@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "638377195713",
+    "project_id": "synccash-d9c04",
+    "storage_bucket": "synccash-d9c04.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:638377195713:android:cab87866d9e42a82e97c40",
+        "android_client_info": {
+          "package_name": "com.example.synccash"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBrpOPJGhCQr1-FZSozIbYivrWplUMyk8I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
