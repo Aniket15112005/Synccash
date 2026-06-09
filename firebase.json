@@ -1,1 +1,44 @@
-{"firestore":{"database":"(default)","location":"asia-south2","rules":"firestore.rules","indexes":"firestore.indexes.json"},"flutter":{"platforms":{"android":{"default":{"projectId":"synccash-d9c04","appId":"1:638377195713:android:cab87866d9e42a82e97c40","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"synccash-d9c04","configurations":{"android":"1:638377195713:android:cab87866d9e42a82e97c40","ios":"1:638377195713:ios:6915d0c276496e89e97c40","web":"1:638377195713:web:9bc8b92da1025bbfe97c40","windows":"1:638377195713:web:3c8b088657e05077e97c40"}}}}}}
+{
+  "firestore": {
+    "database": "(default)",
+    "location": "asia-south2",
+    "rules": "firestore.rules"
+   
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "synccash-d9c04",
+          "appId": "1:638377195713:android:cab87866d9e42a82e97c40",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "synccash-d9c04",
+          "configurations": {
+            "android": "1:638377195713:android:cab87866d9e42a82e97c40",
+            "ios": "1:638377195713:ios:6915d0c276496e89e97c40",
+            "web": "1:638377195713:web:9bc8b92da1025bbfe97c40",
+            "windows": "1:638377195713:web:3c8b088657e05077e97c40"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
