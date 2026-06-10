@@ -8,62 +8,193 @@ import 'package:synccash/features/transactions/domain/entities/transaction_entit
 class TransactionListItem extends ConsumerWidget {
   final TransactionEntity transaction;
 
-  const TransactionListItem({super.key, required this.transaction});
+  const TransactionListItem({
+    super.key,
+    required this.transaction,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentUser = ref.watch(authProvider).value;
-    final bool isCurrentUser = transaction.createdBy == currentUser?.uid;
-    final bool isIncome = transaction.type == 'income';
 
-    final Color badgeColor = isCurrentUser ? AppColors.userABadge : AppColors.userBBadge;
+    final bool isCurrentUser =
+        transaction.createdBy == currentUser?.uid;
+
+    final bool isIncome =
+        transaction.type.toLowerCase() == 'income';
+
+    final Color badgeColor = isCurrentUser
+        ? AppColors.userABadge
+        : AppColors.userBBadge;
+
+    final Color transactionColor =
+        isIncome ? AppColors.income : AppColors.expense;
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.symmetric(
+        horizontal: 2,
+        vertical: 7,
+      ),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.surfaceVariant, width: 1),
+        color: transactionColor.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: transactionColor.withOpacity(0.18),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: transactionColor.withOpacity(0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Row(
         children: [
+          // Transaction Icon
+
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
-              color: badgeColor.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: badgeColor.withOpacity(0.5), width: 1),
+              color: transactionColor.withOpacity(0.12),
+              shape: BoxShape.circle,
             ),
-            child: Text(
-              transaction.creatorName.toUpperCase(),
-              style: TextStyle(color: badgeColor, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+            child: Icon(
+              isIncome
+                  ? Icons.arrow_downward_rounded
+                  : Icons.arrow_upward_rounded,
+              color: transactionColor,
+              size: 22,
             ),
           ),
-          const SizedBox(width: 16),
+
+          const SizedBox(width: 14),
+
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  transaction.description.isEmpty ? transaction.category.toUpperCase() : transaction.description,
-                  style: const TextStyle(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 14),
+                // User Badge
+
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withOpacity(0.15),
+                        borderRadius:
+                            BorderRadius.circular(8),
+                        border: Border.all(
+                          color:
+                              badgeColor.withOpacity(0.35),
+                        ),
+                      ),
+                      child: Text(
+                        transaction.creatorName
+                            .toUpperCase(),
+                        style: TextStyle(
+                          color: badgeColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(width: 8),
+
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color:
+                            AppColors.surfaceVariant,
+                        borderRadius:
+                            BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        transaction.category
+                            .toUpperCase(),
+                        style: const TextStyle(
+                          color:
+                              AppColors.textSecondary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 4),
+
+                const SizedBox(height: 10),
+
                 Text(
-                  DateFormat('hh:mm a - MMM dd').format(transaction.createdAt),
-                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+                  transaction.description.isEmpty
+                      ? transaction.category
+                          .toUpperCase()
+                      : transaction.description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isIncome
+                        ? AppColors.income
+                        : AppColors.expense,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+
+                const SizedBox(height: 4),
+
+                Text(
+                  DateFormat('hh:mm a • MMM dd')
+                      .format(transaction.createdAt),
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
           ),
-          Text(
-            '${isIncome ? "+" : "-"}₹${transaction.amount.toStringAsFixed(0)}',
-            style: TextStyle(
-              color: isIncome ? AppColors.income : AppColors.expense,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
+
+          const SizedBox(width: 12),
+
+          Column(
+            crossAxisAlignment:
+                CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${isIncome ? "+" : "-"}₹${transaction.amount.toStringAsFixed(0)}',
+                style: TextStyle(
+                  color: transactionColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+
+              const SizedBox(height: 4),
+
+              Text(
+                isIncome ? 'INCOME' : 'EXPENSE',
+                style: TextStyle(
+                  color:
+                      transactionColor.withOpacity(0.75),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.1,
+                ),
+              ),
+            ],
           ),
         ],
       ),

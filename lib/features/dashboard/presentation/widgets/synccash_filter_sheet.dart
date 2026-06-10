@@ -4,14 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
 
-/// ---------------------------------------------------------------------------
-/// SyncCash Premium Filter Component
-/// ---------------------------------------------------------------------------
-
 class SyncCashFilterPanel extends ConsumerStatefulWidget {
-  const SyncCashFilterPanel({
-    super.key,
-  });
+  const SyncCashFilterPanel({super.key});
 
   @override
   ConsumerState<SyncCashFilterPanel> createState() =>
@@ -25,7 +19,6 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
 
-  // Local State representing the selected filters
   String _selectedDateRange = '';
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
@@ -36,12 +29,12 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
     super.initState();
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
-      reverseDuration: const Duration(milliseconds: 220),
+      duration: const Duration(milliseconds: 280),
+      reverseDuration: const Duration(milliseconds: 200),
     );
     _scaleAnimation = CurvedAnimation(
       parent: _animationController,
-      curve: Curves.easeOutBack,
+      curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
   }
@@ -66,7 +59,6 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
 
   void _toggleFilterView(BuildContext context) {
     final bool isDesktop = kIsWeb || MediaQuery.of(context).size.width > 768;
-
     if (isDesktop) {
       if (_overlayEntry == null) {
         _showPopover();
@@ -102,7 +94,6 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
       _descController.clear();
       _selectedCategories.clear();
     });
-
     ref.read(selectedCategoryFilterProvider.notifier).setFilter(null);
     ref.read(selectedNameFilterProvider.notifier).setFilter(null);
     ref.read(selectedDescriptionFilterProvider.notifier).setFilter(null);
@@ -115,17 +106,14 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
               ? null
               : _nameController.text.trim(),
         );
-
     ref.read(selectedDescriptionFilterProvider.notifier).setFilter(
           _descController.text.trim().isEmpty
               ? null
               : _descController.text.trim(),
         );
-
     ref.read(selectedCategoryFilterProvider.notifier).setFilter(
           _selectedCategories.isEmpty ? null : _selectedCategories.first,
         );
-
     _hidePopover();
   }
 
@@ -133,37 +121,45 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
     return OverlayEntry(
       builder: (context) => Stack(
         children: [
-          // Dismiss tap-catcher background
           GestureDetector(
             onTap: _hidePopover,
             behavior: HitTestBehavior.translucent,
             child: const SizedBox.expand(),
           ),
           Positioned(
-            width: 380,
+            width: 360,
             child: CompositedTransformFollower(
               link: _layerLink,
               showWhenUnlinked: false,
-              offset: const Offset(-250, 70),
+              offset: const Offset(-250, 52),
               child: ScaleTransition(
                 scale: _scaleAnimation,
-                alignment: Alignment.bottomRight,
+                alignment: Alignment.topRight,
                 child: FadeTransition(
                   opacity: _animationController,
                   child: Material(
-                    elevation: 12,
-                    shadowColor: Colors.black.withAlpha(26),
-                    borderRadius: BorderRadius.circular(24),
-                    color: Theme.of(context).colorScheme.surface,
+                    elevation: 0,
+                    borderRadius: BorderRadius.circular(20),
+                    color: Colors.transparent,
                     child: Container(
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(24),
+                        color: Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(20),
                         border: Border.all(
                           color: Theme.of(context)
                               .colorScheme
                               .outlineVariant
-                              .withAlpha(102),
+                              .withOpacity(0.35),
+                          width: 0.5,
                         ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 24,
+                            spreadRadius: 0,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
                       ),
                       padding: const EdgeInsets.all(20),
                       child: _buildFilterContent(isDesktop: true),
@@ -185,8 +181,8 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
       backgroundColor: Colors.transparent,
       transitionAnimationController: AnimationController(
         vsync: this,
-        duration: const Duration(milliseconds: 400),
-        reverseDuration: const Duration(milliseconds: 300),
+        duration: const Duration(milliseconds: 380),
+        reverseDuration: const Duration(milliseconds: 280),
       )..forward(),
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
@@ -199,24 +195,25 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
                 borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(28)),
+                    const BorderRadius.vertical(top: Radius.circular(24)),
               ),
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // Drag handle
                   Container(
-                    width: 40,
+                    width: 36,
                     height: 4,
                     decoration: BoxDecoration(
                       color: Theme.of(context)
                           .colorScheme
                           .onSurfaceVariant
-                          .withAlpha(102),
-                      borderRadius: BorderRadius.circular(2),
+                          .withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
                   _buildFilterContent(
                     isDesktop: false,
                     updateState: setModalState,
@@ -237,7 +234,7 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
 
     return CompositedTransformTarget(
       link: _layerLink,
-      child: _AnimatedFilterFAB(
+      child: _FilterButton(
         isOpen: isOpen,
         activeFilterCount: activeCount,
         onPressed: () => _toggleFilterView(context),
@@ -245,7 +242,6 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
     );
   }
 
-  /// Centralized Filter Content layout used for both Mobile & Desktop paradigms
   Widget _buildFilterContent(
       {required bool isDesktop, StateSetter? updateState}) {
     final localSetState = updateState ?? setState;
@@ -255,36 +251,45 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header
+        // ── Header ────────────────────────────────────────────────────────
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
               'Filters',
               style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                letterSpacing: -0.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.3,
               ),
             ),
             if (!isDesktop)
-              IconButton(
-                icon: const Icon(Icons.close, size: 20),
-                onPressed: () => Navigator.pop(context),
-              )
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 16,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
           ],
         ),
-        const Divider(height: 24, thickness: 0.5),
+        const SizedBox(height: 18),
 
-        // Date Presets Section
-        Text('Date Range',
-            style: theme.textTheme.labelMedium
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        // ── Date range ────────────────────────────────────────────────────
+        _FilterSectionLabel(label: 'Date range', theme: theme),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children:
-              ['Today'].map((range) {
+          children: ['Today'].map((range) {
             final isSelected = _selectedDateRange == range;
             return _SyncCashChoiceChip(
               label: range,
@@ -293,12 +298,10 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
                 localSetState(() {
                   _selectedDateRange = selected ? range : '';
                 });
-
                 DateTime? filterDate;
                 if (selected && range == 'Today') {
                   filterDate = DateTime.now();
                 }
-
                 ref
                     .read(selectedDateFilterProvider.notifier)
                     .setFilter(filterDate);
@@ -306,39 +309,37 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
             );
           }).toList(),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 18),
 
-        // Search Inputs
+        // ── Search fields ─────────────────────────────────────────────────
         _SyncCashTextField(
           controller: _nameController,
-          label: 'Filter by User/Creator',
-          hint: 'e.g., Alex Carter',
+          label: 'User / Creator',
+          hint: 'e.g. Alex Carter',
           icon: Icons.person_outline_rounded,
           onChanged: (_) => localSetState(() {}),
         ),
         const SizedBox(height: 12),
         _SyncCashTextField(
           controller: _descController,
-          label: 'Filter by Description/Notes',
-          hint: 'e.g., Invoice checkout...',
+          label: 'Description / Notes',
+          hint: 'e.g. Invoice checkout...',
           icon: Icons.notes_rounded,
           onChanged: (_) => localSetState(() {}),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 18),
 
-        // Categories Section
-        Text('Category',
-            style: theme.textTheme.labelMedium
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        // ── Category ──────────────────────────────────────────────────────
+        _FilterSectionLabel(label: 'Category', theme: theme),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: ['Retail', 'Wholesale'].map((category) {
             final isSelected = _selectedCategories.contains(category);
-            return FilterChip(
-              label: Text(category),
-              selected: isSelected,
+            return _SyncCashChoiceChip(
+              label: category,
+              isSelected: isSelected,
               onSelected: (selected) {
                 localSetState(() {
                   if (selected) {
@@ -349,90 +350,109 @@ class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
                   }
                 });
               },
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-              showCheckmark: false,
-              selectedColor: theme.colorScheme.primaryContainer.withAlpha(153),
-              side: BorderSide(
-                color: isSelected
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.outlineVariant,
-                width: 1,
-              ),
             );
           }).toList(),
         ),
+        const SizedBox(height: 24),
 
-        const Divider(height: 32, thickness: 0.5),
-
-        // Action Buttons Row
+        // ── Actions ───────────────────────────────────────────────────────
         Row(
           children: [
-            TextButton(
-              onPressed: () {
-                _clearAllFilters();
-                if (!isDesktop) {
-                  Navigator.pop(context);
-                } else {
-                  localSetState(() {});
-                }
-              },
-              style: TextButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () {
+                  _clearAllFilters();
+                  if (!isDesktop) Navigator.pop(context);
+                  else localSetState(() {});
+                },
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  side: BorderSide(
+                    color: theme.colorScheme.outlineVariant.withOpacity(0.5),
+                    width: 0.5,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  foregroundColor: theme.colorScheme.onSurfaceVariant,
+                ),
+                child: const Text(
+                  'Clear',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
               ),
-              child: const Text('Clear All'),
             ),
-            const Spacer(),
-            ElevatedButton(
-              onPressed: () {
-                if (!isDesktop) {
-                  _applyFilters();
-                  Navigator.pop(context);
-                } else {
-                  _applyFilters();
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: theme.colorScheme.primary,
-                foregroundColor: theme.colorScheme.onPrimary,
-                elevation: 0,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+            const SizedBox(width: 10),
+            Expanded(
+              flex: 2,
+              child: FilledButton(
+                onPressed: () {
+                  if (!isDesktop) {
+                    _applyFilters();
+                    Navigator.pop(context);
+                  } else {
+                    _applyFilters();
+                  }
+                },
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+                child: const Text(
+                  'Apply',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
               ),
-              child: const Text('Apply Filters',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
-        )
+        ),
       ],
     );
   }
 }
 
-/// ---------------------------------------------------------------------------
-/// Custom Premium FAB Layout with Micro-Interactions
-/// ---------------------------------------------------------------------------
-class _AnimatedFilterFAB extends StatefulWidget {
+// ── Filter section label ──────────────────────────────────────────────────────
+
+class _FilterSectionLabel extends StatelessWidget {
+  final String label;
+  final ThemeData theme;
+
+  const _FilterSectionLabel({required this.label, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant.withOpacity(0.7),
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.5,
+      ),
+    );
+  }
+}
+
+// ── Filter button ─────────────────────────────────────────────────────────────
+
+class _FilterButton extends StatefulWidget {
   final bool isOpen;
   final int activeFilterCount;
   final VoidCallback onPressed;
 
-  const _AnimatedFilterFAB({
+  const _FilterButton({
     required this.isOpen,
     required this.activeFilterCount,
     required this.onPressed,
   });
 
   @override
-  State<_AnimatedFilterFAB> createState() => _AnimatedFilterFABState();
+  State<_FilterButton> createState() => _FilterButtonState();
 }
 
-class _AnimatedFilterFABState extends State<_AnimatedFilterFAB> {
+class _FilterButtonState extends State<_FilterButton> {
   bool _isHovered = false;
 
   @override
@@ -450,37 +470,35 @@ class _AnimatedFilterFABState extends State<_AnimatedFilterFAB> {
           widget.onPressed();
         },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: widget.isOpen
                 ? theme.colorScheme.primary
                 : (_isHovered
                     ? theme.colorScheme.surfaceContainerHigh
                     : theme.colorScheme.surfaceContainer),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: widget.isOpen
                   ? Colors.transparent
-                  : theme.colorScheme.outlineVariant.withAlpha(128),
+                  : theme.colorScheme.outlineVariant.withOpacity(0.4),
+              width: 0.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withAlpha(
-                    ((_isHovered || widget.isOpen ? 0.12 : 0.05) * 255)
-                        .round()),
-                blurRadius: _isHovered ? 12 : 6,
-                offset: const Offset(0, 4),
-              )
+                color: Colors.black.withOpacity(_isHovered ? 0.06 : 0.03),
+                blurRadius: _isHovered ? 10 : 4,
+                offset: const Offset(0, 3),
+              ),
             ],
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Dynamic Icon Animation Layer
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
+                duration: const Duration(milliseconds: 180),
                 transitionBuilder: (child, anim) => RotationTransition(
                   turns: child.key == const ValueKey('close')
                       ? Tween<double>(begin: 0.75, end: 1.0).animate(anim)
@@ -488,53 +506,59 @@ class _AnimatedFilterFABState extends State<_AnimatedFilterFAB> {
                   child: ScaleTransition(scale: anim, child: child),
                 ),
                 child: widget.isOpen
-                    ? Icon(Icons.close_rounded,
+                    ? Icon(
+                        Icons.close_rounded,
                         key: const ValueKey('close'),
                         color: theme.colorScheme.onPrimary,
-                        size: 20)
-                    : Icon(Icons.tune_rounded,
+                        size: 18,
+                      )
+                    : Icon(
+                        Icons.tune_rounded,
                         key: const ValueKey('tune'),
                         color: theme.colorScheme.onSurface,
-                        size: 20),
+                        size: 18,
+                      ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Text(
                 'Filters',
                 style: TextStyle(
-                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                   color: widget.isOpen
                       ? theme.colorScheme.onPrimary
                       : theme.colorScheme.onSurface,
                 ),
               ),
-              // Filter count indicator badge
               AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                transitionBuilder: (child, anim) =>
-                    ScaleTransition(scale: anim, child: child),
+                duration: const Duration(milliseconds: 220),
+                transitionBuilder: (child, anim) => ScaleTransition(
+                  scale: anim,
+                  child: child,
+                ),
                 child: hasActive
                     ? Container(
                         key: ValueKey('badge-${widget.activeFilterCount}'),
-                        margin: const EdgeInsets.only(left: 8),
-                        padding: const EdgeInsets.all(6),
+                        margin: const EdgeInsets.only(left: 7),
+                        width: 18,
+                        height: 18,
                         decoration: BoxDecoration(
                           color: widget.isOpen
                               ? theme.colorScheme.onPrimary
                               : theme.colorScheme.primary,
                           shape: BoxShape.circle,
                         ),
-                        constraints:
-                            const BoxConstraints(minWidth: 20, minHeight: 20),
-                        child: Text(
-                          '${widget.activeFilterCount}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: widget.isOpen
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.onPrimary,
+                        child: Center(
+                          child: Text(
+                            '${widget.activeFilterCount}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: widget.isOpen
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.onPrimary,
+                            ),
                           ),
-                          textAlign: TextAlign.center,
                         ),
                       )
                     : const SizedBox.shrink(),
@@ -547,9 +571,7 @@ class _AnimatedFilterFABState extends State<_AnimatedFilterFAB> {
   }
 }
 
-/// ---------------------------------------------------------------------------
-/// Shared Custom Premium Sub-Widgets (Notion/Stripe Aesthetic)
-/// ---------------------------------------------------------------------------
+// ── Choice chip ───────────────────────────────────────────────────────────────
 
 class _SyncCashChoiceChip extends StatefulWidget {
   final String label;
@@ -575,32 +597,43 @@ class _SyncCashChoiceChipState extends State<_SyncCashChoiceChip> {
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: ChoiceChip(
-        label: Text(widget.label),
-        selected: widget.isSelected,
-        onSelected: widget.onSelected,
-        labelStyle: TextStyle(
-          color: widget.isSelected
-              ? theme.colorScheme.onPrimaryContainer
-              : theme.colorScheme.onSurfaceVariant,
-          fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.normal,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        child: ChoiceChip(
+          label: Text(widget.label),
+          selected: widget.isSelected,
+          onSelected: widget.onSelected,
+          labelStyle: TextStyle(
+            fontSize: 12,
+            color: widget.isSelected
+                ? theme.colorScheme.onPrimaryContainer
+                : theme.colorScheme.onSurfaceVariant,
+            fontWeight:
+                widget.isSelected ? FontWeight.w600 : FontWeight.w400,
+          ),
+          backgroundColor: _isHovered
+              ? theme.colorScheme.surfaceContainerHighest
+              : theme.colorScheme.surfaceContainerLow,
+          selectedColor:
+              theme.colorScheme.primaryContainer.withOpacity(0.7),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          side: BorderSide(
+            color: widget.isSelected
+                ? theme.colorScheme.primary.withOpacity(0.6)
+                : theme.colorScheme.outlineVariant.withOpacity(0.4),
+            width: 0.5,
+          ),
+          showCheckmark: false,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         ),
-        backgroundColor: _isHovered
-            ? theme.colorScheme.surfaceContainerHighest
-            : theme.colorScheme.surfaceContainerLow,
-        selectedColor: theme.colorScheme.primaryContainer,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        side: BorderSide(
-          color: widget.isSelected
-              ? theme.colorScheme.primary
-              : theme.colorScheme.outlineVariant.withAlpha(153),
-          width: 1,
-        ),
-        showCheckmark: false,
       ),
     );
   }
 }
+
+// ── Text field ────────────────────────────────────────────────────────────────
 
 class _SyncCashTextField extends StatelessWidget {
   final TextEditingController controller;
@@ -623,37 +656,55 @@ class _SyncCashTextField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: theme.textTheme.labelMedium
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.7),
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.4,
+          ),
+        ),
         const SizedBox(height: 6),
         TextField(
           controller: controller,
           onChanged: onChanged,
-          style: theme.textTheme.bodyMedium,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurface,
+          ),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant.withAlpha(128)),
-            prefixIcon:
-                Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+            hintStyle: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant.withOpacity(0.45),
+            ),
+            prefixIcon: Icon(
+              icon,
+              size: 16,
+              color: theme.colorScheme.onSurfaceVariant.withOpacity(0.6),
+            ),
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
             filled: true,
             fillColor: theme.colorScheme.surfaceContainerLow,
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: theme.colorScheme.outlineVariant),
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                color: theme.colorScheme.outlineVariant.withOpacity(0.4),
+                width: 0.5,
+              ),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(10),
               borderSide: BorderSide(
-                  color: theme.colorScheme.outlineVariant.withAlpha(153)),
+                color: theme.colorScheme.outlineVariant.withOpacity(0.35),
+                width: 0.5,
+              ),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  BorderSide(color: theme.colorScheme.primary, width: 1.5),
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                color: theme.colorScheme.primary.withOpacity(0.7),
+                width: 1,
+              ),
             ),
           ),
         ),
