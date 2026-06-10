@@ -16,9 +16,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
   final _amountController = TextEditingController();
   final _descController = TextEditingController();
   String _type = 'expense';
-  String _category = 'Shop';
+  String _category = 'Retail';
 
-  final List<String> _categories = ['Shop', 'Home', 'Market', 'Supplier', 'Transport', 'Salary', 'Miscellaneous'];
+  final List<String> _categories = ['Retail','Wholesale'];
 
   void _submit() async {
     if (_amountController.text.isEmpty) return;
@@ -55,7 +55,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
               children: [
                 Expanded(
                   child: ChoiceChip(
-                    label: const Center(child: Text('INFLOW (INCOME)')),
+                    label: const Center(child: Text('INCOME')),
                     selected: _type == 'income',
                     selectedColor: AppColors.income.withOpacity(0.2),
                     onSelected: (val) => setState(() => _type = 'income'),
@@ -64,7 +64,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ChoiceChip(
-                    label: const Center(child: Text('OUTFLOW (EXPENSE)')),
+                    label: const Center(child: Text('EXPENSE')),
                     selected: _type == 'expense',
                     selectedColor: AppColors.expense.withOpacity(0.2),
                     onSelected: (val) => setState(() => _type = 'expense'),
@@ -80,11 +80,20 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> {
               decoration: const InputDecoration(labelText: 'Transaction Total (INR)', prefixText: '₹ ', filled: true),
             ),
             const SizedBox(height: 24),
-            DropdownButtonFormField<String>(
+            DropdownButton<String>(
               value: _category,
-              decoration: const InputDecoration(labelText: 'Operational Classification Category', filled: true),
-              items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-              onChanged: (val) => setState(() => _category = val!),
+              items: _categories
+                  .map((category) => DropdownMenuItem(
+                        value: category,
+                        child: Text(category),
+                      ))
+                  .toList(),
+              onChanged: (val) {
+                if (val == null) return;
+                setState(() {
+                  _category = val;
+                });
+              },
             ),
             const SizedBox(height: 24),
             TextField(
