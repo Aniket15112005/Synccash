@@ -12,24 +12,83 @@ class AuthRepositoryImpl implements AuthRepository {
   Stream<UserEntity?> get authStateChanges {
     return _auth.authStateChanges().asyncMap((firebaseUser) async {
       if (firebaseUser == null) return null;
-      final doc = await _firestore.collection('users').doc(firebaseUser.uid).get();
-      if (!doc.exists) return null;
+
+      final doc =
+          await _firestore.collection('users').doc(firebaseUser.uid).get();
+
+      // ✅ FIX 1: handle missing Firestore user safely (no crash, auto-create)
+      if (!doc.exists) {
+        final fallbackUser = UserModel(
+          uid: firebaseUser.uid,
+          email: firebaseUser.email ?? '',
+          displayName: '',
+        );
+
+        await _firestore
+            .collection('users')
+            .doc(firebaseUser.uid)
+            .set(fallbackUser.toJson());
+
+        return fallbackUser;
+      }
+
       return UserModel.fromJson(doc.data()!);
     });
   }
 
   @override
   Future<UserEntity> signInWithEmail(String email, String password) async {
-    final credentials = await _auth.signInWithEmailAndPassword(email: email, password: password);
-    final doc = await _firestore.collection('users').doc(credentials.user!.uid).get();
+    final credentials = await _auth.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+
+    final doc = await _firestore
+        .collection('users')
+        .doc(credentials.user!.uid)
+        .get();
+
+    // ✅ FIX 2: prevent crash if doc missing
+    if (!doc.exists) {
+      final newUser = UserModel(
+        uid: credentials.user!.uid,
+        email: email,
+        displayName: '',
+      );
+
+      await _firestore
+          .collection('users')
+          .doc(newUser.uid)
+          .set(newUser.toJson());
+
+      return newUser;
+    }
+
     return UserModel.fromJson(doc.data()!);
   }
 
   @override
-  Future<UserEntity> signUpWithEmail(String email, String password, String name) async {
-    final credentials = await _auth.createUserWithEmailAndPassword(email: email, password: password);
-    final model = UserModel(uid: credentials.user!.uid, email: email, displayName: name);
-    await _firestore.collection('users').doc(model.uid).set(model.toJson());
+  Future<UserEntity> signUpWithEmail(
+    String email,
+    String password,
+    String name,
+  ) async {
+    final credentials = await _auth.createUserWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+
+    final model = UserModel(
+      uid: credentials.user!.uid,
+      email: email,
+      displayName: name,
+    );
+
+    await _firestore
+        .collection('users')
+        .doc(model.uid)
+        .set(model.toJson());
+
     return model;
   }
 
@@ -37,5 +96,6 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<void> signOut() async => await _auth.signOut();
 
   @override
-  Future<void> resetPassword(String email) async => await _auth.sendPasswordResetEmail(email: email);
+  Future<void> resetPassword(String email) async =>
+      await _auth.sendPasswordResetEmail(email: email);
 }

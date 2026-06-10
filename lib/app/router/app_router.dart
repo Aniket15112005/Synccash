@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:synccash/app/router/route_constants.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
 import 'package:synccash/features/auth/presentation/screens/login_screen.dart';
@@ -16,22 +16,43 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
   return GoRouter(
     initialLocation: RouteConstants.splash,
-    redirect: (BuildContext context, GoRouterState state) {
-      final loggedIn = authState.value != null;
-      final isAuthRoute = state.matchedLocation == RouteConstants.login || 
-                          state.matchedLocation == RouteConstants.signup;
 
-      if (!loggedIn && !isAuthRoute) return RouteConstants.login;
+    redirect: (BuildContext context, GoRouterState state) {
+      final user = authState.maybeWhen(
+        data: (u) => u,
+        orElse: () => null,
+      );
+
+      final loggedIn = user != null;
+
+      final isAuthRoute =
+          state.matchedLocation == RouteConstants.login ||
+          state.matchedLocation == RouteConstants.signup;
+
+      // Not logged in → force login
+      if (!loggedIn && !isAuthRoute) {
+        return RouteConstants.login;
+      }
+
+      // Logged in → block auth screens
       if (loggedIn && isAuthRoute) {
-        final hasCashbook = authState.value?.currentCashbookId != null;
-        return hasCashbook ? RouteConstants.dashboard : RouteConstants.pairing;
+        final hasCashbook = user!.currentCashbookId != null;
+        return hasCashbook
+            ? RouteConstants.dashboard
+            : RouteConstants.pairing;
       }
+
+      // Splash handling
       if (loggedIn && state.matchedLocation == RouteConstants.splash) {
-        final hasCashbook = authState.value?.currentCashbookId != null;
-        return hasCashbook ? RouteConstants.dashboard : RouteConstants.pairing;
+        final hasCashbook = user!.currentCashbookId != null;
+        return hasCashbook
+            ? RouteConstants.dashboard
+            : RouteConstants.pairing;
       }
+
       return null;
     },
+
     routes: [
       GoRoute(
         path: RouteConstants.splash,
