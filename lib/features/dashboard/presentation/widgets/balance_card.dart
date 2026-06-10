@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:synccash/app/theme/app_colors.dart';
 import 'package:synccash/features/cashbook/domain/entities/cashbook_entity.dart';
+import 'package:intl/intl.dart';
+import 'package:synccash/core/utils/currency_formatter.dart';
 
-class BalanceCard extends StatelessWidget {
+class BalanceCard extends StatefulWidget {
   final CashbookEntity cashbook;
 
   const BalanceCard({
@@ -12,11 +14,19 @@ class BalanceCard extends StatelessWidget {
   });
 
   @override
+  State<BalanceCard> createState() => _BalanceCardState();
+}
+
+class _BalanceCardState extends State<BalanceCard> {
+  bool _hideBalance = true;
+
+  @override
   Widget build(BuildContext context) {
+    final cashbook = widget.cashbook;
     final bool positiveBalance = cashbook.totalBalance >= 0;
 
     return Container(
-      height: 270,
+      height: 320,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(32),
         gradient: const LinearGradient(
@@ -99,14 +109,18 @@ class BalanceCard extends StatelessWidget {
 
                 // Balance Amount
                 Text(
-                  "₹${_formatAmount(cashbook.totalBalance)}",
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 35,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -1.9,
-                  ),
-                )
+  _hideBalance
+      ? "••••••••"
+      :"₹${CurrencyFormatter.format(cashbook.totalBalance)}",
+  style: TextStyle(
+    color: positiveBalance
+        ? AppColors.income
+        : AppColors.expense,
+    fontSize: 25,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -1.0,
+  ),
+)
                     .animate()
                     .fadeIn(delay: 150.ms)
                     .scale(
@@ -115,6 +129,51 @@ class BalanceCard extends StatelessWidget {
                     ),
 
                 const SizedBox(height: 12),
+                GestureDetector(
+  onTap: () {
+    setState(() {
+      _hideBalance = !_hideBalance;
+    });
+  },
+  child: Container(
+    padding: const EdgeInsets.symmetric(
+      horizontal: 14,
+      vertical: 8,
+    ),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.10),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(
+        color: Colors.white.withOpacity(0.15),
+      ),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          _hideBalance
+              ? Icons.visibility_off_rounded
+              : Icons.visibility_rounded,
+          color: Colors.white70,
+          size: 16,
+        ),
+        const SizedBox(width: 6),
+        Text(
+          _hideBalance
+              ? "Show Balance"
+              : "Hide Balance",
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+  ),
+),
+
+const SizedBox(height: 12),
 
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -122,27 +181,21 @@ class BalanceCard extends StatelessWidget {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15),
+                    color: Colors.white.withOpacity(0),
                     borderRadius: BorderRadius.circular(30),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
 
-                      Icon(
-                        positiveBalance
-                            ? Icons.trending_up_rounded
-                            : Icons.trending_down_rounded,
-                        color: Colors.white,
-                        size: 16,
-                      ),
+                     
 
                       const SizedBox(width: 6),
 
                       Text(
                         positiveBalance
-                            ? "Positive Cash Position"
-                            : "Negative Cash Position",
+                            ? ""
+                            : "",
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 12,
@@ -162,25 +215,27 @@ class BalanceCard extends StatelessWidget {
                   children: [
 
                     Expanded(
-                      child: _FinanceMetricCard(
-                        title: "Income",
-                        value: cashbook.totalIncome,
-                        icon: Icons.arrow_downward_rounded,
-                        color: AppColors.income,
-                        delay: 350.ms,
-                      ),
+                      child:_FinanceMetricCard(
+  title: "Income",
+  value: cashbook.totalIncome,
+  hideAmount: _hideBalance,
+  icon: Icons.arrow_downward_rounded,
+  color: AppColors.income,
+  delay: 350.ms,
+),
                     ),
 
                     const SizedBox(width: 12),
 
                     Expanded(
                       child: _FinanceMetricCard(
-                        title: "Expense",
-                        value: cashbook.totalExpense,
-                        icon: Icons.arrow_upward_rounded,
-                        color: AppColors.expense,
-                        delay: 450.ms,
-                      ),
+  title: "Expense",
+  value: cashbook.totalExpense,
+  hideAmount: _hideBalance,
+  icon: Icons.arrow_upward_rounded,
+  color: AppColors.expense,
+  delay: 450.ms,
+),
                     ),
                   ],
                 ),
@@ -192,14 +247,13 @@ class BalanceCard extends StatelessWidget {
     );
   }
 
-  String _formatAmount(double amount) {
-    if (amount.abs() >= 1000000) {
-      return '${(amount / 1000000).toStringAsFixed(2)}M';
-    } else if (amount.abs() >= 100000) {
-      return '${(amount / 1000).toStringAsFixed(1)}K';
-    }
-    return amount.toStringAsFixed(2);
-  }
+ String _formatAmount(double amount) {
+  return NumberFormat.currency(
+    locale: 'en_IN',
+    symbol: '',
+    decimalDigits: 0,
+  ).format(amount);
+}
 }
 
 class _FinanceMetricCard extends StatelessWidget {
@@ -208,14 +262,16 @@ class _FinanceMetricCard extends StatelessWidget {
   final IconData icon;
   final Color color;
   final Duration delay;
+  final bool hideAmount;
 
   const _FinanceMetricCard({
-    required this.title,
-    required this.value,
-    required this.icon,
-    required this.color,
-    required this.delay,
-  });
+  required this.title,
+  required this.value,
+  required this.icon,
+  required this.color,
+  required this.delay,
+  required this.hideAmount,
+});
 
   @override
   Widget build(BuildContext context) {
@@ -262,8 +318,10 @@ class _FinanceMetricCard extends StatelessWidget {
 
                 const SizedBox(height: 4),
 
-                Text(
-  "₹${value.toStringAsFixed(0)}",
+               Text(
+  hideAmount
+      ? "₹*****"
+      : "₹${CurrencyFormatter.format(value)}",
   style: TextStyle(
     color: color,
     fontWeight: FontWeight.w700,

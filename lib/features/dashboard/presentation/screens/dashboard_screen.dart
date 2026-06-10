@@ -133,9 +133,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         : ref.watch(filteredTransactionsProvider(cashbookId));
 
     return Scaffold(
-  backgroundColor: AppColors.background,
+      backgroundColor: AppColors.background,
       extendBodyBehindAppBar: false,
-      
       body: cashbookAsync.when(
         data: (cashbook) => FadeTransition(
           opacity: _fadeAnimation,
@@ -151,60 +150,52 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               },
               child: CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-               slivers: [
-
-  SliverToBoxAdapter(
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-
-              Text(
-                _getGreeting(),
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12,
-                ),
-              ),
-
-              const SizedBox(height: 4),
-
-              Text(
-                user?.displayName?.split(' ').first ?? 'Welcome',
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-
-          GestureDetector(
-            onTap: () => _showProfileSheet(context),
-            child: _AvatarWidget(
-              initial: _getInitial(user?.displayName),
-            ),
-          ),
-        ],
-      ),
-    ),
-  ),
-
-  SliverToBoxAdapter(
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-      child: BalanceCard(cashbook: cashbook),
-    ),
-  ),
-  const SliverToBoxAdapter(
-  child: SizedBox(height: 24),
-),
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _getGreeting(),
+                                style: const TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                user?.displayName?.split(' ').first ??
+                                    'Welcome',
+                                style: const TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                          GestureDetector(
+                            onTap: () => _showProfileSheet(context),
+                            child: _AvatarWidget(
+                              initial: _getInitial(user?.displayName),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                      child: BalanceCard(cashbook: cashbook),
+                    ),
+                  ),
+                  const SliverToBoxAdapter(child: SizedBox(height: 24)),
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
@@ -212,10 +203,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         title: 'Recent transactions',
                         action: 'View all',
                         onAction: () => context.push(RouteConstants.history),
-                        trailing: const Align(
-                          alignment: Alignment.centerRight,
-                          child: SyncCashFilterPanel(),
-                        ),
+                        trailing: const SyncCashFilterPanel(),
                       ),
                     ),
                   ),
@@ -242,7 +230,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
 
   PreferredSizeWidget _buildAppBar(BuildContext context, dynamic user) {
     return AppBar(
-     backgroundColor: AppColors.background,
+      backgroundColor: AppColors.background,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
@@ -300,10 +288,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           sliver: SliverList.separated(
             itemCount: displayList.length,
             separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (context, index) => _AnimatedListItem(
-              index: index,
-              child: TransactionListItem(transaction: displayList[index]),
-            ),
+            itemBuilder: (context, index) =>
+    TransactionListItem(
+      transaction: displayList[index],
+    ),
           ),
         );
       },
@@ -342,13 +330,13 @@ class _AvatarWidget extends StatelessWidget {
     return Container(
       width: 38,
       height: 38,
-     decoration: BoxDecoration(
-  color: AppColors.surfaceVariant,
-  shape: BoxShape.circle,
-  border: Border.all(
-    color: AppColors.border,
-  ),
-),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: AppColors.border,
+        ),
+      ),
       child: Center(
         child: Text(
           initial,
@@ -384,25 +372,41 @@ class _SectionHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF1A1A2E),
-                letterSpacing: -0.2,
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                  letterSpacing: -0.3,
+                ),
               ),
             ),
+            if (trailing != null) trailing!,
+            const SizedBox(width: 18),
             GestureDetector(
               onTap: onAction,
-              child: Text(
-                action,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.secondary,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppColors.border,
+                  ),
+                ),
+                child: Text(
+                  action,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ),
             ),
@@ -510,19 +514,22 @@ class _AnimatedFabState extends State<_AnimatedFab>
       scale: _scale,
       child: FloatingActionButton.extended(
         onPressed: widget.onPressed,
-        backgroundColor: AppColors.primary,
-        elevation: 2,
-        highlightElevation: 4,
+        backgroundColor: const Color(0xFF2563EB),
+        elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
         ),
-        icon: const Icon(Icons.add_rounded, color: Colors.grey, size: 22),
+        icon: const Icon(
+          Icons.add_rounded,
+          color: Colors.white,
+          size: 22,
+        ),
         label: const Text(
-          'Add transaction',
+          'Add Transaction',
           style: TextStyle(
             color: Colors.white,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),
@@ -602,7 +609,8 @@ class _ErrorState extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.error_outline_rounded, color: Colors.red.shade400, size: 22),
+          Icon(Icons.error_outline_rounded,
+              color: Colors.red.shade400, size: 22),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
