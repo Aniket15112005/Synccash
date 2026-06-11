@@ -296,6 +296,20 @@ class TransactionRepositoryImpl implements TransactionRepository {
 
   }
 
+  @override
+Future<void> updateTransaction(TransactionEntity transaction) async {
+  await _firestore
+      .collection('cashbooks')
+      .doc(transaction.cashbookId)
+      .collection('transactions')
+      .doc(transaction.transactionId)
+      .update({
+        'amount': transaction.amount,
+        'category': transaction.category,
+        'description': transaction.description,
+      });
+}
+
 
 
   @override

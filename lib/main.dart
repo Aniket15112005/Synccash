@@ -11,6 +11,7 @@ import 'package:synccash/app/app.dart';
 import 'package:synccash/core/services/notification_service.dart';
 import 'package:synccash/firebase_options.dart';
 import 'package:synccash/core/services/fcm_service.dart';
+import 'package:synccash/features/cashbook/presentation/screens/splash_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,5 +59,29 @@ void main() async {
     ),
   );
 
-  runApp(const ProviderScope(child: SyncCashApp()));
+  runApp(const ProviderScope(child: _RootApp()));
+}
+
+class _RootApp extends StatefulWidget {
+  const _RootApp();
+
+  @override
+  State<_RootApp> createState() => _RootAppState();
+}
+
+class _RootAppState extends State<_RootApp> {
+  bool _splashDone = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_splashDone) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: SplashScreen(
+          onComplete: () => setState(() => _splashDone = true),
+        ),
+      );
+    }
+    return const SyncCashApp();
+  }
 }

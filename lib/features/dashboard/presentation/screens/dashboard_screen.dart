@@ -1,4 +1,8 @@
+// lib/features/dashboard/presentation/screens/dashboard_screen.dart
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:synccash/app/router/route_constants.dart';
@@ -11,6 +15,18 @@ import 'package:synccash/features/transactions/presentation/widgets/transaction_
 import 'package:synccash/features/dashboard/presentation/widgets/balance_card.dart';
 import 'package:synccash/features/dashboard/presentation/widgets/synccash_filter_sheet.dart';
 
+String _greeting() {
+  final h = DateTime.now().hour;
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+String _initial(String? name) {
+  final s = name?.trim();
+  return (s == null || s.isEmpty) ? 'U' : s[0].toUpperCase();
+}
+
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
@@ -20,122 +36,45 @@ class DashboardScreen extends ConsumerStatefulWidget {
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen>
     with TickerProviderStateMixin {
-  late final AnimationController _fadeController;
-  late final AnimationController _slideController;
-  late final Animation<double> _fadeAnimation;
-  late final Animation<Offset> _slideAnimation;
+  late final AnimationController _fadeCtrl;
+  late final AnimationController _slideCtrl;
+  late final Animation<double> _fadeAnim;
+  late final Animation<Offset> _slideAnim;
 
   @override
   void initState() {
     super.initState();
-
-    _fadeController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _slideController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
-
-    _fadeAnimation = CurvedAnimation(
-      parent: _fadeController,
-      curve: Curves.easeOut,
-    );
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.06),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _slideController,
-      curve: Curves.easeOutCubic,
-    ));
-
-    // Forward both together — no delay needed for the screen entry animation
-    _fadeController.forward();
-    _slideController.forward();
+    _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 480));
+    _slideCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.055), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOutCubic));
+    _fadeCtrl.forward();
+    _slideCtrl.forward();
   }
 
   @override
   void dispose() {
-    _fadeController.dispose();
-    _slideController.dispose();
+    _fadeCtrl.dispose();
+    _slideCtrl.dispose();
     super.dispose();
-  }
-
-  String _getInitial(String? name) {
-    final safe = name?.trim();
-    if (safe == null || safe.isEmpty) return 'U';
-    return safe[0].toUpperCase();
-  }
-
-  void _showLogoutDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Sign out',
-            style: TextStyle(fontWeight: FontWeight.w600)),
-        content: const Text('Are you sure you want to sign out?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red.shade400,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: () {
-              Navigator.pop(context);
-              ref.read(authRepositoryProvider).signOut();
-            },
-            child: const Text('Sign out'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showProfileSheet(BuildContext context) {
-    final user = ref.read(authProvider).asData?.value;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _ProfileBottomSheet(
-        initial: _getInitial(user?.displayName),
-        displayName: user?.displayName,
-        email: user?.email,
-        onLogout: () {
-          Navigator.pop(context);
-          _showLogoutDialog(context);
-        },
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final cashbookAsync = ref.watch(cashbookStreamProvider);
-    final displayName = ref.watch(
-      authProvider.select((async) => async.asData?.value?.displayName),
-    );
-    final userInitial = _getInitial(displayName);
-    final firstName = displayName?.split(' ').first ?? 'Welcome';
     final cashbookId = ref.watch(currentCashbookIdProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: cashbookAsync.when(
-        data: (cashbook) => FadeTransition(
-          opacity: _fadeAnimation,
+        child: FadeTransition(
+          opacity: _fadeAnim,
           child: SlideTransition(
-            position: _slideAnimation,
+            position: _slideAnim,
             child: RefreshIndicator(
               color: AppColors.primary,
+              backgroundColor: AppColors.surface,
+              strokeWidth: 1.5,
               onRefresh: () async {
                 ref.invalidate(cashbookStreamProvider);
                 if (cashbookId != null) {
@@ -143,71 +82,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 }
               },
               child: CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
                 slivers: [
-                  // ── Greeting header ──────────────────────────────────
+                  const SliverToBoxAdapter(child: _GreetingHeader()),
+                  const SliverToBoxAdapter(child: _BalanceCardSection()),
+                  const SliverToBoxAdapter(child: SizedBox(height: 28)),
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _getGreeting(),
-                                style: const TextStyle(
-                                  color: AppColors.textMuted,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                firstName,
-                                style: const TextStyle(
-                                  color: AppColors.textPrimary,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                          GestureDetector(
-                            onTap: () => _showProfileSheet(context),
-                            child: _AvatarWidget(initial: userInitial),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // ── Balance card ─────────────────────────────────────
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                      child: BalanceCard(cashbook: cashbook),
-                    ),
-                  ),
-
-                  const SliverToBoxAdapter(child: SizedBox(height: 24)),
-
-                  // ── Section header ───────────────────────────────────
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
                       child: _SectionHeader(
-                        title: 'Recent transactions',
-                        action: 'View all',
-                        onAction: () => context.push(RouteConstants.history),
-                        trailing: const SyncCashFilterPanel(),
+                        onViewAll: () => context.push(RouteConstants.history),
                       ),
                     ),
                   ),
-
-                  const SliverToBoxAdapter(child: SizedBox(height: 12)),
-
-                  // ── Transaction list ─────────────────────────────────
+                  const SliverToBoxAdapter(child: SizedBox(height: 14)),
                   if (cashbookId != null)
                     _DashboardTransactionsSliver(cashbookId: cashbookId)
                   else
@@ -217,72 +107,184 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         child: _EmptyTransactions(),
                       ),
                     ),
-
-                  const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                  const SliverToBoxAdapter(child: SizedBox(height: 110)),
                 ],
               ),
             ),
           ),
         ),
-        loading: () => const Center(
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-        error: (e, _) => Center(
-          child: _ErrorState(message: e.toString()),
-        ),
       ),
+      floatingActionButton: _AddFAB(
+        onTap: () => context.push(RouteConstants.addTransaction),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push(RouteConstants.addTransaction),
-        backgroundColor: const Color(0xFF2563EB),
-        elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        icon: const Icon(Icons.add_rounded, color: Colors.white, size: 22),
-        label: const Text(
-          'Add Transaction',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-          ),
+    );
+  }
+}
+
+// ── FAB ───────────────────────────────────────────────────────────────────────
+
+class _AddFAB extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AddFAB({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        onTap();
+      },
+      child: Container(
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 22),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2563EB),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF2563EB).withOpacity(0.35),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add_rounded, color: Colors.white, size: 20),
+            SizedBox(width: 8),
+            Text(
+              'Add Transaction',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
 
-  String _getGreeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
+// ── Greeting ──────────────────────────────────────────────────────────────────
+
+class _GreetingHeader extends ConsumerWidget {
+  const _GreetingHeader();
+
+  void _showLogoutDialog(BuildContext ctx, WidgetRef ref) {
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Sign out', style: TextStyle(fontWeight: FontWeight.w600)),
+        content: const Text('Are you sure you want to sign out?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red.shade400,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref.read(authRepositoryProvider).signOut();
+            },
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showProfileSheet(BuildContext ctx, WidgetRef ref) {
+    final user = ref.read(authProvider).asData?.value;
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ProfileBottomSheet(
+        initial: _initial(user?.displayName),
+        displayName: user?.displayName,
+        email: user?.email,
+        onLogout: () {
+          Navigator.pop(ctx);
+          _showLogoutDialog(ctx, ref);
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final displayName = ref.watch(
+      authProvider.select((a) => a.asData?.value?.displayName),
+    );
+    final firstName = displayName?.split(' ').first ?? 'Welcome';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _greeting(),
+                style: const TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                firstName,
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.6,
+                ),
+              ),
+            ],
+          ),
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.lightImpact();
+              _showProfileSheet(context, ref);
+            },
+            child: _AvatarWidget(initial: _initial(displayName)),
+          ),
+        ],
+      ),
+    );
   }
 }
 
-// ── Avatar widget ─────────────────────────────────────────────────────────────
+// ── Balance card section ──────────────────────────────────────────────────────
 
-class _AvatarWidget extends StatelessWidget {
-  final String initial;
-  const _AvatarWidget({required this.initial});
+class _BalanceCardSection extends ConsumerWidget {
+  const _BalanceCardSection();
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 38,
-      height: 38,
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
-        shape: BoxShape.circle,
-        border: Border.all(color: AppColors.border),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cashbookAsync = ref.watch(cashbookStreamProvider);
+    return cashbookAsync.when(
+      data: (cashbook) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: RepaintBoundary(child: BalanceCard(cashbook: cashbook)),
       ),
-      child: Center(
-        child: Text(
-          initial,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.w600,
-            fontSize: 15,
-          ),
-        ),
+      loading: () => const Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: _BalanceCardSkeleton(),
+      ),
+      error: (_, __) => const Padding(
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: _ErrorState(message: 'Could not load balance.'),
       ),
     );
   }
@@ -291,72 +293,84 @@ class _AvatarWidget extends StatelessWidget {
 // ── Section header ────────────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
-  final String title;
-  final String action;
-  final VoidCallback onAction;
-  final Widget? trailing;
-
-  const _SectionHeader({
-    required this.title,
-    required this.action,
-    required this.onAction,
-    this.trailing,
-  });
+  final VoidCallback onViewAll;
+  const _SectionHeader({required this.onViewAll});
 
   @override
   Widget build(BuildContext context) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Expanded(
+        const Expanded(
           child: Text(
-            title,
-            style: const TextStyle(
-              fontSize: 22,
+            'Recent',
+            style: TextStyle(
+              fontSize: 20,
               fontWeight: FontWeight.w800,
               color: AppColors.textPrimary,
-              letterSpacing: -0.3,
+              letterSpacing: -0.5,
             ),
           ),
         ),
-        if (trailing != null) trailing!,
-        const SizedBox(width: 18),
-        GestureDetector(
-          onTap: onAction,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Text(
-              action,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-        ),
+        const SyncCashFilterPanel(),
+        const SizedBox(width: 10),
+        _ViewAllButton(onTap: onViewAll),
       ],
     );
   }
 }
 
-// ── Transaction list (isolated rebuild scope) ─────────────────────────────────
+class _ViewAllButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const _ViewAllButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'See all',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textSecondary,
+                letterSpacing: -0.1,
+              ),
+            ),
+            SizedBox(width: 3),
+            Icon(Icons.chevron_right_rounded,
+                size: 14, color: AppColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Transaction list sliver ───────────────────────────────────────────────────
 
 class _DashboardTransactionsSliver extends ConsumerWidget {
   final String cashbookId;
-
   const _DashboardTransactionsSliver({required this.cashbookId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final filteredTxs = ref.watch(filteredTransactionsProvider(cashbookId));
-    final currentUserId = ref.watch(
-      currentUserIdProvider.select((id) => id),
-    );
+    final currentUserId = ref.watch(currentUserIdProvider.select((id) => id));
 
     return filteredTxs.when(
       data: (txs) {
@@ -368,22 +382,30 @@ class _DashboardTransactionsSliver extends ConsumerWidget {
             ),
           );
         }
-
         final itemCount = txs.length > 5 ? 5 : txs.length;
-
         return SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           sliver: SliverList.builder(
             itemCount: itemCount,
-            itemBuilder: (context, index) {
-              final tx = txs[index];
+            itemBuilder: (_, i) {
+              final tx = txs[i];
+              final delay = Duration(milliseconds: 40 + i * 35);
               return Padding(
-                padding: EdgeInsets.only(
-                    bottom: index < itemCount - 1 ? 10 : 0),
-                child: TransactionListItem(
-                  key: ValueKey(tx.transactionId),
-                  transaction: tx,
-                  currentUserId: currentUserId,
+                padding: EdgeInsets.only(bottom: i < itemCount - 1 ? 8 : 0),
+                child: RepaintBoundary(
+                  child: TransactionListItem(
+                    key: ValueKey(tx.transactionId),
+                    transaction: tx,
+                    currentUserId: currentUserId,
+                  )
+                      .animate(delay: delay)
+                      .fadeIn(duration: 280.ms)
+                      .slideY(
+                        begin: 0.04,
+                        end: 0,
+                        curve: Curves.easeOut,
+                        duration: 280.ms,
+                      ),
                 ),
               );
             },
@@ -406,28 +428,102 @@ class _DashboardTransactionsSliver extends ConsumerWidget {
   }
 }
 
+// ── Skeletons ─────────────────────────────────────────────────────────────────
+
+class _BalanceCardSkeleton extends StatelessWidget {
+  const _BalanceCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 200,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.border),
+      ),
+    ).animate().shimmer(
+      delay: 200.ms,
+      duration: 1200.ms,
+      color: Colors.white.withOpacity(0.03),
+    );
+  }
+}
+
 class _TransactionListSkeleton extends StatelessWidget {
   const _TransactionListSkeleton();
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      children: List.generate(3, (index) {
-        return Container(
-          height: 82,
-          margin: EdgeInsets.only(bottom: index < 2 ? 10 : 0),
+      children: List.generate(
+        3,
+        (i) => Container(
+          height: 72,
+          margin: EdgeInsets.only(bottom: i < 2 ? 8 : 0),
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.border),
           ),
-        );
-      }),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceVariant,
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      height: 8, width: 70,
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceVariant.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                height: 13, width: 55,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+              ),
+            ],
+          ),
+        )
+            .animate(delay: Duration(milliseconds: i * 60))
+            .fadeIn(duration: 240.ms)
+            .then()
+            .shimmer(
+              duration: 1000.ms,
+              color: Colors.white.withOpacity(0.03),
+            ),
+      ),
     );
   }
 }
 
-// ── Empty state ───────────────────────────────────────────────────────────────
+// ── Empty transactions ────────────────────────────────────────────────────────
 
 class _EmptyTransactions extends StatelessWidget {
   const _EmptyTransactions();
@@ -435,7 +531,7 @@ class _EmptyTransactions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 24),
+      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 24),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(20),
@@ -444,35 +540,28 @@ class _EmptyTransactions extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            width: 56,
-            height: 56,
+            width: 52, height: 52,
             decoration: BoxDecoration(
               color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(15),
             ),
-            child: const Icon(
-              Icons.receipt_long_outlined,
-              size: 26,
-              color: AppColors.textSecondary,
-            ),
+            child: const Icon(Icons.receipt_long_outlined,
+                size: 24, color: AppColors.textSecondary),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           const Text(
             'No transactions yet',
             style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
+              fontSize: 15, fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary, letterSpacing: -0.2,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 5),
           const Text(
-            'Tap the button below to log your first transaction.',
+            'Tap the button below to log your first entry.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 13,
-              color: AppColors.textSecondary,
-              height: 1.5,
+              fontSize: 12, color: AppColors.textSecondary, height: 1.5,
             ),
           ),
         ],
@@ -490,27 +579,58 @@ class _ErrorState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.expense.withValues(alpha: 0.08),
+        color: AppColors.expense.withOpacity(0.06),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.expense.withValues(alpha: 0.2)),
+        border: Border.all(color: AppColors.expense.withOpacity(0.15)),
       ),
-      child: Row(
+      child: const Row(
         children: [
-          const Icon(Icons.error_outline_rounded, color: AppColors.expense, size: 22),
-          const SizedBox(width: 12),
+          Icon(Icons.error_outline_rounded, color: AppColors.expense, size: 18),
+          SizedBox(width: 10),
           Expanded(
             child: Text(
               'Something went wrong. Pull to refresh.',
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppColors.expense,
-                fontWeight: FontWeight.w500,
+              style: TextStyle(
+                fontSize: 13, color: AppColors.expense, fontWeight: FontWeight.w500,
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Avatar ────────────────────────────────────────────────────────────────────
+
+class _AvatarWidget extends StatelessWidget {
+  final String initial;
+  const _AvatarWidget({required this.initial});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40, height: 40,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF1E3A5F), Color(0xFF2563EB)],
+        ),
+        shape: BoxShape.circle,
+        border: Border.all(color: AppColors.border, width: 1.5),
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+          ),
+        ),
       ),
     );
   }
@@ -533,82 +653,169 @@ class _ProfileBottomSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
       ),
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 36),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade200,
-              borderRadius: BorderRadius.circular(4),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.onSurfaceVariant.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ),
+          Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              Container(
+                height: 100,
+                margin: const EdgeInsets.fromLTRB(0, 16, 0, 0),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF1E3A5F), Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: -40,
+                child: Stack(
+                  children: [
+                    Container(
+                      width: 80, height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
+                        ),
+                        border: Border.all(color: theme.colorScheme.surface, width: 3),
+                        boxShadow: [BoxShadow(
+                          color: const Color(0xFF2563EB).withOpacity(0.3),
+                          blurRadius: 16, offset: const Offset(0, 6),
+                        )],
+                      ),
+                      child: Center(
+                        child: Text(initial, style: const TextStyle(
+                          fontSize: 30, fontWeight: FontWeight.w800,
+                          color: Colors.white, letterSpacing: -0.5,
+                        )),
+                      ),
+                    ),
+                    Positioned(
+                      bottom: 4, right: 4,
+                      child: Container(
+                        width: 14, height: 14,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF22C55E), shape: BoxShape.circle,
+                          border: Border.all(color: theme.colorScheme.surface, width: 2),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 52),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              children: [
+                Text(
+                  displayName ?? 'User',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800, letterSpacing: -0.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 5),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: theme.colorScheme.outlineVariant.withOpacity(0.3),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.mail_outline_rounded, size: 13,
+                          color: theme.colorScheme.onSurfaceVariant.withOpacity(0.6)),
+                      const SizedBox(width: 5),
+                      Text(email ?? '', style: TextStyle(
+                        fontSize: 13, color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      )),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 28),
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Center(
-              child: Text(
-                initial,
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Divider(height: 1,
+                color: theme.colorScheme.outlineVariant.withOpacity(0.2)),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: InkWell(
+              onTap: onLogout,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44, height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(Icons.logout_rounded,
+                          color: Colors.red.shade400, size: 20),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Sign out', style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600,
+                            color: Colors.red.shade400,
+                          )),
+                          Text('You will need to log in again', style: TextStyle(
+                            fontSize: 12,
+                            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
+                          )),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right_rounded, size: 18,
+                        color: theme.colorScheme.onSurfaceVariant.withOpacity(0.3)),
+                  ],
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 14),
-          Text(
-            displayName ?? 'User',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF1A1A2E),
-              letterSpacing: -0.2,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            email ?? '',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-          ),
-          const SizedBox(height: 28),
-          Divider(color: Colors.grey.shade100, height: 1),
-          const SizedBox(height: 12),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.logout_rounded,
-                  color: Colors.red.shade400, size: 18),
-            ),
-            title: Text(
-              'Sign out',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: Colors.red.shade400,
-              ),
-            ),
-            onTap: onLogout,
-          ),
+          const SizedBox(height: 32),
         ],
       ),
     );

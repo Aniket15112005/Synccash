@@ -1,341 +1,188 @@
 // lib/features/transactions/presentation/screens/add_transaction_screen.dart
 
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
 
+class _C {
+  static const bg       = Color(0xFF08090B);
+  static const surface  = Color(0xFF111316);
+  static const surface2 = Color(0xFF18191E);
+  static const border   = Color(0xFF202228);
+  static const border2  = Color(0xFF2A2C33);
+  static const textPri  = Color(0xFFF0F1F3);
+  static const textSec  = Color(0xFF6B7280);
+  static const textMut  = Color(0xFF3D4149);
+  static const income   = Color(0xFF22C55E);
+  static const expense  = Color(0xFFF43F5E);
+}
+
 class AddTransactionScreen extends ConsumerStatefulWidget {
   const AddTransactionScreen({super.key});
 
   @override
-  ConsumerState<AddTransactionScreen> createState() => _AddTransactionScreenState();
+  ConsumerState<AddTransactionScreen> createState() =>
+      _AddTransactionScreenState();
 }
 
-class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> with TickerProviderStateMixin {
-  final _formKey = GlobalKey<FormState>();
-  final _amountController = TextEditingController();
-  final _descController = TextEditingController();
-  
-  String _type = 'expense';
-  String _category = 'Retail';
-  bool _isSubmitting = false;
+class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+    with SingleTickerProviderStateMixin {
+  final _formKey    = GlobalKey<FormState>();
+  final _amountCtrl = TextEditingController();
+  final _descCtrl   = TextEditingController();
 
-  late AnimationController _bgAnimationController;
+  String _type       = 'expense';
+  String _category   = 'Retail';
+  bool   _submitting = false;
+
+  late final AnimationController _btnCtrl;
+  late final Animation<double>   _btnScale;
 
   @override
   void initState() {
     super.initState();
-    _bgAnimationController = AnimationController(
+    _btnCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 20),
-    )..repeat();
+      duration: const Duration(milliseconds: 120),
+      reverseDuration: const Duration(milliseconds: 200),
+    );
+    _btnScale = Tween<double>(begin: 1.0, end: 0.96).animate(
+      CurvedAnimation(parent: _btnCtrl, curve: Curves.easeInOut),
+    );
   }
 
   @override
   void dispose() {
-    _amountController.dispose();
-    _descController.dispose();
-    _bgAnimationController.dispose();
+    _amountCtrl.dispose();
+    _descCtrl.dispose();
+    _btnCtrl.dispose();
     super.dispose();
   }
 
-  void _submit() async {
+  Color get _accentColor => _type == 'income' ? _C.income : _C.expense;
+
+  void _switchType(String type) {
+    if (_type == type) return;
+    HapticFeedback.selectionClick();
+    setState(() => _type = type);
+  }
+
+  void _switchCategory(String cat) {
+    if (_category == cat) return;
+    HapticFeedback.selectionClick();
+    setState(() => _category = cat);
+  }
+
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    
     final user = ref.read(authProvider).value;
     if (user == null) return;
 
-    setState(() => _isSubmitting = true);
+    await _btnCtrl.forward();
+    await _btnCtrl.reverse();
+
+    HapticFeedback.mediumImpact();
+    setState(() => _submitting = true);
 
     try {
       final tx = TransactionEntity(
         transactionId: '',
-        cashbookId: user.currentCashbookId!,
-        createdBy: user.uid,
-        creatorName: user.displayName,
-        createdAt: DateTime.now(),
-        amount: double.parse(_amountController.text.trim()),
-        type: _type,
-        category: _category.toLowerCase(),
-        description: _descController.text.trim(),
+        cashbookId:    user.currentCashbookId!,
+        createdBy:     user.uid,
+        creatorName:   user.displayName,
+        createdAt:     DateTime.now(),
+        amount:        double.parse(_amountCtrl.text.trim()),
+        type:          _type,
+        category:      _category.toLowerCase(),
+        description:   _descCtrl.text.trim(),
       );
-
       await ref.read(transactionRepositoryProvider).addTransaction(tx);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
+        HapticFeedback.heavyImpact();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Ledger Commit Error: ${e.toString()}'),
-            backgroundColor: const Color(0xFFFF453A),
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: _C.expense,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           ),
         );
       }
     } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    const backgroundColor = Color(0xFF07080A);       
-    const surfaceColor = Color(0xFF121316);          
-    const borderDefault = Color(0xFF222428);         
-    const textPrimary = Color(0xFFF1F2F4);           
-    const textSecondary = Color(0xFF7E848C);         
-
-    const neonGreenActive = Color(0xFF32D74B);
-    const neonRedActive = Color(0xFFFF453A);
-
     return Scaffold(
-      backgroundColor: backgroundColor,
+      backgroundColor: _C.bg,
       body: Stack(
         children: [
-          // --- Ambient Ledger Record Tape Background ---
-          AnimatedBuilder(
-            animation: _bgAnimationController,
-            builder: (context, child) {
-              return CustomPaint(
-                painter: _LedgerRecordTapePainter(
-                  progress: _bgAnimationController.value,
-                  type: _type,
-                ),
-                child: const SizedBox.expand(),
-              );
-            },
-          ),
-
+          RepaintBoundary(child: _AmbientGlow(accent: _accentColor)),
           SafeArea(
             child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: textSecondary),
-                        onPressed: () => Navigator.pop(context),
-                        style: IconButton.styleFrom(
-                          backgroundColor: surfaceColor,
-                          side: BorderSide(color: borderDefault.withOpacity(0.8)),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.all(12),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      const Text(
-                        'New Ledger Entry',
-                        style: TextStyle(
-                          color: textPrimary,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: -0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ).animate().fadeIn(duration: 300.ms),
-
+                _AppBar(onBack: () => Navigator.pop(context))
+                    .animate()
+                    .fadeIn(duration: 240.ms)
+                    .slideY(begin: -0.06, end: 0, curve: Curves.easeOut),
                 Expanded(
                   child: SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
-                    child: Container(
-                      constraints: const BoxConstraints(maxWidth: 460),
-                      padding: const EdgeInsets.all(28.0),
-                      decoration: BoxDecoration(
-                        color: surfaceColor.withOpacity(0.85),
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: borderDefault.withOpacity(0.6)),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.5),
-                            blurRadius: 40,
-                            offset: const Offset(0, 20),
-                          ),
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _TypeToggle(type: _type, onSwitch: _switchType)
+                              .animate()
+                              .fadeIn(delay: 60.ms, duration: 280.ms)
+                              .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                          const SizedBox(height: 28),
+                          _FieldLabel('Amount (INR)'),
+                          const SizedBox(height: 8),
+                          _AmountField(controller: _amountCtrl, accent: _accentColor)
+                              .animate()
+                              .fadeIn(delay: 110.ms, duration: 280.ms)
+                              .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                          const SizedBox(height: 24),
+                          _FieldLabel('Category'),
+                          const SizedBox(height: 8),
+                          _CategoryToggle(selected: _category, onSwitch: _switchCategory)
+                              .animate()
+                              .fadeIn(delay: 160.ms, duration: 280.ms)
+                              .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                          const SizedBox(height: 24),
+                          _FieldLabel('Description'),
+                          const SizedBox(height: 8),
+                          _DescriptionField(controller: _descCtrl)
+                              .animate()
+                              .fadeIn(delay: 210.ms, duration: 280.ms)
+                              .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                          const SizedBox(height: 36),
+                          ScaleTransition(
+                            scale: _btnScale,
+                            child: _SubmitButton(
+                              type:       _type,
+                              accent:     _accentColor,
+                              submitting: _submitting,
+                              onTap:      _submit,
+                            ),
+                          )
+                              .animate()
+                              .fadeIn(delay: 260.ms, duration: 280.ms)
+                              .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                         ],
-                      ),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // --- Neon High-Glow Selection Block ---
-                            Row(
-                              children: [
-                                _buildUltraGlowTypeButton(
-                                  label: 'INCOME',
-                                  isActive: _type == 'income',
-                                  activeColor: neonGreenActive,
-                                  icon: Icons.arrow_downward_rounded,
-                                  onTap: () => setState(() => _type = 'income'),
-                                ),
-                                const SizedBox(width: 16),
-                                _buildUltraGlowTypeButton(
-                                  label: 'EXPENSE',
-                                  isActive: _type == 'expense',
-                                  activeColor: neonRedActive,
-                                  icon: Icons.arrow_upward_rounded,
-                                  onTap: () => setState(() => _type = 'expense'),
-                                ),
-                              ],
-                            ).animate().fadeIn(duration: 400.ms),
-
-                            const SizedBox(height: 28),
-
-                            // --- Amount Input Module ---
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Transaction Total (INR)',
-                                  style: TextStyle(fontSize: 11, color: textSecondary, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                                ),
-                                const SizedBox(height: 8),
-                                TextFormField(
-                                  controller: _amountController,
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  textInputAction: TextInputAction.next,
-                                  cursorColor: textPrimary,
-                                  style: const TextStyle(color: textPrimary, fontSize: 26, fontWeight: FontWeight.bold, letterSpacing: -0.5),
-                                  decoration: _buildGreyInputDecoration(
-                                    hint: '0.00',
-                                    prefixIcon: Icons.currency_rupee_rounded,
-                                    borderDefault: borderDefault,
-                                    textSecondary: textSecondary,
-                                    surfaceColor: backgroundColor,
-                                  ),
-                                  validator: (value) {
-                                    if (value == null || value.trim().isEmpty) {
-                                      return 'Please enter a transactional execution total';
-                                    }
-                                    if (double.tryParse(value.trim()) == null) {
-                                      return 'Please enter a valid numeric value';
-                                    }
-                                    return null;
-                                  },
-                                ),
-                              ],
-                            ).animate().fadeIn(delay: 100.ms, duration: 400.ms),
-
-                            const SizedBox(height: 24),
-
-                            // --- Category Segment ---
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Category',
-                                  style: TextStyle(fontSize: 11, color: textSecondary, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                                ),
-                                const SizedBox(height: 8),
-                                Container(
-                                  padding: const EdgeInsets.all(6),
-                                  decoration: BoxDecoration(
-                                    color: backgroundColor,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(color: borderDefault),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      _buildPremiumCategoryCapsule(
-                                        label: 'Retail',
-                                        isSelected: _category == 'Retail',
-                                        borderDefault: borderDefault,
-                                        surfaceColor: surfaceColor,
-                                        textPrimary: textPrimary,
-                                        textSecondary: textSecondary,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      _buildPremiumCategoryCapsule(
-                                        label: 'Wholesale',
-                                        isSelected: _category == 'Wholesale',
-                                        borderDefault: borderDefault,
-                                        surfaceColor: surfaceColor,
-                                        textPrimary: textPrimary,
-                                        textSecondary: textSecondary,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ).animate().fadeIn(delay: 180.ms, duration: 400.ms),
-
-                            const SizedBox(height: 24),
-
-                            // --- Description Input Module ---
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Audit Memo / Description',
-                                  style: TextStyle(fontSize: 11, color: textSecondary, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                                ),
-                                const SizedBox(height: 8),
-                                TextFormField(
-                                  controller: _descController,
-                                  textInputAction: TextInputAction.done,
-                                  maxLines: 3,
-                                  cursorColor: textPrimary,
-                                  style: const TextStyle(color: textPrimary, fontSize: 14),
-                                  decoration: _buildGreyInputDecoration(
-                                    hint: 'Describe the operational purpose of this ledger entry...',
-                                    prefixIcon: Icons.description_outlined,
-                                    borderDefault: borderDefault,
-                                    textSecondary: textSecondary,
-                                    surfaceColor: backgroundColor,
-                                  ),
-                                  onFieldSubmitted: (_) => _isSubmitting ? null : _submit(),
-                                ),
-                              ],
-                            ).animate().fadeIn(delay: 260.ms, duration: 400.ms),
-
-                            const SizedBox(height: 36),
-
-                            // --- Dynamically Morphed Submit Button ---
-                            ElevatedButton(
-                              onPressed: _isSubmitting ? null : _submit,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _type == 'income' ? neonGreenActive : neonRedActive,
-                                foregroundColor: Colors.black,
-                                disabledBackgroundColor: textSecondary.withOpacity(0.2),
-                                elevation: 0,
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                shadowColor: (_type == 'income' ? neonGreenActive : neonRedActive).withOpacity(0.4),
-                              ),
-                              child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 250),
-                                child: _isSubmitting
-                                    ? const SizedBox(
-                                        height: 20,
-                                        width: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2.5,
-                                          color: Colors.black,
-                                        ),
-                                      )
-                                    : Text(
-                                        _type == 'income' ? 'Add Income Entry' : 'Add Expense Entry',
-                                        key: ValueKey<String>(_type),
-                                        style: const TextStyle(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w900, // FIXED: Changed from FontWeight.black to FontWeight.w900
-                                          letterSpacing: -0.2,
-                                        ),
-                                      ),
-                              ),
-                            ).animate().fadeIn(delay: 340.ms, duration: 400.ms),
-                          ],
-                        ),
                       ),
                     ),
                   ),
@@ -347,201 +194,458 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen> wit
       ),
     );
   }
+}
 
-  /// Neon Ultra Glow Segment Selector Engine
-  Widget _buildUltraGlowTypeButton({
-    required String label,
-    required bool isActive,
-    required Color activeColor,
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOutCubic,
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
-          decoration: BoxDecoration(
-            color: isActive ? activeColor.withOpacity(0.15) : const Color(0xFF0F1012),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isActive ? activeColor : const Color(0xFF1B1D21),
-              width: isActive ? 2.0 : 1.0,
-            ),
-            boxShadow: isActive
-                ? [
-                    BoxShadow(
-                      color: activeColor.withOpacity(0.45),
-                      blurRadius: 24,
-                      offset: const Offset(0, 2),
-                    ),
-                    // FIXED: Removed the invalid custom inner shadow block parameter here
-                  ]
-                : [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.6),
-                      offset: const Offset(0, 2),
-                    )
-                  ],
-          ),
-          child: AnimatedOpacity( // FIXED: Upgraded from static Opacity to AnimatedOpacity
-            duration: const Duration(milliseconds: 200),
-            opacity: isActive ? 1.0 : 0.35,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  icon,
-                  size: 18,
-                  color: isActive ? activeColor : const Color(0xFF7E848C),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: isActive ? Colors.white : const Color(0xFF7E848C),
-                    fontWeight: FontWeight.w900, // FIXED: Changed from FontWeight.black to FontWeight.w900
-                    fontSize: 14,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-              ],
-            ),
-          ),
+class _AmbientGlow extends StatelessWidget {
+  final Color accent;
+  const _AmbientGlow({required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeInOut,
+      decoration: BoxDecoration(
+        gradient: RadialGradient(
+          center: const Alignment(0, -0.6),
+          radius: 1.2,
+          colors: [accent.withOpacity(0.07), _C.bg.withOpacity(0.0)],
         ),
-      ),
-    );
-  }
-
-  /// Modern Inline Capsule Item View Builder
-  Widget _buildPremiumCategoryCapsule({
-    required String label,
-    required bool isSelected,
-    required Color borderDefault,
-    required Color surfaceColor,
-    required Color textPrimary,
-    required Color textSecondary,
-  }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _category = label),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          decoration: BoxDecoration(
-            color: isSelected ? surfaceColor : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isSelected ? borderDefault : Colors.transparent,
-            ),
-          ),
-          child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? textPrimary : textSecondary.withOpacity(0.7),
-                fontSize: 14,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Universal Input Spec Sheet Component
-  InputDecoration _buildGreyInputDecoration({
-    required String hint,
-    required IconData prefixIcon,
-    required Color borderDefault,
-    required Color textSecondary,
-    required Color surfaceColor,
-  }) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(color: textSecondary.withOpacity(0.3), fontSize: 14, fontWeight: FontWeight.normal),
-      prefixIcon: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0),
-        child: Icon(prefixIcon, size: 18, color: textSecondary.withOpacity(0.6)),
-      ),
-      prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      filled: true,
-      fillColor: surfaceColor,
-      errorStyle: const TextStyle(fontSize: 11, color: Color(0xFFFF453A)),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: borderDefault),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: borderDefault.withOpacity(0.7)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFF484A50), width: 1.2),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFFF453A), width: 1),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFFF453A), width: 1.2),
       ),
     );
   }
 }
 
-/// --- Custom Background Painter for Ambient, Flowing Record Ledger Matrices ---
-class _LedgerRecordTapePainter extends CustomPainter {
-  final double progress;
-  final String type;
-  _LedgerRecordTapePainter({required this.progress, required this.type});
+class _AppBar extends StatelessWidget {
+  final VoidCallback onBack;
+  const _AppBar({required this.onBack});
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..style = PaintingStyle.stroke;
-    
-    final baseColor = type == 'income' ? const Color(0xFF32D74B) : const Color(0xFFFF453A);
-
-    final centerGlow = Offset(size.width * 0.5, size.height * 0.3);
-    final centerGradient = RadialGradient(
-      center: Alignment.center,
-      radius: 1.4,
-      colors: [
-        baseColor.withOpacity(0.08),
-        const Color(0xFF07080A).withOpacity(0.0),
-      ],
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      child: Row(
+        children: [
+          _IconBtn(icon: Icons.arrow_back_ios_new_rounded, onTap: onBack),
+          const SizedBox(width: 14),
+          const Text(
+            'New Entry',
+            style: TextStyle(
+              color: _C.textPri,
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.4,
+            ),
+          ),
+        ],
+      ),
     );
+  }
+}
 
-    final fillPaint = Paint()
-      ..style = PaintingStyle.fill
-      ..shader = centerGradient.createShader(Rect.fromCircle(center: centerGlow, radius: size.width * 0.8));
-    canvas.drawCircle(centerGlow, size.width * 0.8, fillPaint);
+class _IconBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _IconBtn({required this.icon, required this.onTap});
 
-    paint.color = baseColor.withOpacity(0.04);
-    paint.strokeWidth = 1.0;
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 40, height: 40,
+        decoration: BoxDecoration(
+          color: _C.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _C.border),
+        ),
+        child: Icon(icon, size: 15, color: _C.textSec),
+      ),
+    );
+  }
+}
 
-    final double waveSpacing = size.height / 7;
-    for (int i = 0; i < 6; i++) {
-      final Path path = Path();
-      final double yPos = waveSpacing * (i + 1);
-      
-      path.moveTo(0, yPos);
-      for (double x = 0; x <= size.width; x += 20) {
-        final double lacing = (x / size.width) * 2 * math.pi + (progress * 2 * math.pi);
-        final double yDelta = math.sin(lacing + i) * 15;
-        path.lineTo(x, yPos + yDelta);
-      }
-      canvas.drawPath(path, paint);
-    }
+class _TypeToggle extends StatelessWidget {
+  final String type;
+  final void Function(String) onSwitch;
+  const _TypeToggle({required this.type, required this.onSwitch});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _C.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _C.border),
+      ),
+      child: Row(
+        children: [
+          _TypeChip(
+            label: 'Income', icon: Icons.south_rounded,
+            active: type == 'income', activeColor: _C.income,
+            onTap: () => onSwitch('income'),
+          ),
+          const SizedBox(width: 4),
+          _TypeChip(
+            label: 'Expense', icon: Icons.north_rounded,
+            active: type == 'expense', activeColor: _C.expense,
+            onTap: () => onSwitch('expense'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TypeChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool active;
+  final Color activeColor;
+  final VoidCallback onTap;
+  const _TypeChip({
+    required this.label, required this.icon, required this.active,
+    required this.activeColor, required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            color: active ? activeColor.withOpacity(0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: active ? activeColor.withOpacity(0.5) : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: active ? activeColor.withOpacity(0.18) : _C.surface2,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 14,
+                    color: active ? activeColor : _C.textSec),
+              ),
+              const SizedBox(width: 8),
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 220),
+                style: TextStyle(
+                  color: active ? activeColor : _C.textSec,
+                  fontSize: 14,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  letterSpacing: -0.2,
+                ),
+                child: Text(label),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AmountField extends StatefulWidget {
+  final TextEditingController controller;
+  final Color accent;
+  const _AmountField({required this.controller, required this.accent});
+
+  @override
+  State<_AmountField> createState() => _AmountFieldState();
+}
+
+class _AmountFieldState extends State<_AmountField> {
+  final _focus = FocusNode();
+  bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(() => setState(() => _focused = _focus.hasFocus));
   }
 
   @override
-  bool shouldRepaint(covariant _LedgerRecordTapePainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.type != type;
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        color: _C.bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _focused ? widget.accent.withOpacity(0.5) : _C.border,
+          width: _focused ? 1.5 : 1.0,
+        ),
+        boxShadow: _focused
+            ? [BoxShadow(
+                color: widget.accent.withOpacity(0.08),
+                blurRadius: 12, spreadRadius: 0)]
+            : null,
+      ),
+      child: TextFormField(
+        controller: widget.controller,
+        focusNode: _focus,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        textInputAction: TextInputAction.next,
+        cursorColor: widget.accent,
+        cursorWidth: 1.5,
+        style: const TextStyle(
+          color: _C.textPri, fontSize: 28,
+          fontWeight: FontWeight.w700, letterSpacing: -0.8,
+        ),
+        decoration: InputDecoration(
+          hintText: '0.00',
+          hintStyle: TextStyle(
+            color: _C.textMut, fontSize: 28,
+            fontWeight: FontWeight.w700, letterSpacing: -0.8,
+          ),
+          prefixIcon: Padding(
+            padding: const EdgeInsets.only(left: 16, right: 4),
+            child: AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 200),
+              style: TextStyle(
+                color: _focused ? widget.accent : _C.textSec,
+                fontSize: 20, fontWeight: FontWeight.w600,
+              ),
+              child: const Text('₹'),
+            ),
+          ),
+          prefixIconConstraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+          border: InputBorder.none,
+          errorBorder: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          disabledBorder: InputBorder.none,
+          focusedErrorBorder: InputBorder.none,
+          errorStyle: const TextStyle(fontSize: 11, color: _C.expense, height: 0.1),
+        ),
+        validator: (v) {
+          if (v == null || v.trim().isEmpty) return 'Enter an amount';
+          if (double.tryParse(v.trim()) == null) return 'Invalid number';
+          if (double.parse(v.trim()) <= 0) return 'Amount must be greater than 0';
+          return null;
+        },
+      ),
+    );
+  }
+}
+
+class _CategoryToggle extends StatelessWidget {
+  final String selected;
+  final void Function(String) onSwitch;
+  const _CategoryToggle({required this.selected, required this.onSwitch});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _C.bg,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: _C.border),
+      ),
+      child: Row(
+        children: ['Retail', 'Wholesale'].map((cat) {
+          final active = selected == cat;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onSwitch(cat),
+              behavior: HitTestBehavior.opaque,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: active ? _C.surface2 : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: active ? _C.border2 : Colors.transparent,
+                  ),
+                ),
+                child: Center(
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 200),
+                    style: TextStyle(
+                      color: active ? _C.textPri : _C.textSec,
+                      fontSize: 14,
+                      fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                      letterSpacing: -0.1,
+                    ),
+                    child: Text(cat),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _DescriptionField extends StatefulWidget {
+  final TextEditingController controller;
+  const _DescriptionField({required this.controller});
+
+  @override
+  State<_DescriptionField> createState() => _DescriptionFieldState();
+}
+
+class _DescriptionFieldState extends State<_DescriptionField> {
+  final _focus = FocusNode();
+  bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(() => setState(() => _focused = _focus.hasFocus));
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        color: _C.bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _focused ? const Color(0xFF4B5563) : _C.border,
+          width: _focused ? 1.5 : 1.0,
+        ),
+      ),
+      child: TextFormField(
+        controller: widget.controller,
+        focusNode: _focus,
+        textInputAction: TextInputAction.done,
+        maxLines: 3,
+        cursorColor: _C.textPri,
+        cursorWidth: 1.5,
+        style: const TextStyle(color: _C.textPri, fontSize: 14, height: 1.6),
+        decoration: InputDecoration(
+          hintText: 'What was this for?',
+          hintStyle: TextStyle(color: _C.textMut, fontSize: 14),
+          prefixIcon: Padding(
+            padding: const EdgeInsets.only(left: 16, right: 8, top: 14),
+            child: Icon(Icons.notes_rounded, size: 17,
+                color: _focused ? _C.textSec : _C.textMut),
+          ),
+          prefixIconConstraints:
+              const BoxConstraints(minWidth: 44, minHeight: 52),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+        ),
+      ),
+    );
+  }
+}
+
+class _SubmitButton extends StatelessWidget {
+  final String type;
+  final Color accent;
+  final bool submitting;
+  final VoidCallback onTap;
+  const _SubmitButton({
+    required this.type, required this.accent,
+    required this.submitting, required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: submitting ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeInOutCubic,
+        height: 56,
+        decoration: BoxDecoration(
+          color: submitting ? _C.border2 : accent,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: submitting
+              ? null
+              : [BoxShadow(
+                  color: accent.withOpacity(0.28),
+                  blurRadius: 20, offset: const Offset(0, 8))],
+        ),
+        child: Center(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: submitting
+                ? SizedBox(
+                    key: const ValueKey('loader'),
+                    width: 20, height: 20,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: _C.textSec),
+                  )
+                : Row(
+                    key: ValueKey<String>(type),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        type == 'income'
+                            ? Icons.south_rounded
+                            : Icons.north_rounded,
+                        size: 16, color: Colors.black87,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        type == 'income' ? 'Save Income' : 'Save Expense',
+                        style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700,
+                          color: Colors.black87, letterSpacing: -0.2,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FieldLabel extends StatelessWidget {
+  final String text;
+  const _FieldLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 12, color: _C.textSec,
+        fontWeight: FontWeight.w600, letterSpacing: 0.2,
+      ),
+    );
+  }
 }
