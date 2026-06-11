@@ -1,6 +1,6 @@
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 
 initializeApp();
@@ -25,21 +25,23 @@ exports.notifyTransactionAdded = onDocumentCreated(
     if (!cashbookDoc.exists) return;
 
     const cashbook = cashbookDoc.data();
-    // Adjust field names to match YOUR Firestore cashbook document
-    const memberIds = cashbook.memberIds || cashbook.members || [];
+
+    // ownerId + participantId are the two members
+    const ownerId = cashbook.ownerId;
+    const participantId = cashbook.participantId;
+    const memberIds = [ownerId, participantId].filter(Boolean);
 
     // 2. The sender is the one who created the transaction
     const senderId = transaction.createdBy || transaction.userId || transaction.addedBy;
 
-    // 3. Recipients = everyone in cashbook EXCEPT the sender
+    // 3. Recipients = the other person only
     const recipientIds = memberIds.filter((id) => id !== senderId);
     if (recipientIds.length === 0) return;
 
     // 4. Collect all FCM tokens of recipients
-    const tokenFetches = recipientIds.map((uid) =>
-      db.collection("users").doc(uid).get()
+    const userDocs = await Promise.all(
+      recipientIds.map((uid) => db.collection("users").doc(uid).get())
     );
-    const userDocs = await Promise.all(tokenFetches);
 
     const allTokens = [];
     userDocs.forEach((doc) => {
@@ -49,9 +51,13 @@ exports.notifyTransactionAdded = onDocumentCreated(
       }
     });
 
-    if (allTokens.length === 0) return;
+    if (allTokens.length === 0) {
+      console.log("No FCM tokens found for recipients:", recipientIds);
+      return;
+    }
+    const uniqueTokens = [...new Set(allTokens)];
 
-    // 5. Build a professional bank-style notification
+    // 5. Build notification content
     const isIncome = transaction.type === "income";
     const amount = transaction.amount || 0;
     const category = transaction.category || transaction.note || "Transaction";
@@ -69,7 +75,7 @@ exports.notifyTransactionAdded = onDocumentCreated(
 
     const body = `${senderName} added ${category} to SyncCash`;
 
-    // 6. Send to each token individually (handles stale tokens gracefully)
+    // 6. Send to each token, clean up stale ones
     const sendPromises = allTokens.map((token) =>
       messaging
         .send({
@@ -82,7 +88,6 @@ exports.notifyTransactionAdded = onDocumentCreated(
               sound: "default",
               priority: "high",
               visibility: "PUBLIC",
-              // Makes it look like a bank notification
               color: isIncome ? "#22C55E" : "#EF4444",
             },
           },
@@ -102,31 +107,27 @@ exports.notifyTransactionAdded = onDocumentCreated(
             amount: String(amount),
           },
         })
-        .catch((err) => {
-          // If token is invalid/expired, remove it from Firestore
+        .catch(async (err) => {
           if (
             err.code === "messaging/invalid-registration-token" ||
             err.code === "messaging/registration-token-not-registered"
           ) {
-            return db
+            // Remove stale token from Firestore
+            const snapshot = await db
               .collection("users")
               .where("fcmTokens", "array-contains", token)
-              .get()
-              .then((snapshot) => {
-                snapshot.forEach((doc) => {
-                  doc.ref.update({
-                    fcmTokens: getFirestore.FieldValue
-                      ? getFirestore.FieldValue.arrayRemove(token)
-                      : snap.ref.firestore.FieldValue?.arrayRemove(token),
-                  });
-                });
-              });
+              .get();
+            snapshot.forEach((doc) => {
+              doc.ref.update({ fcmTokens: FieldValue.arrayRemove(token) });
+            });
+            console.log("Removed stale token:", token.slice(0, 20) + "...");
+          } else {
+            console.error("FCM send error:", err.code, err.message);
           }
-          console.error("FCM send error:", err.code, err.message);
         })
     );
 
     await Promise.all(sendPromises);
-    console.log(`✅ Notified ${allTokens.length} device(s) for transaction in cashbook ${cashbookId}`);
+    console.log(`✅ Notified ${allTokens.length} device(s) for cashbook ${cashbookId}`);
   }
 );
