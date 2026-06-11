@@ -1,7 +1,16 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:synccash/features/transactions/data/repositories/transaction_repository_impl.dart';
+
+class TransactionDateFilter {
+  final DateTime? startDate;
+  final DateTime? endDate;
+
+  const TransactionDateFilter({
+    this.startDate,
+    this.endDate,
+  });
+}
 
 /// 1. Transaction Repository Provider
 final transactionRepositoryProvider =
@@ -13,7 +22,7 @@ final transactionRepositoryProvider =
 final transactionsStreamProvider =
     StreamProvider.family<List<TransactionEntity>, String>(
         (ref, cashbookId) {
-  final repo = ref.watch(transactionRepositoryProvider);
+  final repo = ref.read(transactionRepositoryProvider);
   return repo.getTransactionsStream(cashbookId);
 });
 
@@ -42,18 +51,25 @@ final selectedNameFilterProvider =
         SelectedNameNotifier.new);
 
 /// 5. DATE FILTER
-class SelectedDateNotifier extends Notifier<DateTime?> {
-  @override
-  DateTime? build() => null;
+class SelectedDateNotifier
+    extends Notifier<TransactionDateFilter?> {
 
-  void setFilter(DateTime? value) => state = value;
+  @override
+  TransactionDateFilter? build() => null;
+
+  void setFilter(TransactionDateFilter? value) {
+    state = value;
+  }
 }
 
 final selectedDateFilterProvider =
-    NotifierProvider<SelectedDateNotifier, DateTime?>(
-        SelectedDateNotifier.new);
+    NotifierProvider<
+        SelectedDateNotifier,
+        TransactionDateFilter?>(
+      SelectedDateNotifier.new,
+    );
 
-/// ⭐ 5.1 DESCRIPTION FILTER (NEW FEATURE ONLY)
+/// 5.1 DESCRIPTION FILTER
 class SelectedDescriptionNotifier extends Notifier<String?> {
   @override
   String? build() => null;
@@ -65,7 +81,74 @@ final selectedDescriptionFilterProvider =
     NotifierProvider<SelectedDescriptionNotifier, String?>(
         SelectedDescriptionNotifier.new);
 
-/// 6. FILTERED PROVIDER (UNCHANGED LOGIC + DESCRIPTION ADDED)
+bool _hasActiveFilters({
+  String? category,
+  String? name,
+  TransactionDateFilter? date,
+  String? description,
+}) {
+  return category != null ||
+      (name != null && name.isNotEmpty) ||
+      date != null ||
+      (description != null && description.isNotEmpty);
+}
+
+List<TransactionEntity> _applyTransactionFilters(
+  List<TransactionEntity> data, {
+  String? activeCategory,
+  String? activeName,
+  TransactionDateFilter? activeDate,
+  String? activeDescription,
+}) {
+  if (!_hasActiveFilters(
+    category: activeCategory,
+    name: activeName,
+    date: activeDate,
+    description: activeDescription,
+  )) {
+    return data;
+  }
+
+  final categoryLower = activeCategory?.toLowerCase();
+  final nameLower = activeName?.toLowerCase().trim();
+  final descriptionLower = activeDescription?.toLowerCase().trim();
+  final startDate = activeDate?.startDate;
+  final endDate = activeDate?.endDate;
+  final endBoundary = endDate != null
+      ? DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59)
+      : null;
+
+  return data.where((tx) {
+    if (categoryLower != null &&
+        tx.category.toLowerCase() != categoryLower) {
+      return false;
+    }
+
+    if (nameLower != null &&
+        nameLower.isNotEmpty &&
+        !tx.creatorName.toLowerCase().trim().contains(nameLower)) {
+      return false;
+    }
+
+    if (startDate != null && tx.createdAt.isBefore(startDate)) {
+      return false;
+    }
+
+    if (endBoundary != null && tx.createdAt.isAfter(endBoundary)) {
+      return false;
+    }
+
+    if (descriptionLower != null &&
+        descriptionLower.isNotEmpty &&
+        !tx.description.toLowerCase().trim().contains(descriptionLower)) {
+      return false;
+    }
+
+    return true;
+  }).toList();
+}
+
+/// 6. FILTERED PROVIDER
 final filteredTransactionsProvider =
     Provider.family<AsyncValue<List<TransactionEntity>>, String>(
   (ref, cashbookId) {
@@ -75,54 +158,17 @@ final filteredTransactionsProvider =
     final activeCategory = ref.watch(selectedCategoryFilterProvider);
     final activeName = ref.watch(selectedNameFilterProvider);
     final activeDate = ref.watch(selectedDateFilterProvider);
-
-    /// ⭐ NEW WATCH (DESCRIPTION)
     final activeDescription =
         ref.watch(selectedDescriptionFilterProvider);
 
-    return asyncTransactions.whenData((data) {
-      return data.where((tx) {
-        // CATEGORY
-        if (activeCategory != null &&
-            (tx.category ?? '').toLowerCase() !=
-                activeCategory.toLowerCase()) {
-          return false;
-        }
-
-        // NAME
-        if (activeName != null &&
-            activeName.isNotEmpty &&
-            !(tx.creatorName ?? '')
-                .toLowerCase()
-                .trim()
-                .contains(activeName.toLowerCase().trim())) {
-          return false;
-        }
-
-        // DATE
-        if (activeDate != null) {
-          final txDate = tx.createdAt;
-
-          if (txDate == null ||
-              txDate.year != activeDate.year ||
-              txDate.month != activeDate.month ||
-              txDate.day != activeDate.day) {
-            return false;
-          }
-        }
-
-        // ⭐ DESCRIPTION FILTER (NEW)
-        if (activeDescription != null &&
-            activeDescription.isNotEmpty &&
-            !(tx.description ?? '')
-                .toLowerCase()
-                .trim()
-                .contains(activeDescription.toLowerCase().trim())) {
-          return false;
-        }
-
-        return true;
-      }).toList();
-    });
+    return asyncTransactions.whenData(
+      (data) => _applyTransactionFilters(
+        data,
+        activeCategory: activeCategory,
+        activeName: activeName,
+        activeDate: activeDate,
+        activeDescription: activeDescription,
+      ),
+    );
   },
 );

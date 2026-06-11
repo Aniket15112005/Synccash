@@ -8,5 +8,17 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
 });
 
 final authProvider = StreamProvider<UserEntity?>((ref) {
-  return ref.watch(authRepositoryProvider).authStateChanges;
+  return ref.read(authRepositoryProvider).authStateChanges;
+});
+
+final currentUserIdProvider = Provider<String?>((ref) {
+  return ref.watch(
+    authProvider.select((async) => async.asData?.value?.uid),
+  );
+});
+
+final currentCashbookIdProvider = Provider<String?>((ref) {
+  return ref.watch(
+    authProvider.select((async) => async.asData?.value?.currentCashbookId),
+  );
 });

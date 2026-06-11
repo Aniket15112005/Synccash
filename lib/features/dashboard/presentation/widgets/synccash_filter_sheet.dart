@@ -1,714 +1,508 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
 
-class SyncCashFilterPanel extends ConsumerStatefulWidget {
+class SyncCashFilterPanel extends ConsumerWidget {
   const SyncCashFilterPanel({super.key});
 
   @override
-  ConsumerState<SyncCashFilterPanel> createState() =>
-      _SyncCashFilterPanelState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dateFilter = ref.watch(selectedDateFilterProvider);
+    final nameFilter = ref.watch(selectedNameFilterProvider);
+    final descFilter = ref.watch(selectedDescriptionFilterProvider);
+    final categoryFilter = ref.watch(selectedCategoryFilterProvider);
+
+    final activeCount = (dateFilter != null ? 1 : 0) +
+        (nameFilter != null && nameFilter.isNotEmpty ? 1 : 0) +
+        (descFilter != null && descFilter.isNotEmpty ? 1 : 0) +
+        (categoryFilter != null ? 1 : 0);
+
+    return _FilterIconButton(
+      activeCount: activeCount,
+      onTap: () {
+        HapticFeedback.lightImpact();
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (_) => const _FilterSheet(),
+        );
+      },
+    );
+  }
 }
 
-class _SyncCashFilterPanelState extends ConsumerState<SyncCashFilterPanel>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _animationController;
-  late Animation<double> _scaleAnimation;
-  final LayerLink _layerLink = LayerLink();
-  OverlayEntry? _overlayEntry;
+// ── Icon button with active badge ─────────────────────────────────────────────
 
-  String _selectedDateRange = '';
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _descController = TextEditingController();
-  final Set<String> _selectedCategories = {};
+class _FilterIconButton extends StatelessWidget {
+  final int activeCount;
+  final VoidCallback onTap;
+  const _FilterIconButton({required this.activeCount, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasActive = activeCount > 0;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: hasActive
+              ? theme.colorScheme.primary
+              : theme.colorScheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: hasActive
+                ? Colors.transparent
+                : theme.colorScheme.outlineVariant.withOpacity(0.4),
+            width: 0.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.tune_rounded,
+              size: 18,
+              color: hasActive
+                  ? theme.colorScheme.onPrimary
+                  : theme.colorScheme.onSurface,
+            ),
+            if (hasActive) ...[
+              const SizedBox(width: 6),
+              Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onPrimary,
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    '$activeCount',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Bottom sheet — self-contained, never causes dashboard rebuilds ─────────────
+
+class _FilterSheet extends ConsumerStatefulWidget {
+  const _FilterSheet();
+
+  @override
+  ConsumerState<_FilterSheet> createState() => _FilterSheetState();
+}
+
+class _FilterSheetState extends ConsumerState<_FilterSheet> {
+  final _nameCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+  Timer? _debounce;
+  String _selectedDateLabel = '';
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 280),
-      reverseDuration: const Duration(milliseconds: 200),
-    );
-    _scaleAnimation = CurvedAnimation(
-      parent: _animationController,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
+    final name = ref.read(selectedNameFilterProvider);
+    final desc = ref.read(selectedDescriptionFilterProvider);
+    if (name != null) _nameCtrl.text = name;
+    if (desc != null) _descCtrl.text = desc;
+    _selectedDateLabel = _labelFromFilter(ref.read(selectedDateFilterProvider));
   }
 
   @override
   void dispose() {
-    _hidePopover();
-    _animationController.dispose();
-    _nameController.dispose();
-    _descController.dispose();
+    _debounce?.cancel();
+    _nameCtrl.dispose();
+    _descCtrl.dispose();
     super.dispose();
   }
 
-  int _getActiveFilterCount() {
-    int count = 0;
-    if (_selectedDateRange.isNotEmpty) count++;
-    if (_nameController.text.isNotEmpty) count++;
-    if (_descController.text.isNotEmpty) count++;
-    count += _selectedCategories.length;
-    return count;
+  String _labelFromFilter(TransactionDateFilter? f) {
+    if (f == null) return '';
+    final s = f.startDate;
+    final e = f.endDate;
+    if (s == null || e == null) return '';
+    final now = DateTime.now();
+    final ws = now.subtract(Duration(days: now.weekday - 1));
+    if (s == DateTime(now.year, now.month, now.day)) return 'Today';
+    if (s == DateTime(ws.year, ws.month, ws.day)) return 'This Week';
+    if (s == DateTime(now.year, now.month, 1)) return 'This Month';
+    if (s == DateTime(now.year, 1, 1)) return 'This Year';
+    if (s.year == e.year && s.month == e.month && s.day == e.day) return 'Single Date';
+    return 'Custom';
   }
 
-  void _toggleFilterView(BuildContext context) {
-    final bool isDesktop = kIsWeb || MediaQuery.of(context).size.width > 768;
-    if (isDesktop) {
-      if (_overlayEntry == null) {
-        _showPopover();
-      } else {
-        _hidePopover();
-      }
-    } else {
-      _showBottomSheet(context);
+  void _debounced(VoidCallback fn) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 250), fn);
+  }
+
+  void _onDateChip(String label, bool selected) {
+    if (!selected) {
+      setState(() => _selectedDateLabel = '');
+      ref.read(selectedDateFilterProvider.notifier).setFilter(null);
+      return;
     }
+    if (label == 'Single Date') { _pickSingleDate(); return; }
+    if (label == 'Custom') { _pickDateRange(); return; }
+
+    setState(() => _selectedDateLabel = label);
+    final now = DateTime.now();
+    final ws = now.subtract(Duration(days: now.weekday - 1));
+    final filterMap = {
+      'Today': TransactionDateFilter(
+        startDate: DateTime(now.year, now.month, now.day), endDate: now),
+      'This Week': TransactionDateFilter(
+        startDate: DateTime(ws.year, ws.month, ws.day), endDate: now),
+      'This Month': TransactionDateFilter(
+        startDate: DateTime(now.year, now.month, 1), endDate: now),
+      'This Year': TransactionDateFilter(
+        startDate: DateTime(now.year, 1, 1), endDate: now),
+    };
+    final f = filterMap[label];
+    if (f != null) ref.read(selectedDateFilterProvider.notifier).setFilter(f);
   }
 
-  void _showPopover() {
-    _overlayEntry = _createOverlayEntry();
-    Overlay.of(context).insert(_overlayEntry!);
-    _animationController.forward();
+  Future<void> _pickSingleDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDate: ref.read(selectedDateFilterProvider)?.startDate ?? DateTime.now(),
+    );
+    if (!mounted || picked == null) return;
+    setState(() => _selectedDateLabel = 'Single Date');
+    ref.read(selectedDateFilterProvider.notifier).setFilter(TransactionDateFilter(
+      startDate: DateTime(picked.year, picked.month, picked.day),
+      endDate: DateTime(picked.year, picked.month, picked.day, 23, 59, 59),
+    ));
+  }
+
+  Future<void> _pickDateRange() async {
+    final cur = ref.read(selectedDateFilterProvider);
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDateRange: (cur?.startDate != null && cur?.endDate != null)
+          ? DateTimeRange(start: cur!.startDate!, end: cur.endDate!)
+          : null,
+    );
+    if (!mounted || picked == null) return;
+    setState(() => _selectedDateLabel = 'Custom');
+    ref.read(selectedDateFilterProvider.notifier).setFilter(TransactionDateFilter(
+      startDate: picked.start,
+      endDate: DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59),
+    ));
+  }
+
+  void _onCategoryChip(String cat, bool selected) {
+    HapticFeedback.selectionClick();
     setState(() {});
+    _debounced(() => ref
+        .read(selectedCategoryFilterProvider.notifier)
+        .setFilter(selected ? cat : null));
   }
 
-  void _hidePopover() {
-    if (_overlayEntry != null) {
-      _animationController.reverse().then((_) {
-        _overlayEntry?.remove();
-        _overlayEntry = null;
-        if (mounted) setState(() {});
-      });
-    }
-  }
-
-  void _clearAllFilters() {
-    setState(() {
-      _selectedDateRange = '';
-      _nameController.clear();
-      _descController.clear();
-      _selectedCategories.clear();
-    });
-    ref.read(selectedCategoryFilterProvider.notifier).setFilter(null);
+  void _clearAll() {
+    _debounce?.cancel();
+    _nameCtrl.clear();
+    _descCtrl.clear();
+    setState(() => _selectedDateLabel = '');
+    ref.read(selectedDateFilterProvider.notifier).setFilter(null);
     ref.read(selectedNameFilterProvider.notifier).setFilter(null);
     ref.read(selectedDescriptionFilterProvider.notifier).setFilter(null);
-    ref.read(selectedDateFilterProvider.notifier).setFilter(null);
+    ref.read(selectedCategoryFilterProvider.notifier).setFilter(null);
   }
 
-  void _applyFilters() {
+  void _apply() {
+    _debounce?.cancel();
     ref.read(selectedNameFilterProvider.notifier).setFilter(
-          _nameController.text.trim().isEmpty
-              ? null
-              : _nameController.text.trim(),
-        );
+        _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim());
     ref.read(selectedDescriptionFilterProvider.notifier).setFilter(
-          _descController.text.trim().isEmpty
-              ? null
-              : _descController.text.trim(),
-        );
-    ref.read(selectedCategoryFilterProvider.notifier).setFilter(
-          _selectedCategories.isEmpty ? null : _selectedCategories.first,
-        );
-    _hidePopover();
+        _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim());
+    Navigator.pop(context);
   }
 
-  OverlayEntry _createOverlayEntry() {
-    return OverlayEntry(
-      builder: (context) => Stack(
-        children: [
-          GestureDetector(
-            onTap: _hidePopover,
-            behavior: HitTestBehavior.translucent,
-            child: const SizedBox.expand(),
-          ),
-          Positioned(
-            width: 360,
-            child: CompositedTransformFollower(
-              link: _layerLink,
-              showWhenUnlinked: false,
-              offset: const Offset(-250, 52),
-              child: ScaleTransition(
-                scale: _scaleAnimation,
-                alignment: Alignment.topRight,
-                child: FadeTransition(
-                  opacity: _animationController,
-                  child: Material(
-                    elevation: 0,
-                    borderRadius: BorderRadius.circular(20),
-                    color: Colors.transparent,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surface,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .outlineVariant
-                              .withOpacity(0.35),
-                          width: 0.5,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.08),
-                            blurRadius: 24,
-                            spreadRadius: 0,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.all(20),
-                      child: _buildFilterContent(isDesktop: true),
-                    ),
-                  ),
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final categoryFilter = ref.watch(selectedCategoryFilterProvider);
+    final mq = MediaQuery.of(context);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── Handle ──────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onSurfaceVariant.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(4),
                 ),
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
 
-  void _showBottomSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      transitionAnimationController: AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 380),
-        reverseDuration: const Duration(milliseconds: 280),
-      )..forward(),
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) {
-          return AnimatedPadding(
-            padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom),
-            duration: const Duration(milliseconds: 150),
-            curve: Curves.easeOut,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 28),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+            // ── Title + Clear all ────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Drag handle
-                  Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurfaceVariant
-                          .withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(4),
+                  Text('Filter Transactions',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700, letterSpacing: -0.3)),
+                  TextButton(
+                    onPressed: _clearAll,
+                    style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.error,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                  ),
-                  const SizedBox(height: 18),
-                  _buildFilterContent(
-                    isDesktop: false,
-                    updateState: setModalState,
+                    child: const Text('Clear all', style: TextStyle(fontSize: 13)),
                   ),
                 ],
               ),
             ),
-          );
-        },
-      ),
-    ).then((_) => setState(() {}));
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    final activeCount = _getActiveFilterCount();
-    final isOpen = _overlayEntry != null;
+            const SizedBox(height: 20),
 
-    return CompositedTransformTarget(
-      link: _layerLink,
-      child: _FilterButton(
-        isOpen: isOpen,
-        activeFilterCount: activeCount,
-        onPressed: () => _toggleFilterView(context),
-      ),
-    );
-  }
+            // ── Date range ────────────────────────────────────────────────
+            _Label('DATE RANGE', theme),
+            const SizedBox(height: 10),
+            _HChipRow(
+              chips: ['Today', 'This Week', 'This Month', 'This Year', 'Single Date', 'Custom'],
+              selected: _selectedDateLabel,
+              onTap: (label) => _onDateChip(label, _selectedDateLabel != label),
+            ),
 
-  Widget _buildFilterContent(
-      {required bool isDesktop, StateSetter? updateState}) {
-    final localSetState = updateState ?? setState;
-    final theme = Theme.of(context);
+            const SizedBox(height: 20),
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // ── Header ────────────────────────────────────────────────────────
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Filters',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-                letterSpacing: -0.3,
+            // ── Category ──────────────────────────────────────────────────
+            _Label('CATEGORY', theme),
+            const SizedBox(height: 10),
+            _HChipRow(
+              chips: const ['Retail', 'Wholesale'],
+              selected: categoryFilter ?? '',
+              onTap: (cat) => _onCategoryChip(cat, categoryFilter != cat),
+            ),
+
+            const SizedBox(height: 20),
+
+            // ── Search fields ─────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                children: [
+                  _Field(
+                    ctrl: _nameCtrl,
+                    hint: 'Search by creator',
+                    icon: Icons.person_outline_rounded,
+                    onChanged: (v) => _debounced(() =>
+                        ref.read(selectedNameFilterProvider.notifier).setFilter(
+                            v.trim().isEmpty ? null : v.trim())),
+                  ),
+                  const SizedBox(height: 12),
+                  _Field(
+                    ctrl: _descCtrl,
+                    hint: 'Search by description',
+                    icon: Icons.notes_rounded,
+                    onChanged: (v) => _debounced(() =>
+                        ref.read(selectedDescriptionFilterProvider.notifier).setFilter(
+                            v.trim().isEmpty ? null : v.trim())),
+                  ),
+                ],
               ),
             ),
-            if (!isDesktop)
-              GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 16,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 18),
 
-        // ── Date range ────────────────────────────────────────────────────
-        _FilterSectionLabel(label: 'Date range', theme: theme),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: ['Today'].map((range) {
-            final isSelected = _selectedDateRange == range;
-            return _SyncCashChoiceChip(
-              label: range,
-              isSelected: isSelected,
-              onSelected: (selected) {
-                localSetState(() {
-                  _selectedDateRange = selected ? range : '';
-                });
-                DateTime? filterDate;
-                if (selected && range == 'Today') {
-                  filterDate = DateTime.now();
-                }
-                ref
-                    .read(selectedDateFilterProvider.notifier)
-                    .setFilter(filterDate);
-              },
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 18),
+            const SizedBox(height: 24),
 
-        // ── Search fields ─────────────────────────────────────────────────
-        _SyncCashTextField(
-          controller: _nameController,
-          label: 'User / Creator',
-          hint: 'e.g. Alex Carter',
-          icon: Icons.person_outline_rounded,
-          onChanged: (_) => localSetState(() {}),
-        ),
-        const SizedBox(height: 12),
-        _SyncCashTextField(
-          controller: _descController,
-          label: 'Description / Notes',
-          hint: 'e.g. Invoice checkout...',
-          icon: Icons.notes_rounded,
-          onChanged: (_) => localSetState(() {}),
-        ),
-        const SizedBox(height: 18),
-
-        // ── Category ──────────────────────────────────────────────────────
-        _FilterSectionLabel(label: 'Category', theme: theme),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: ['Retail', 'Wholesale'].map((category) {
-            final isSelected = _selectedCategories.contains(category);
-            return _SyncCashChoiceChip(
-              label: category,
-              isSelected: isSelected,
-              onSelected: (selected) {
-                localSetState(() {
-                  if (selected) {
-                    _selectedCategories.clear();
-                    _selectedCategories.add(category);
-                  } else {
-                    _selectedCategories.clear();
-                  }
-                });
-              },
-            );
-          }).toList(),
-        ),
-        const SizedBox(height: 24),
-
-        // ── Actions ───────────────────────────────────────────────────────
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () {
-                  _clearAllFilters();
-                  if (!isDesktop) Navigator.pop(context);
-                  else localSetState(() {});
-                },
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: BorderSide(
-                    color: theme.colorScheme.outlineVariant.withOpacity(0.5),
-                    width: 0.5,
+            // ── Apply button ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _apply,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                    elevation: 0,
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  foregroundColor: theme.colorScheme.onSurfaceVariant,
-                ),
-                child: const Text(
-                  'Clear',
-                  style: TextStyle(fontWeight: FontWeight.w500),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              flex: 2,
-              child: FilledButton(
-                onPressed: () {
-                  if (!isDesktop) {
-                    _applyFilters();
-                    Navigator.pop(context);
-                  } else {
-                    _applyFilters();
-                  }
-                },
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 0,
-                ),
-                child: const Text(
-                  'Apply',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+                  child: const Text('Apply Filters',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
               ),
             ),
           ],
         ),
-      ],
+      ),
     );
   }
 }
 
-// ── Filter section label ──────────────────────────────────────────────────────
+// ── Micro widgets ─────────────────────────────────────────────────────────────
 
-class _FilterSectionLabel extends StatelessWidget {
-  final String label;
+class _Label extends StatelessWidget {
+  final String text;
   final ThemeData theme;
-
-  const _FilterSectionLabel({required this.label, required this.theme});
+  const _Label(this.text, this.theme);
 
   @override
-  Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: theme.textTheme.labelSmall?.copyWith(
-        color: theme.colorScheme.onSurfaceVariant.withOpacity(0.7),
-        fontWeight: FontWeight.w600,
-        letterSpacing: 0.5,
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(text,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
+                fontSize: 10,
+              )),
+        ),
+      );
 }
 
-// ── Filter button ─────────────────────────────────────────────────────────────
-
-class _FilterButton extends StatefulWidget {
-  final bool isOpen;
-  final int activeFilterCount;
-  final VoidCallback onPressed;
-
-  const _FilterButton({
-    required this.isOpen,
-    required this.activeFilterCount,
-    required this.onPressed,
-  });
+class _HChipRow extends StatelessWidget {
+  final List<String> chips;
+  final String selected;
+  final ValueChanged<String> onTap;
+  const _HChipRow({required this.chips, required this.selected, required this.onTap});
 
   @override
-  State<_FilterButton> createState() => _FilterButtonState();
-}
-
-class _FilterButtonState extends State<_FilterButton> {
-  bool _isHovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final hasActive = widget.activeFilterCount > 0;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.lightImpact();
-          widget.onPressed();
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: widget.isOpen
-                ? theme.colorScheme.primary
-                : (_isHovered
-                    ? theme.colorScheme.surfaceContainerHigh
-                    : theme.colorScheme.surfaceContainer),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: widget.isOpen
-                  ? Colors.transparent
-                  : theme.colorScheme.outlineVariant.withOpacity(0.4),
-              width: 0.5,
+  Widget build(BuildContext context) => SizedBox(
+        height: 36,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          itemCount: chips.length,
+          itemBuilder: (_, i) => Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _Chip(
+              label: chips[i],
+              isSelected: selected == chips[i],
+              onTap: () => onTap(chips[i]),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(_isHovered ? 0.06 : 0.03),
-                blurRadius: _isHovered ? 10 : 4,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                transitionBuilder: (child, anim) => RotationTransition(
-                  turns: child.key == const ValueKey('close')
-                      ? Tween<double>(begin: 0.75, end: 1.0).animate(anim)
-                      : Tween<double>(begin: 0.25, end: 1.0).animate(anim),
-                  child: ScaleTransition(scale: anim, child: child),
-                ),
-                child: widget.isOpen
-                    ? Icon(
-                        Icons.close_rounded,
-                        key: const ValueKey('close'),
-                        color: theme.colorScheme.onPrimary,
-                        size: 18,
-                      )
-                    : Icon(
-                        Icons.tune_rounded,
-                        key: const ValueKey('tune'),
-                        color: theme.colorScheme.onSurface,
-                        size: 18,
-                      ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Filters',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: widget.isOpen
-                      ? theme.colorScheme.onPrimary
-                      : theme.colorScheme.onSurface,
-                ),
-              ),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                transitionBuilder: (child, anim) => ScaleTransition(
-                  scale: anim,
-                  child: child,
-                ),
-                child: hasActive
-                    ? Container(
-                        key: ValueKey('badge-${widget.activeFilterCount}'),
-                        margin: const EdgeInsets.only(left: 7),
-                        width: 18,
-                        height: 18,
-                        decoration: BoxDecoration(
-                          color: widget.isOpen
-                              ? theme.colorScheme.onPrimary
-                              : theme.colorScheme.primary,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            '${widget.activeFilterCount}',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: widget.isOpen
-                                  ? theme.colorScheme.primary
-                                  : theme.colorScheme.onPrimary,
-                            ),
-                          ),
-                        ),
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ],
           ),
         ),
-      ),
-    );
-  }
+      );
 }
 
-// ── Choice chip ───────────────────────────────────────────────────────────────
-
-class _SyncCashChoiceChip extends StatefulWidget {
+class _Chip extends StatelessWidget {
   final String label;
   final bool isSelected;
-  final Function(bool) onSelected;
-
-  const _SyncCashChoiceChip({
-    required this.label,
-    required this.isSelected,
-    required this.onSelected,
-  });
-
-  @override
-  State<_SyncCashChoiceChip> createState() => _SyncCashChoiceChipState();
-}
-
-class _SyncCashChoiceChipState extends State<_SyncCashChoiceChip> {
-  bool _isHovered = false;
+  final VoidCallback onTap;
+  const _Chip({required this.label, required this.isSelected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
+    return GestureDetector(
+      onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        child: ChoiceChip(
-          label: Text(widget.label),
-          selected: widget.isSelected,
-          onSelected: widget.onSelected,
-          labelStyle: TextStyle(
-            fontSize: 12,
-            color: widget.isSelected
-                ? theme.colorScheme.onPrimaryContainer
-                : theme.colorScheme.onSurfaceVariant,
-            fontWeight:
-                widget.isSelected ? FontWeight.w600 : FontWeight.w400,
-          ),
-          backgroundColor: _isHovered
-              ? theme.colorScheme.surfaceContainerHighest
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? theme.colorScheme.primary
               : theme.colorScheme.surfaceContainerLow,
-          selectedColor:
-              theme.colorScheme.primaryContainer.withOpacity(0.7),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-          side: BorderSide(
-            color: widget.isSelected
-                ? theme.colorScheme.primary.withOpacity(0.6)
-                : theme.colorScheme.outlineVariant.withOpacity(0.4),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected
+                ? Colors.transparent
+                : theme.colorScheme.outlineVariant.withOpacity(0.35),
             width: 0.5,
           ),
-          showCheckmark: false,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         ),
+        child: Text(label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+              color: isSelected
+                  ? theme.colorScheme.onPrimary
+                  : theme.colorScheme.onSurface,
+            )),
       ),
     );
   }
 }
 
-// ── Text field ────────────────────────────────────────────────────────────────
-
-class _SyncCashTextField extends StatelessWidget {
-  final TextEditingController controller;
-  final String label;
+class _Field extends StatelessWidget {
+  final TextEditingController ctrl;
   final String hint;
   final IconData icon;
   final ValueChanged<String> onChanged;
-
-  const _SyncCashTextField({
-    required this.controller,
-    required this.label,
-    required this.hint,
-    required this.icon,
-    required this.onChanged,
-  });
+  const _Field({required this.ctrl, required this.hint, required this.icon, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.7),
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.4,
-          ),
+    return TextField(
+      controller: ctrl,
+      onChanged: onChanged,
+      style: theme.textTheme.bodyMedium,
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(
+            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.45),
+            fontSize: 14),
+        prefixIcon: Icon(icon,
+            size: 18,
+            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.55)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        filled: true,
+        fillColor: theme.colorScheme.surfaceContainerLow,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+              color: theme.colorScheme.outlineVariant.withOpacity(0.3),
+              width: 0.5),
         ),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          onChanged: onChanged,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurface,
-          ),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant.withOpacity(0.45),
-            ),
-            prefixIcon: Icon(
-              icon,
-              size: 16,
-              color: theme.colorScheme.onSurfaceVariant.withOpacity(0.6),
-            ),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-            filled: true,
-            fillColor: theme.colorScheme.surfaceContainerLow,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(
-                color: theme.colorScheme.outlineVariant.withOpacity(0.4),
-                width: 0.5,
-              ),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(
-                color: theme.colorScheme.outlineVariant.withOpacity(0.35),
-                width: 0.5,
-              ),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(
-                color: theme.colorScheme.primary.withOpacity(0.7),
-                width: 1,
-              ),
-            ),
-          ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+              color: theme.colorScheme.outlineVariant.withOpacity(0.25),
+              width: 0.5),
         ),
-      ],
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+              color: theme.colorScheme.primary.withOpacity(0.7), width: 1.2),
+        ),
+      ),
     );
   }
 }
