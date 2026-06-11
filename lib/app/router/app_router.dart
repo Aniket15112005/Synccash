@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:synccash/app/router/route_constants.dart';
+import 'package:synccash/core/navigation/navigation_service.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
 import 'package:synccash/features/auth/presentation/screens/login_screen.dart';
 import 'package:synccash/features/auth/presentation/screens/signup_screen.dart';
@@ -15,6 +16,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
 
   return GoRouter(
+    navigatorKey: NavigationService.navigatorKey,
     initialLocation: RouteConstants.splash,
 
     redirect: (BuildContext context, GoRouterState state) {
@@ -29,9 +31,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation == RouteConstants.login ||
           state.matchedLocation == RouteConstants.signup;
 
-      if (!loggedIn && !isAuthRoute) {
-        return RouteConstants.login;
-      }
+      if (!loggedIn && !isAuthRoute) return RouteConstants.login;
 
       if (loggedIn && isAuthRoute) {
         final hasCashbook = user.currentCashbookId != null;

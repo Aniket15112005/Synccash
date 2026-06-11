@@ -32,14 +32,10 @@ void main() async {
     );
   }
 
-  // 3. Notifications: permission + Android channel + foreground handler
-  //    Safe to call before login — does NOT touch tokens.
-  if (!kIsWeb) {
-    await NotificationService.initialize();
-  }
+  // 3. Notifications — runs on ALL platforms (Android, iOS, web/iOS PWA)
+  await NotificationService.initialize();
 
-  // 4. FCM token lifecycle — only after the user is confirmed logged in.
-  //    Guard prevents calling initFCM() more than once per session.
+  // 4. FCM token lifecycle — only after the user is confirmed logged in
   bool fcmReady = false;
   FirebaseAuth.instance.authStateChanges().listen((user) async {
     if (user != null && !fcmReady) {
@@ -48,23 +44,28 @@ void main() async {
       await FCMService.initFCM();
     }
     if (user == null) {
-      fcmReady = false; // reset so next login re-initializes
+      fcmReady = false;
     }
   });
 
-  // 5. Lock to portrait
-  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  // 5. Lock to portrait (mobile only)
+  if (!kIsWeb) {
+    await SystemChrome.setPreferredOrientations(
+        [DeviceOrientation.portraitUp]);
+  }
 
-  // 6. Status/nav bar styling
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor:                   Colors.transparent,
-      statusBarIconBrightness:          Brightness.light,
-      statusBarBrightness:              Brightness.dark,
-      systemNavigationBarColor:         Color(0xFF0A0E17),
-      systemNavigationBarIconBrightness: Brightness.light,
-    ),
-  );
+  // 6. Status/nav bar styling (mobile only)
+  if (!kIsWeb) {
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor:                    Colors.transparent,
+        statusBarIconBrightness:           Brightness.light,
+        statusBarBrightness:               Brightness.dark,
+        systemNavigationBarColor:          Color(0xFF0A0E17),
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
+    );
+  }
 
   runApp(const ProviderScope(child: _RootApp()));
 }
