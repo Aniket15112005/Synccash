@@ -243,10 +243,10 @@ class _LogoBox extends StatelessWidget {
           ),
         ),
         // Corners
-        Positioned(top: -1, left: -1,   child: _Corner(top: true,  left: true)),
-        Positioned(top: -1, right: -1,  child: _Corner(top: true,  left: false)),
-        Positioned(bottom: -1, left: -1,  child: _Corner(top: false, left: true)),
-        Positioned(bottom: -1, right: -1, child: _Corner(top: false, left: false)),
+        const Positioned(top: -1, left: -1,   child: _Corner(top: true,  left: true)),
+        const Positioned(top: -1, right: -1,  child: _Corner(top: true,  left: false)),
+        const Positioned(bottom: -1, left: -1,  child: _Corner(top: false, left: true)),
+        const Positioned(bottom: -1, right: -1, child: _Corner(top: false, left: false)),
       ]),
     );
   }

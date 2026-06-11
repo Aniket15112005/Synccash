@@ -23,7 +23,6 @@ class _BalanceCardState extends State<BalanceCard>
   bool _hideBalance = true;
 
   late final AnimationController _revealCtrl;
-  late final Animation<double> _revealAnim;
 
   @override
   void initState() {
@@ -32,7 +31,6 @@ class _BalanceCardState extends State<BalanceCard>
       vsync: this,
       duration: const Duration(milliseconds: 280),
     );
-    _revealAnim = CurvedAnimation(parent: _revealCtrl, curve: Curves.easeOut);
   }
 
   @override
@@ -72,12 +70,12 @@ class _BalanceCardState extends State<BalanceCard>
           stops: [0.0, 0.5, 1.0],
         ),
         border: Border.all(
-          color: Colors.white.withOpacity(0.06),
+          color: Colors.white.withValues(alpha: 0.06),
           width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
+            color: Colors.black.withValues(alpha: 0.4),
             blurRadius: 32,
             offset: const Offset(0, 12),
           ),
@@ -87,7 +85,6 @@ class _BalanceCardState extends State<BalanceCard>
         borderRadius: BorderRadius.circular(24),
         child: Stack(
           children: [
-            // ── Decorative glow ──────────────────────────────────────────
             Positioned(
               top: -60,
               right: -60,
@@ -98,7 +95,7 @@ class _BalanceCardState extends State<BalanceCard>
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
                     colors: [
-                      balanceColor.withOpacity(0.08),
+                      balanceColor.withValues(alpha: 0.08),
                       Colors.transparent,
                     ],
                   ),
@@ -106,23 +103,20 @@ class _BalanceCardState extends State<BalanceCard>
               ),
             ),
 
-            // ── Main content ─────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
 
-                  // ── Header row ─────────────────────────────────────────
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Live pulse label
-                      Row(
+                      const Row(
                         children: [
                           _PulseDot(color: AppColors.income),
-                          const SizedBox(width: 7),
-                          const Text(
+                          SizedBox(width: 7),
+                          Text(
                             'LIVE',
                             style: TextStyle(
                               color: Colors.white38,
@@ -133,14 +127,12 @@ class _BalanceCardState extends State<BalanceCard>
                           ),
                         ],
                       ),
-                      // Invite code badge
                       _InviteCodeBadge(code: cashbook.inviteCode),
                     ],
                   ),
 
                   const SizedBox(height: 18),
 
-                  // ── Balance row ────────────────────────────────────────
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -158,7 +150,6 @@ class _BalanceCardState extends State<BalanceCard>
                               ),
                             ),
                             const SizedBox(height: 6),
-                            // Animated reveal on tap
                             AnimatedSwitcher(
                               duration: const Duration(milliseconds: 240),
                               transitionBuilder: (child, anim) =>
@@ -190,7 +181,6 @@ class _BalanceCardState extends State<BalanceCard>
                         ),
                       ),
 
-                      // ── Hide / show toggle ─────────────────────────────
                       GestureDetector(
                         onTap: _toggleBalance,
                         behavior: HitTestBehavior.opaque,
@@ -199,11 +189,11 @@ class _BalanceCardState extends State<BalanceCard>
                           padding: const EdgeInsets.all(9),
                           decoration: BoxDecoration(
                             color: _hideBalance
-                                ? Colors.white.withOpacity(0.06)
-                                : Colors.white.withOpacity(0.10),
+                                ? Colors.white.withValues(alpha: 0.06)
+                                : Colors.white.withValues(alpha: 0.10),
                             borderRadius: BorderRadius.circular(11),
                             border: Border.all(
-                              color: Colors.white.withOpacity(0.10),
+                              color: Colors.white.withValues(alpha: 0.10),
                               width: 0.5,
                             ),
                           ),
@@ -221,15 +211,13 @@ class _BalanceCardState extends State<BalanceCard>
 
                   const SizedBox(height: 20),
 
-                  // ── Divider ────────────────────────────────────────────
                   Container(
                     height: 0.5,
-                    color: Colors.white.withOpacity(0.07),
+                    color: Colors.white.withValues(alpha: 0.07),
                   ),
 
                   const SizedBox(height: 16),
 
-                  // ── Income / Expense metric tiles ──────────────────────
                   Row(
                     children: [
                       Expanded(
@@ -288,21 +276,20 @@ class _MetricTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.07),
+        color: color.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: color.withOpacity(0.16),
+          color: color.withValues(alpha: 0.16),
           width: 0.5,
         ),
       ),
       child: Row(
         children: [
-          // Icon circle
           Container(
             width: 32,
             height: 32,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.14),
+              color: color.withValues(alpha: 0.14),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: color, size: 14),
@@ -315,7 +302,7 @@ class _MetricTile extends StatelessWidget {
                 Text(
                   label,
                   style: TextStyle(
-                    color: color.withOpacity(0.6),
+                    color: color.withValues(alpha: 0.6),
                     fontSize: 10,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.3,
@@ -323,19 +310,19 @@ class _MetricTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
+                  duration: const Duration(milliseconds: 200),
                   child: Text(
                     hideAmount
-                        ? '₹*****'
+                        ? '••••'
                         : '₹${CurrencyFormatter.format(value)}',
                     key: ValueKey<bool>(hideAmount),
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.w700,
+                    style: const TextStyle(
+                      color: Colors.white,
                       fontSize: 13,
+                      fontWeight: FontWeight.w700,
                       letterSpacing: -0.3,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -348,8 +335,7 @@ class _MetricTile extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Pulsing live dot — wrapped in RepaintBoundary so its animation
-//  never triggers repaints in the card above it
+//  Pulsing live dot
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PulseDot extends StatefulWidget {
@@ -421,10 +407,10 @@ class _InviteCodeBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.07),
+        color: Colors.white.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: Colors.white.withOpacity(0.10),
+          color: Colors.white.withValues(alpha: 0.10),
           width: 0.5,
         ),
       ),

@@ -102,7 +102,7 @@ class _TransactionActionSheet extends StatelessWidget {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: theme.colorScheme.onSurfaceVariant.withOpacity(0.2),
+                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -115,7 +115,7 @@ class _TransactionActionSheet extends StatelessWidget {
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: typeColor.withOpacity(0.12),
+                    color: typeColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(
@@ -160,7 +160,7 @@ class _TransactionActionSheet extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Divider(
-                height: 24, color: theme.colorScheme.outlineVariant.withOpacity(0.3)),
+                height: 24, color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3)),
           ),
           _ActionTile(
             icon: Icons.delete_outline_rounded,
@@ -201,7 +201,7 @@ class _ActionTile extends StatelessWidget {
               width: 38,
               height: 38,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(icon, color: color, size: 18),

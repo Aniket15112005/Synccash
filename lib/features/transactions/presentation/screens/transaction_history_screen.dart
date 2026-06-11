@@ -1,6 +1,5 @@
 // lib/features/transactions/presentation/screens/transaction_history_screen.dart
 
-import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -92,7 +91,7 @@ final class _TxEntry extends _ListItem {
 }
 
 List<_ListItem> _buildFlatList(List<dynamic> txs) {
-  final grouped = LinkedHashMap<String, List<dynamic>>();
+  final grouped = <String, List<dynamic>>{};
   for (final tx in txs) {
     final date = (tx.createdAt as DateTime).toLocal();
     grouped.putIfAbsent(_dayKey(date), () => []).add(tx);
@@ -603,10 +602,10 @@ class _PillChip extends StatelessWidget {
         curve:    Curves.easeInOut,
         padding:  const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: active ? color.withOpacity(0.14) : Colors.transparent,
+          color: active ? color.withValues(alpha: 0.14) : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: active ? color.withOpacity(0.35) : Colors.transparent,
+            color: active ? color.withValues(alpha: 0.35) : Colors.transparent,
             width: 1,
           ),
         ),
@@ -634,7 +633,6 @@ class _SummaryStrip extends StatelessWidget {
   final double expense;
 
   const _SummaryStrip({
-    super.key,
     required this.total,
     required this.income,
     required this.expense,
@@ -658,7 +656,7 @@ class _SummaryStrip extends StatelessWidget {
             align:      CrossAxisAlignment.start,
             leftPad:    18,
           ),
-          VerticalDivider(
+          const VerticalDivider(
               width: 1, thickness: 0.5,
               color: AppColors.border, indent: 12, endIndent: 12),
           _SummaryCell(
@@ -667,7 +665,7 @@ class _SummaryStrip extends StatelessWidget {
             valueColor: AppColors.income,
             align:      CrossAxisAlignment.center,
           ),
-          VerticalDivider(
+          const VerticalDivider(
               width: 1, thickness: 0.5,
               color: AppColors.border, indent: 12, endIndent: 12),
           _SummaryCell(
@@ -771,7 +769,6 @@ class _DateSectionHeader extends StatelessWidget {
   final int    count;
 
   const _DateSectionHeader({
-    super.key,
     required this.label,
     required this.count,
   });
@@ -923,7 +920,7 @@ class _LoadingState extends StatelessWidget {
               border:       Border.all(color: AppColors.border),
             ),
           ).animate().shimmer(
-              duration: 1000.ms, color: Colors.white.withOpacity(0.03)),
+              duration: 1000.ms, color: Colors.white.withValues(alpha: 0.03)),
           const SizedBox(height: 12),
           Container(
             height: 70,
@@ -933,7 +930,7 @@ class _LoadingState extends StatelessWidget {
               border:       Border.all(color: AppColors.border),
             ),
           ).animate().shimmer(
-              duration: 1100.ms, color: Colors.white.withOpacity(0.03)),
+              duration: 1100.ms, color: Colors.white.withValues(alpha: 0.03)),
           const SizedBox(height: 24),
           ...List.generate(6, (i) => _SkeletonRow(index: i)),
         ],
@@ -944,7 +941,7 @@ class _LoadingState extends StatelessWidget {
 
 class _SkeletonRow extends StatelessWidget {
   final int index;
-  const _SkeletonRow({super.key, required this.index});
+  const _SkeletonRow({required this.index});
 
   @override
   Widget build(BuildContext context) {
@@ -1006,7 +1003,7 @@ class _SkeletonRow extends StatelessWidget {
         .then()
         .shimmer(
           duration: 1000.ms,
-          color:    Colors.white.withOpacity(0.03),
+          color:    Colors.white.withValues(alpha: 0.03),
         );
   }
 }
@@ -1075,7 +1072,7 @@ class _EmptyState extends StatelessWidget {
 
 class _ErrorState extends StatelessWidget {
   final String message;
-  const _ErrorState({super.key, required this.message});
+  const _ErrorState({required this.message});
 
   @override
   Widget build(BuildContext context) {

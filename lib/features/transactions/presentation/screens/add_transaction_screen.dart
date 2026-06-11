@@ -149,21 +149,21 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               .fadeIn(delay: 60.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 28),
-                          _FieldLabel('Amount (INR)'),
+                          const _FieldLabel('Amount (INR)'),
                           const SizedBox(height: 8),
                           _AmountField(controller: _amountCtrl, accent: _accentColor)
                               .animate()
                               .fadeIn(delay: 110.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 24),
-                          _FieldLabel('Category'),
+                          const _FieldLabel('Category'),
                           const SizedBox(height: 8),
                           _CategoryToggle(selected: _category, onSwitch: _switchCategory)
                               .animate()
                               .fadeIn(delay: 160.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 24),
-                          _FieldLabel('Description'),
+                          const _FieldLabel('Description'),
                           const SizedBox(height: 8),
                           _DescriptionField(controller: _descCtrl)
                               .animate()
@@ -209,7 +209,7 @@ class _AmbientGlow extends StatelessWidget {
         gradient: RadialGradient(
           center: const Alignment(0, -0.6),
           radius: 1.2,
-          colors: [accent.withOpacity(0.07), _C.bg.withOpacity(0.0)],
+          colors: [accent.withValues(alpha: 0.07), _C.bg.withValues(alpha: 0.0)],
         ),
       ),
     );
@@ -321,10 +321,10 @@ class _TypeChip extends StatelessWidget {
           curve: Curves.easeOutCubic,
           padding: const EdgeInsets.symmetric(vertical: 16),
           decoration: BoxDecoration(
-            color: active ? activeColor.withOpacity(0.12) : Colors.transparent,
+            color: active ? activeColor.withValues(alpha: 0.12) : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: active ? activeColor.withOpacity(0.5) : Colors.transparent,
+              color: active ? activeColor.withValues(alpha: 0.5) : Colors.transparent,
             ),
           ),
           child: Row(
@@ -334,7 +334,7 @@ class _TypeChip extends StatelessWidget {
                 duration: const Duration(milliseconds: 220),
                 padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
-                  color: active ? activeColor.withOpacity(0.18) : _C.surface2,
+                  color: active ? activeColor.withValues(alpha: 0.18) : _C.surface2,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, size: 14,
@@ -393,12 +393,12 @@ class _AmountFieldState extends State<_AmountField> {
         color: _C.bg,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: _focused ? widget.accent.withOpacity(0.5) : _C.border,
+          color: _focused ? widget.accent.withValues(alpha: 0.5) : _C.border,
           width: _focused ? 1.5 : 1.0,
         ),
         boxShadow: _focused
             ? [BoxShadow(
-                color: widget.accent.withOpacity(0.08),
+                color: widget.accent.withValues(alpha: 0.08),
                 blurRadius: 12, spreadRadius: 0)]
             : null,
       ),
@@ -415,7 +415,7 @@ class _AmountFieldState extends State<_AmountField> {
         ),
         decoration: InputDecoration(
           hintText: '0.00',
-          hintStyle: TextStyle(
+          hintStyle: const TextStyle(
             color: _C.textMut, fontSize: 28,
             fontWeight: FontWeight.w700, letterSpacing: -0.8,
           ),
@@ -551,7 +551,7 @@ class _DescriptionFieldState extends State<_DescriptionField> {
         style: const TextStyle(color: _C.textPri, fontSize: 14, height: 1.6),
         decoration: InputDecoration(
           hintText: 'What was this for?',
-          hintStyle: TextStyle(color: _C.textMut, fontSize: 14),
+          hintStyle: const TextStyle(color: _C.textMut, fontSize: 14),
           prefixIcon: Padding(
             padding: const EdgeInsets.only(left: 16, right: 8, top: 14),
             child: Icon(Icons.notes_rounded, size: 17,
@@ -594,15 +594,15 @@ class _SubmitButton extends StatelessWidget {
           boxShadow: submitting
               ? null
               : [BoxShadow(
-                  color: accent.withOpacity(0.28),
+                  color: accent.withValues(alpha: 0.28),
                   blurRadius: 20, offset: const Offset(0, 8))],
         ),
         child: Center(
           child: AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
             child: submitting
-                ? SizedBox(
-                    key: const ValueKey('loader'),
+                ? const SizedBox(
+                    key: ValueKey('loader'),
                     width: 20, height: 20,
                     child: CircularProgressIndicator(
                         strokeWidth: 2, color: _C.textSec),

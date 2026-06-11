@@ -60,7 +60,7 @@ class _FilterIconButton extends StatelessWidget {
           border: Border.all(
             color: hasActive
                 ? Colors.transparent
-                : theme.colorScheme.outlineVariant.withOpacity(0.4),
+                : theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
             width: 0.5,
           ),
         ),
@@ -265,7 +265,7 @@ class _FilterSheetState extends ConsumerState<_FilterSheet> {
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.onSurfaceVariant.withOpacity(0.2),
+                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
@@ -300,7 +300,7 @@ class _FilterSheetState extends ConsumerState<_FilterSheet> {
             _Label('DATE RANGE', theme),
             const SizedBox(height: 10),
             _HChipRow(
-              chips: ['Today', 'This Week', 'This Month', 'This Year', 'Single Date', 'Custom'],
+              chips: const ['Today', 'This Week', 'This Month', 'This Year', 'Single Date', 'Custom'],
               selected: _selectedDateLabel,
               onTap: (label) => _onDateChip(label, _selectedDateLabel != label),
             ),
@@ -385,7 +385,7 @@ class _Label extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: Text(text,
               style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
+                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.8,
                 fontSize: 10,
@@ -442,7 +442,7 @@ class _Chip extends StatelessWidget {
           border: Border.all(
             color: isSelected
                 ? Colors.transparent
-                : theme.colorScheme.outlineVariant.withOpacity(0.35),
+                : theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
             width: 0.5,
           ),
         ),
@@ -476,11 +476,11 @@ class _Field extends StatelessWidget {
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(
-            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.45),
+            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
             fontSize: 14),
         prefixIcon: Icon(icon,
             size: 18,
-            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.55)),
+            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.55)),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         filled: true,
@@ -488,19 +488,19 @@ class _Field extends StatelessWidget {
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
-              color: theme.colorScheme.outlineVariant.withOpacity(0.3),
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
               width: 0.5),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
-              color: theme.colorScheme.outlineVariant.withOpacity(0.25),
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.25),
               width: 0.5),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(
-              color: theme.colorScheme.primary.withOpacity(0.7), width: 1.2),
+              color: theme.colorScheme.primary.withValues(alpha: 0.7), width: 1.2),
         ),
       ),
     );

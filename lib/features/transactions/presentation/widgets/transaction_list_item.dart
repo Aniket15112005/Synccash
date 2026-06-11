@@ -442,7 +442,7 @@ class _SheetAction extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(children: [
-          Icon(icon, size: 18, color: color.withOpacity(0.7)),
+          Icon(icon, size: 18, color: color.withValues(alpha: 0.7)),
           const SizedBox(width: 12),
           Text(label,
               style: TextStyle(

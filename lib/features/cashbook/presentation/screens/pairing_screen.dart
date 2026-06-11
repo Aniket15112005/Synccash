@@ -1,7 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:synccash/app/theme/app_colors.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
 import 'package:synccash/features/cashbook/presentation/providers/cashbook_provider.dart';
 
@@ -119,22 +118,25 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
   }
 
   Widget _buildHeader() {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    return const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
-        Container(
-          width: 32, height: 32,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF4f6ef7), Color(0xFF8b5cf6)],
+        SizedBox(
+          width: 32,
+          height: 32,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF4f6ef7), Color(0xFF8b5cf6)],
+              ),
+              borderRadius: BorderRadius.all(Radius.circular(8)),
             ),
-            borderRadius: BorderRadius.circular(8),
+            child: Icon(Icons.sync_alt_rounded, color: Colors.white, size: 16),
           ),
-          child: const Icon(Icons.sync_alt_rounded, color: Colors.white, size: 16),
         ),
-        const SizedBox(width: 10),
-        const Text('SYNCCASH',
+        SizedBox(width: 10),
+        Text('SYNCCASH',
             style: TextStyle(
               color: Color(0xFF6b7280),
               fontSize: 11,
@@ -142,16 +144,16 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
               letterSpacing: 2.5,
             )),
       ]),
-      const SizedBox(height: 20),
-      const Text('Secure Sync',
+      SizedBox(height: 20),
+      Text('Secure Sync',
           style: TextStyle(
             color: Color(0xFFe5e7eb),
             fontSize: 28,
             fontWeight: FontWeight.w800,
             letterSpacing: -0.5,
           )),
-      const SizedBox(height: 6),
-      const Text('Connect your financial network node',
+      SizedBox(height: 6),
+      Text('Connect your financial network node',
           style: TextStyle(color: Color(0xFF6b7280), fontSize: 14)),
     ]);
   }
@@ -160,10 +162,10 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
     return _GlassCard(child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(children: [
-          _IconBadge(icon: Icons.grid_view_rounded, color: const Color(0xFF4f6ef7)),
-          const SizedBox(width: 12),
-          const Expanded(child: Column(
+        const Row(children: [
+          _IconBadge(icon: Icons.grid_view_rounded, color: Color(0xFF4f6ef7)),
+          SizedBox(width: 12),
+          Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('New Network Node',
@@ -217,10 +219,10 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
         return _GlassCard(child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              _IconBadge(icon: Icons.link_rounded, color: const Color(0xFF8b5cf6)),
-              const SizedBox(width: 12),
-              const Expanded(child: Column(
+            const Row(children: [
+              _IconBadge(icon: Icons.link_rounded, color: Color(0xFF8b5cf6)),
+              SizedBox(width: 12),
+              Expanded(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Join via Invite',
@@ -233,7 +235,6 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
             ]),
             const SizedBox(height: 16),
 
-            // Token input field
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               decoration: BoxDecoration(
@@ -241,7 +242,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                   color: isReady
-                      ? const Color(0xFF8b5cf6).withOpacity(0.5)
+                      ? const Color(0xFF8b5cf6).withValues(alpha: 0.5)
                       : const Color(0xFF2d3240),
                   width: 1.2,
                 ),
@@ -293,7 +294,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
                   Container(
                     width: 22, height: 22,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF22c55e).withOpacity(0.15),
+                      color: const Color(0xFF22c55e).withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.check_rounded, size: 14, color: Color(0xFF22c55e)),
@@ -319,7 +320,8 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
                       end: Alignment.centerRight,
                     )
                   : const LinearGradient(
-                      colors: [Color(0xFF1f2937), Color(0xFF1f2937)]),
+                      colors: [Color(0xFF1f2937), Color(0xFF1f2937)],
+                    ),
               onTap: _joinLedger,
             ),
           ],
@@ -329,20 +331,18 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
   }
 
   Widget _buildFooter() {
-    return const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(Icons.shield_outlined, size: 12, color: Color(0xFF374151)),
-      SizedBox(width: 5),
-      Text('All connections are end-to-end encrypted',
-          style: TextStyle(color: Color(0xFF374151), fontSize: 11)),
-    ]);
+    return const Center(
+      child: Text(
+        'Your data is end-to-end synced via Firebase',
+        style: TextStyle(color: Color(0xFF374151), fontSize: 12),
+      ),
+    );
   }
 }
 
-// ─── Reusable widgets ─────────────────────────────────────────────────────────
-
 class _GlassCard extends StatelessWidget {
-  const _GlassCard({required this.child});
   final Widget child;
+  const _GlassCard({required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -350,7 +350,7 @@ class _GlassCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF161922),
+        color: const Color(0xFF161b27),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFF1f2937), width: 1),
       ),
@@ -369,9 +369,9 @@ class _IconBadge extends StatelessWidget {
     return Container(
       width: 40, height: 40,
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.25), width: 1),
+        border: Border.all(color: color.withValues(alpha: 0.25), width: 1),
       ),
       child: Icon(icon, color: color, size: 18),
     );
@@ -433,8 +433,6 @@ class _GradientButton extends StatelessWidget {
     );
   }
 }
-
-// ─── Background network painter ───────────────────────────────────────────────
 
 class _NetworkPainter extends CustomPainter {
   _NetworkPainter(this.t);

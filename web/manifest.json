@@ -1,11 +1,11 @@
 {
-    "name": "synccash",
-    "short_name": "synccash",
+    "name": "SyncCash",
+    "short_name": "SyncCash",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0A0E17",
+    "theme_color": "#0A0E17",
+    "description": "Shared real-time cashbook for two.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

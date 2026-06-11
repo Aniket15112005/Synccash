@@ -1,139 +1,132 @@
-const admin = require("firebase-admin");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
-const logger = require("firebase-functions/logger");
+const { initializeApp } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+const { getMessaging } = require("firebase-admin/messaging");
 
-admin.initializeApp();
+initializeApp();
 
 exports.notifyTransactionAdded = onDocumentCreated(
-  "cashbooks/{cashbookId}/transactions/{transactionId}",
+  {
+    document: "cashbooks/{cashbookId}/transactions/{transactionId}",
+    region: "asia-south2",
+  },
   async (event) => {
-    try {
-      if (!event.data) {
-        logger.error("No transaction data received");
-        return;
+    const snap = event.data;
+    if (!snap) return;
+
+    const transaction = snap.data();
+    const cashbookId = event.params.cashbookId;
+
+    const db = getFirestore();
+    const messaging = getMessaging();
+
+    // 1. Get the cashbook to find both user IDs
+    const cashbookDoc = await db.collection("cashbooks").doc(cashbookId).get();
+    if (!cashbookDoc.exists) return;
+
+    const cashbook = cashbookDoc.data();
+    // Adjust field names to match YOUR Firestore cashbook document
+    const memberIds = cashbook.memberIds || cashbook.members || [];
+
+    // 2. The sender is the one who created the transaction
+    const senderId = transaction.createdBy || transaction.userId || transaction.addedBy;
+
+    // 3. Recipients = everyone in cashbook EXCEPT the sender
+    const recipientIds = memberIds.filter((id) => id !== senderId);
+    if (recipientIds.length === 0) return;
+
+    // 4. Collect all FCM tokens of recipients
+    const tokenFetches = recipientIds.map((uid) =>
+      db.collection("users").doc(uid).get()
+    );
+    const userDocs = await Promise.all(tokenFetches);
+
+    const allTokens = [];
+    userDocs.forEach((doc) => {
+      if (doc.exists) {
+        const tokens = doc.data().fcmTokens || [];
+        allTokens.push(...tokens);
       }
+    });
 
-      const transaction = event.data.data();
-      const cashbookId = event.params.cashbookId;
+    if (allTokens.length === 0) return;
 
-      logger.info(`New transaction in cashbook ${cashbookId}`);
+    // 5. Build a professional bank-style notification
+    const isIncome = transaction.type === "income";
+    const amount = transaction.amount || 0;
+    const category = transaction.category || transaction.note || "Transaction";
+    const senderName = transaction.addedByName || "Your partner";
 
-      // Get cashbook document
-      const cashbookRef = admin.firestore()
-        .collection("cashbooks")
-        .doc(cashbookId);
+    const formattedAmount = new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 0,
+    }).format(amount);
 
-      const cashbookSnap = await cashbookRef.get();
+    const title = isIncome
+      ? `+${formattedAmount} Income Added`
+      : `-${formattedAmount} Expense Added`;
 
-      if (!cashbookSnap.exists) {
-        logger.error("Cashbook document not found");
-        return;
-      }
+    const body = `${senderName} added ${category} to SyncCash`;
 
-      const cashbook = cashbookSnap.data();
-
-      const ownerId = cashbook.ownerId;
-      const participantId = cashbook.participantId;
-
-      const createdBy = transaction.createdBy;
-
-      if (!createdBy) {
-        logger.error("Transaction missing createdBy field");
-        return;
-      }
-
-      // Determine recipient
-      let receiverId;
-
-      if (createdBy === ownerId) {
-        receiverId = participantId;
-      } else if (createdBy === participantId) {
-        receiverId = ownerId;
-      } else {
-        logger.error("createdBy does not match owner or participant");
-        return;
-      }
-
-      // Load recipient user document
-      const userSnap = await admin.firestore()
-        .collection("users")
-        .doc(receiverId)
-        .get();
-
-      if (!userSnap.exists) {
-        logger.error(`User ${receiverId} not found`);
-        return;
-      }
-
-      const user = userSnap.data();
-
-      if (
-        !user.fcmTokens ||
-        !Array.isArray(user.fcmTokens) ||
-        user.fcmTokens.length === 0
-      ) {
-        logger.info(`No FCM tokens for user ${receiverId}`);
-        return;
-      }
-
-      const amount = transaction.amount || 0;
-      const description = transaction.description || "Transaction";
-      const creatorName = transaction.creatorName || "Someone";
-      const type = transaction.type || "";
-
-      const message = {
-        notification: {
-          title: "Cashbook Updated",
-          body: `${creatorName}: ₹${amount} - ${description}`,
-        },
-        data: {
-          cashbookId: cashbookId,
-          transactionId: event.params.transactionId,
-          type: type,
-        },
-        tokens: user.fcmTokens,
-      };
-
-      const response = await admin.messaging().sendMulticast(message);
-      logger.info(
-        `Notification sent. Success: ${response.successCount}, Failure: ${response.failureCount}`
-      );
-
-      // Remove invalid tokens automatically
-      const invalidTokens = [];
-
-      response.responses.forEach((resp, index) => {
-        if (!resp.success) {
-          const code = resp.error?.code || "";
-
+    // 6. Send to each token individually (handles stale tokens gracefully)
+    const sendPromises = allTokens.map((token) =>
+      messaging
+        .send({
+          token,
+          notification: { title, body },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "synccash_transactions",
+              sound: "default",
+              priority: "high",
+              visibility: "PUBLIC",
+              // Makes it look like a bank notification
+              color: isIncome ? "#22C55E" : "#EF4444",
+            },
+          },
+          apns: {
+            payload: {
+              aps: {
+                alert: { title, body },
+                sound: "default",
+                badge: 1,
+              },
+            },
+          },
+          data: {
+            cashbookId,
+            transactionId: event.params.transactionId,
+            type: transaction.type || "expense",
+            amount: String(amount),
+          },
+        })
+        .catch((err) => {
+          // If token is invalid/expired, remove it from Firestore
           if (
-            code.includes("registration-token-not-registered") ||
-            code.includes("invalid-registration-token")
+            err.code === "messaging/invalid-registration-token" ||
+            err.code === "messaging/registration-token-not-registered"
           ) {
-            invalidTokens.push(user.fcmTokens[index]);
+            return db
+              .collection("users")
+              .where("fcmTokens", "array-contains", token)
+              .get()
+              .then((snapshot) => {
+                snapshot.forEach((doc) => {
+                  doc.ref.update({
+                    fcmTokens: getFirestore.FieldValue
+                      ? getFirestore.FieldValue.arrayRemove(token)
+                      : snap.ref.firestore.FieldValue?.arrayRemove(token),
+                  });
+                });
+              });
           }
-        }
-      });
+          console.error("FCM send error:", err.code, err.message);
+        })
+    );
 
-      if (invalidTokens.length > 0) {
-        await admin.firestore()
-          .collection("users")
-          .doc(receiverId)
-          .update({
-            fcmTokens: admin.firestore.FieldValue.arrayRemove(
-              ...invalidTokens
-            ),
-          });
-
-        logger.info(
-          `Removed ${invalidTokens.length} invalid FCM token(s)`
-        );
-      }
-
-      return;
-    } catch (error) {
-      logger.error("Notification function failed:", error);
-      return;
-    }
+    await Promise.all(sendPromises);
+    console.log(`✅ Notified ${allTokens.length} device(s) for transaction in cashbook ${cashbookId}`);
   }
 );

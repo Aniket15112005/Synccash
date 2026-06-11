@@ -1,8 +1,43 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ── Network ──────────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- ── Notifications ────────────────────────────────────────────────── -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+
+    <!-- ── Storage (scoped storage API 30+, legacy below) ───────────────── -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+
     <application
-        android:label="synccash"
+        android:label="SyncCash"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+
+        <!-- Performance: allocate more heap for large transaction lists -->
+        android:largeHeap="true"
+
+        <!-- Faster startup: skip extracting .so files to disk -->
+        android:extractNativeLibs="false"
+
+        <!-- Hardware-accelerated rendering for the whole app -->
+        android:hardwareAccelerated="true"
+
+        <!-- Backup: disable to avoid restoring stale auth/session data -->
+        android:allowBackup="false"
+
+        <!-- Required for Android 13+ predictive back gesture -->
+        android:enableOnBackInvokedCallback="true">
+
+        <!-- ── Main activity ──────────────────────────────────────────── -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -11,35 +46,76 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
-            <!-- Specifies an Android theme to apply to this Activity as soon as
-                 the Android process has started. This theme is visible to the user
-                 while the Flutter UI initializes. After that, this theme continues
-                 to determine the Window background behind the Flutter UI. -->
+            android:windowSoftInputMode="adjustResize"
+
+            <!-- Smooth window background during cold start -->
+            android:screenOrientation="portrait">
+
             <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme"/>
+
+            <!-- Reduce Flutter startup jank: use impeller by default -->
+            <meta-data
+                android:name="io.flutter.embedding.android.EnableImpeller"
+                android:value="true"/>
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <!-- Don't delete the meta-data below.
-             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+
+        <!-- ── Flutter embedding ──────────────────────────────────────── -->
         <meta-data
             android:name="flutterEmbedding"
-            android:value="2" />
-    </application>
-    <!-- Required to query activities that can process text, see:
-         https://developer.android.com/training/package-visibility and
-         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+            android:value="2"/>
 
-         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+        <!-- ── FCM ───────────────────────────────────────────────────── -->
+        <service
+            android:name="com.google.firebase.messaging.FirebaseMessagingService"
+            android:exported="false">
+            <intent-filter android:priority="100">
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+
+        <!-- Channel ID must match NotificationService._androidChannel id -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="synccash_high"/>
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher"/>
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_color"/>
+
+    </application>
+
+    <!-- ── Package visibility (Android 11+) ─────────────────────────────── -->
     <queries>
+        <!-- Text processing (copy/paste) -->
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- share_plus -->
+        <intent>
+            <action android:name="android.intent.action.SEND"/>
+            <data android:mimeType="*/*"/>
+        </intent>
+        <!-- file_picker / open files -->
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT"/>
+        </intent>
+        <!-- Open PDF exports -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="application/pdf"/>
+        </intent>
     </queries>
+
 </manifest>

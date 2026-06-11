@@ -14,6 +14,9 @@ import 'package:synccash/features/transactions/presentation/providers/transactio
 import 'package:synccash/features/transactions/presentation/widgets/transaction_list_item.dart';
 import 'package:synccash/features/dashboard/presentation/widgets/balance_card.dart';
 import 'package:synccash/features/dashboard/presentation/widgets/synccash_filter_sheet.dart';
+import 'package:synccash/features/settings/presentation/screens/settings_screen.dart';
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -27,6 +30,8 @@ String _initial(String? name) {
   return (s == null || s.isEmpty) ? 'U' : s[0].toUpperCase();
 }
 
+// ── Screen ────────────────────────────────────────────────────────────────────
+
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
@@ -35,28 +40,29 @@ class DashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen>
-    with TickerProviderStateMixin {
-  late final AnimationController _fadeCtrl;
-  late final AnimationController _slideCtrl;
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entryCtrl;
   late final Animation<double> _fadeAnim;
   late final Animation<Offset> _slideAnim;
 
   @override
   void initState() {
     super.initState();
-    _fadeCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 480));
-    _slideCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 400));
-    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
-    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.055), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _slideCtrl, curve: Curves.easeOutCubic));
-    _fadeCtrl.forward();
-    _slideCtrl.forward();
+    _entryCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 460),
+    );
+    _fadeAnim = CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOut);
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.045),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOutCubic));
+    _entryCtrl.forward();
   }
 
   @override
   void dispose() {
-    _fadeCtrl.dispose();
-    _slideCtrl.dispose();
+    _entryCtrl.dispose();
     super.dispose();
   }
 
@@ -86,8 +92,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   parent: BouncingScrollPhysics(),
                 ),
                 slivers: [
-                  const SliverToBoxAdapter(child: _GreetingHeader()),
-                  const SliverToBoxAdapter(child: _BalanceCardSection()),
+                  const SliverToBoxAdapter(
+                    child: RepaintBoundary(child: _GreetingHeader()),
+                  ),
+                  const SliverToBoxAdapter(
+                    child: RepaintBoundary(child: _BalanceCardSection()),
+                  ),
                   const SliverToBoxAdapter(child: SizedBox(height: 28)),
                   SliverToBoxAdapter(
                     child: Padding(
@@ -142,7 +152,7 @@ class _AddFAB extends StatelessWidget {
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF2563EB).withOpacity(0.35),
+              color: const Color(0xFF2563EB).withValues(alpha: 0.35),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
@@ -169,7 +179,7 @@ class _AddFAB extends StatelessWidget {
   }
 }
 
-// ── Greeting ──────────────────────────────────────────────────────────────────
+// ── Greeting header ───────────────────────────────────────────────────────────
 
 class _GreetingHeader extends ConsumerWidget {
   const _GreetingHeader();
@@ -179,14 +189,19 @@ class _GreetingHeader extends ConsumerWidget {
       context: ctx,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Sign out', style: TextStyle(fontWeight: FontWeight.w600)),
+        title: const Text('Sign out',
+            style: TextStyle(fontWeight: FontWeight.w600)),
         content: const Text('Are you sure you want to sign out?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: Colors.red.shade400,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () {
               Navigator.pop(ctx);
@@ -217,6 +232,17 @@ class _GreetingHeader extends ConsumerWidget {
     );
   }
 
+  void _showSettings(BuildContext ctx) {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      useSafeArea: true,
+      builder: (_) => const SettingsSheet(),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final displayName = ref.watch(
@@ -229,6 +255,7 @@ class _GreetingHeader extends ConsumerWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          // ── Greeting text ──────────────────────────────────────────────────
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -252,12 +279,49 @@ class _GreetingHeader extends ConsumerWidget {
               ),
             ],
           ),
-          GestureDetector(
-            onTap: () {
-              HapticFeedback.lightImpact();
-              _showProfileSheet(context, ref);
-            },
-            child: _AvatarWidget(initial: _initial(displayName)),
+
+          // ── Action buttons ─────────────────────────────────────────────────
+          Row(
+            children: [
+              // Settings icon
+              GestureDetector(
+                onTap: () => _showSettings(context),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF111316),
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(color: const Color(0xFF202228)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.22),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.settings_rounded,
+                    size: 18,
+                    color: Color(0xFF9CA3AF),
+                  ),
+                ),
+              ),
+
+              const SizedBox(width: 10),
+
+              // Avatar / profile
+              GestureDetector(
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  _showProfileSheet(context, ref);
+                },
+                behavior: HitTestBehavior.opaque,
+                child: _AvatarWidget(initial: _initial(displayName)),
+              ),
+            ],
           ),
         ],
       ),
@@ -370,7 +434,9 @@ class _DashboardTransactionsSliver extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final filteredTxs = ref.watch(filteredTransactionsProvider(cashbookId));
-    final currentUserId = ref.watch(currentUserIdProvider.select((id) => id));
+    final currentUserId = ref.watch(
+      currentUserIdProvider.select((id) => id),
+    );
 
     return filteredTxs.when(
       data: (txs) {
@@ -389,7 +455,6 @@ class _DashboardTransactionsSliver extends ConsumerWidget {
             itemCount: itemCount,
             itemBuilder: (_, i) {
               final tx = txs[i];
-              final delay = Duration(milliseconds: 40 + i * 35);
               return Padding(
                 padding: EdgeInsets.only(bottom: i < itemCount - 1 ? 8 : 0),
                 child: RepaintBoundary(
@@ -398,13 +463,13 @@ class _DashboardTransactionsSliver extends ConsumerWidget {
                     transaction: tx,
                     currentUserId: currentUserId,
                   )
-                      .animate(delay: delay)
-                      .fadeIn(duration: 280.ms)
+                      .animate(delay: Duration(milliseconds: 40 + i * 35))
+                      .fadeIn(duration: 260.ms)
                       .slideY(
-                        begin: 0.04,
+                        begin: 0.035,
                         end: 0,
                         curve: Curves.easeOut,
-                        duration: 280.ms,
+                        duration: 260.ms,
                       ),
                 ),
               );
@@ -443,10 +508,10 @@ class _BalanceCardSkeleton extends StatelessWidget {
         border: Border.all(color: AppColors.border),
       ),
     ).animate().shimmer(
-      delay: 200.ms,
-      duration: 1200.ms,
-      color: Colors.white.withOpacity(0.03),
-    );
+          delay: 200.ms,
+          duration: 1200.ms,
+          color: Colors.white.withValues(alpha: 0.03),
+        );
   }
 }
 
@@ -470,7 +535,8 @@ class _TransactionListSkeleton extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 40, height: 40,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: AppColors.surfaceVariant,
                   borderRadius: BorderRadius.circular(12),
@@ -491,9 +557,10 @@ class _TransactionListSkeleton extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Container(
-                      height: 8, width: 70,
+                      height: 8,
+                      width: 70,
                       decoration: BoxDecoration(
-                        color: AppColors.surfaceVariant.withOpacity(0.5),
+                        color: AppColors.surfaceVariant.withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(5),
                       ),
                     ),
@@ -502,7 +569,8 @@ class _TransactionListSkeleton extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Container(
-                height: 13, width: 55,
+                height: 13,
+                width: 55,
                 decoration: BoxDecoration(
                   color: AppColors.surfaceVariant,
                   borderRadius: BorderRadius.circular(5),
@@ -512,11 +580,11 @@ class _TransactionListSkeleton extends StatelessWidget {
           ),
         )
             .animate(delay: Duration(milliseconds: i * 60))
-            .fadeIn(duration: 240.ms)
+            .fadeIn(duration: 220.ms)
             .then()
             .shimmer(
               duration: 1000.ms,
-              color: Colors.white.withOpacity(0.03),
+              color: Colors.white.withValues(alpha: 0.03),
             ),
       ),
     );
@@ -540,7 +608,8 @@ class _EmptyTransactions extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            width: 52, height: 52,
+            width: 52,
+            height: 52,
             decoration: BoxDecoration(
               color: AppColors.surfaceVariant,
               borderRadius: BorderRadius.circular(15),
@@ -552,8 +621,10 @@ class _EmptyTransactions extends StatelessWidget {
           const Text(
             'No transactions yet',
             style: TextStyle(
-              fontSize: 15, fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary, letterSpacing: -0.2,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+              letterSpacing: -0.2,
             ),
           ),
           const SizedBox(height: 5),
@@ -561,7 +632,9 @@ class _EmptyTransactions extends StatelessWidget {
             'Tap the button below to log your first entry.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 12, color: AppColors.textSecondary, height: 1.5,
+              fontSize: 12,
+              color: AppColors.textSecondary,
+              height: 1.5,
             ),
           ),
         ],
@@ -581,19 +654,22 @@ class _ErrorState extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.expense.withOpacity(0.06),
+        color: AppColors.expense.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.expense.withOpacity(0.15)),
+        border: Border.all(color: AppColors.expense.withValues(alpha: 0.15)),
       ),
       child: const Row(
         children: [
-          Icon(Icons.error_outline_rounded, color: AppColors.expense, size: 18),
+          Icon(Icons.error_outline_rounded,
+              color: AppColors.expense, size: 18),
           SizedBox(width: 10),
           Expanded(
             child: Text(
               'Something went wrong. Pull to refresh.',
               style: TextStyle(
-                fontSize: 13, color: AppColors.expense, fontWeight: FontWeight.w500,
+                fontSize: 13,
+                color: AppColors.expense,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ),
@@ -612,7 +688,8 @@ class _AvatarWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 40, height: 40,
+      width: 40,
+      height: 40,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
@@ -665,9 +742,10 @@ class _ProfileBottomSheet extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Container(
-              width: 36, height: 4,
+              width: 36,
+              height: 4,
               decoration: BoxDecoration(
-                color: theme.colorScheme.onSurfaceVariant.withOpacity(0.2),
+                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -683,7 +761,11 @@ class _ProfileBottomSheet extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xFF1E3A5F), Color(0xFF2563EB), Color(0xFF1D4ED8)],
+                    colors: [
+                      Color(0xFF1E3A5F),
+                      Color(0xFF2563EB),
+                      Color(0xFF1D4ED8),
+                    ],
                   ),
                 ),
               ),
@@ -692,7 +774,8 @@ class _ProfileBottomSheet extends StatelessWidget {
                 child: Stack(
                   children: [
                     Container(
-                      width: 80, height: 80,
+                      width: 80,
+                      height: 80,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         gradient: const LinearGradient(
@@ -700,26 +783,39 @@ class _ProfileBottomSheet extends StatelessWidget {
                           end: Alignment.bottomRight,
                           colors: [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
                         ),
-                        border: Border.all(color: theme.colorScheme.surface, width: 3),
-                        boxShadow: [BoxShadow(
-                          color: const Color(0xFF2563EB).withOpacity(0.3),
-                          blurRadius: 16, offset: const Offset(0, 6),
-                        )],
+                        border: Border.all(
+                            color: theme.colorScheme.surface, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF2563EB).withValues(alpha: 0.3),
+                            blurRadius: 16,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                       ),
                       child: Center(
-                        child: Text(initial, style: const TextStyle(
-                          fontSize: 30, fontWeight: FontWeight.w800,
-                          color: Colors.white, letterSpacing: -0.5,
-                        )),
+                        child: Text(
+                          initial,
+                          style: const TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
                       ),
                     ),
                     Positioned(
-                      bottom: 4, right: 4,
+                      bottom: 4,
+                      right: 4,
                       child: Container(
-                        width: 14, height: 14,
+                        width: 14,
+                        height: 14,
                         decoration: BoxDecoration(
-                          color: const Color(0xFF22C55E), shape: BoxShape.circle,
-                          border: Border.all(color: theme.colorScheme.surface, width: 2),
+                          color: const Color(0xFF22C55E),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                              color: theme.colorScheme.surface, width: 2),
                         ),
                       ),
                     ),
@@ -736,31 +832,42 @@ class _ProfileBottomSheet extends StatelessWidget {
                 Text(
                   displayName ?? 'User',
                   style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800, letterSpacing: -0.4,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
                   ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 5),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surfaceContainerLow,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: theme.colorScheme.outlineVariant.withOpacity(0.3),
+                      color:
+                          theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
                       width: 0.5,
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.mail_outline_rounded, size: 13,
-                          color: theme.colorScheme.onSurfaceVariant.withOpacity(0.6)),
+                      Icon(
+                        Icons.mail_outline_rounded,
+                        size: 13,
+                        color: theme.colorScheme.onSurfaceVariant
+                            .withValues(alpha: 0.6),
+                      ),
                       const SizedBox(width: 5),
-                      Text(email ?? '', style: TextStyle(
-                        fontSize: 13, color: theme.colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w500,
-                      )),
+                      Text(
+                        email ?? '',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -770,8 +877,10 @@ class _ProfileBottomSheet extends StatelessWidget {
           const SizedBox(height: 28),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Divider(height: 1,
-                color: theme.colorScheme.outlineVariant.withOpacity(0.2)),
+            child: Divider(
+              height: 1,
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.2),
+            ),
           ),
           const SizedBox(height: 8),
           Padding(
@@ -780,11 +889,13 @@ class _ProfileBottomSheet extends StatelessWidget {
               onTap: onLogout,
               borderRadius: BorderRadius.circular(16),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 14),
                 child: Row(
                   children: [
                     Container(
-                      width: 44, height: 44,
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(
                         color: Colors.red.shade50,
                         borderRadius: BorderRadius.circular(14),
@@ -797,19 +908,31 @@ class _ProfileBottomSheet extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Sign out', style: TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600,
-                            color: Colors.red.shade400,
-                          )),
-                          Text('You will need to log in again', style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
-                          )),
+                          Text(
+                            'Sign out',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.red.shade400,
+                            ),
+                          ),
+                          Text(
+                            'You will need to log in again',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.colorScheme.onSurfaceVariant
+                                  .withValues(alpha: 0.5),
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    Icon(Icons.chevron_right_rounded, size: 18,
-                        color: theme.colorScheme.onSurfaceVariant.withOpacity(0.3)),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color:
+                          theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                    ),
                   ],
                 ),
               ),

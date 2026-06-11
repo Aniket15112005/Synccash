@@ -32,13 +32,13 @@ class TransactionDetailsScreen extends StatelessWidget {
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 color: isIncome
-                    ? AppColors.income.withOpacity(0.08)
-                    : AppColors.expense.withOpacity(0.08),
+                    ? AppColors.income.withValues(alpha: 0.08)
+                    : AppColors.expense.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(
                   color: isIncome
-                      ? AppColors.income.withOpacity(0.25)
-                      : AppColors.expense.withOpacity(0.25),
+                      ? AppColors.income.withValues(alpha: 0.25)
+                      : AppColors.expense.withValues(alpha: 0.25),
                 ),
               ),
               child: Column(

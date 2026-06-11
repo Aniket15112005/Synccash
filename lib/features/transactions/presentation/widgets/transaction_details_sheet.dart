@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:synccash/app/theme/app_colors.dart';
 import 'package:synccash/core/utils/currency_formatter.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 

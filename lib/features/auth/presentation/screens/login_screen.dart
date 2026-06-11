@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -22,7 +23,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   bool _obscurePassword = true;
   bool _isLoading = false;
 
-  // Controller for ambient kinetic background motion
   late AnimationController _bgAnimationController;
 
   @override
@@ -55,14 +55,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     setState(() => _isLoading = true);
 
     try {
-      print("AUTH DEPLOY ---> Attempting login for: '$cleanEmail'");
+      if (kDebugMode) {
+        print("AUTH DEPLOY ---> Attempting login for: '$cleanEmail'");
+      }
       await ref.read(authRepositoryProvider).signInWithEmail(
             cleanEmail,
             cleanPassword,
           );
     } catch (e) {
       final errorMessage = e.toString();
-      print("AUTH FAILURE LOG ---> Raw Exception details: $errorMessage");
+      if (kDebugMode) {
+        print("AUTH FAILURE LOG ---> Raw Exception details: $errorMessage");
+      }
 
       String friendlyMessage =
           'Authentication failed. Please verify credentials or create a profile.';
@@ -82,7 +86,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(friendlyMessage),
-            backgroundColor: const Color(0xFFE5484D), // Premium slate red error
+            backgroundColor: const Color(0xFFE5484D),
             duration: const Duration(seconds: 4),
             behavior: SnackBarBehavior.floating,
             shape:
@@ -97,22 +101,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Premium Minimalist Grey Palette Matrix Definitions
-    const backgroundColor = Color(0xFF0B0C0E); // Deep Charcoal black background
-    const surfaceColor = Color(0xFF16171A); // Muted slate surface container
-    const borderDefault = Color(0xFF2A2C30); // Subdued grey border grid stroke
-    const textPrimary =
-        Color(0xFFEDEEF0); // Off-white high contrast readable text
-    const textSecondary =
-        Color(0xFF8A8E93); // Mid-tone cool grey body copy text
-    const primaryAccent =
-        Color(0xFFF3F4F6); // Clean modern crisp platinum interactive items
+    const backgroundColor = Color(0xFF0B0C0E);
+    const surfaceColor = Color(0xFF16171A);
+    const borderDefault = Color(0xFF2A2C30);
+    const textPrimary = Color(0xFFEDEEF0);
+    const textSecondary = Color(0xFF8A8E93);
+    const primaryAccent = Color(0xFFF3F4F6);
 
     return Scaffold(
       backgroundColor: backgroundColor,
       body: Stack(
         children: [
-          // --- Ambient Animated Kinetic Grey Mesh Gradients Background ---
           AnimatedBuilder(
             animation: _bgAnimationController,
             builder: (context, child) {
@@ -125,7 +124,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             },
           ),
 
-          // --- Main Content Interactive Layer ---
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -135,12 +133,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   constraints: const BoxConstraints(maxWidth: 420),
                   padding: const EdgeInsets.all(32.0),
                   decoration: BoxDecoration(
-                    color: surfaceColor.withOpacity(0.75),
+                    color: surfaceColor.withValues(alpha: 0.75),
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: borderDefault.withOpacity(0.5)),
+                    border: Border.all(color: borderDefault.withValues(alpha: 0.5)),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.4),
+                        color: Colors.black.withValues(alpha: 0.4),
                         blurRadius: 40,
                         offset: const Offset(0, 20),
                       ),
@@ -152,7 +150,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // --- Header Branding Layout Section ---
                         Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -165,8 +162,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                 border: Border.all(color: borderDefault),
                               ),
                               child: const Icon(
-                                Icons
-                                    .blur_on_rounded, // Premium tech aesthetic geometric icon
+                                Icons.blur_on_rounded,
                                 size: 28,
                                 color: textPrimary,
                               ),
@@ -200,7 +196,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
                         const SizedBox(height: 36),
 
-                        // --- Input Fields Container Block ---
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -259,29 +254,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
+                            const Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text(
+                                Text(
                                   'Password',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: textSecondary,
                                     fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                GestureDetector(
-                                  onTap: () {
-                                    // Configuration linkage pathway hook for reset handling
-                                  },
-                                  child: const Text(
-                                    'Forgot password?',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: textSecondary,
-                                      fontWeight: FontWeight.w500,
-                                      decoration: TextDecoration.underline,
-                                    ),
                                   ),
                                 ),
                               ],
@@ -290,7 +271,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             TextFormField(
                               controller: _passwordController,
                               obscureText: _obscurePassword,
-                              autofillHints: const [AutofillHints.password],
                               textInputAction: TextInputAction.done,
                               style: const TextStyle(
                                   color: textPrimary, fontSize: 14),
@@ -336,14 +316,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
                         const SizedBox(height: 32),
 
-                        // --- Interactive Primary Button ---
                         ElevatedButton(
                           onPressed: _isLoading ? null : _login,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: primaryAccent,
                             foregroundColor: backgroundColor,
                             disabledBackgroundColor:
-                                primaryAccent.withOpacity(0.3),
+                                primaryAccent.withValues(alpha: 0.3),
                             elevation: 0,
                             padding: const EdgeInsets.symmetric(vertical: 15),
                             shape: RoundedRectangleBorder(
@@ -383,7 +362,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
                         const SizedBox(height: 24),
 
-                        // --- Create Profile Secondary Text Trigger Row ---
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -417,7 +395,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     );
   }
 
-  /// Master Slate/Grey Clean Input Structurizer Decoration Framework
   InputDecoration _buildGreyInputDecoration({
     required String hint,
     required IconData prefixIcon,
@@ -429,9 +406,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     return InputDecoration(
       hintText: hint,
       hintStyle:
-          TextStyle(color: textSecondary.withOpacity(0.35), fontSize: 14),
+          TextStyle(color: textSecondary.withValues(alpha: 0.35), fontSize: 14),
       prefixIcon:
-          Icon(prefixIcon, size: 18, color: textSecondary.withOpacity(0.7)),
+          Icon(prefixIcon, size: 18, color: textSecondary.withValues(alpha: 0.7)),
       suffixIcon: suffixIcon,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       filled: true,
@@ -443,7 +420,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: borderDefault.withOpacity(0.7)),
+        borderSide: BorderSide(color: borderDefault.withValues(alpha: 0.7)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
@@ -461,7 +438,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   }
 }
 
-/// --- Custom Background Painter for Ambient, Flowing Slate Radial Glows ---
 class _AmbientBackgroundPainter extends CustomPainter {
   final double progress;
   _AmbientBackgroundPainter({required this.progress});
@@ -470,19 +446,17 @@ class _AmbientBackgroundPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..style = PaintingStyle.fill;
 
-    // Calculate fluid structural drift offsets across time spectrum parameters
     final double radians = progress * 2 * math.pi;
     final double dx = math.sin(radians) * 40;
     final double dy = math.cos(radians) * 30;
 
-    // Ambient Center Center Glow Matrix Definition
     final centerGlow = Offset(size.width * 0.5 + dx, size.height * 0.4 + dy);
     final centerGradient = RadialGradient(
       center: Alignment.center,
       radius: 1.2,
       colors: [
-        const Color(0xFF1F2124).withOpacity(0.35), // Dark Charcoal Highlight
-        const Color(0xFF0B0C0E).withOpacity(0.0),
+        const Color(0xFF1F2124).withValues(alpha: 0.35),
+        const Color(0xFF0B0C0E).withValues(alpha: 0.0),
       ],
     );
 
@@ -491,14 +465,13 @@ class _AmbientBackgroundPainter extends CustomPainter {
     );
     canvas.drawCircle(centerGlow, size.width * 0.9, paint);
 
-    // Complementary Low-Opacity Structural Mesh Point Accent Top Right
     final cornerGlow = Offset(size.width * 0.85 - dx, size.height * 0.15 - dy);
     final cornerGradient = RadialGradient(
       center: Alignment.center,
       radius: 0.8,
       colors: [
-        const Color(0xFF2E3136).withOpacity(0.18),
-        const Color(0xFF0B0C0E).withOpacity(0.0),
+        const Color(0xFF2E3136).withValues(alpha: 0.18),
+        const Color(0xFF0B0C0E).withValues(alpha: 0.0),
       ],
     );
 

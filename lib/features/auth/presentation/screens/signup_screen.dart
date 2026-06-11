@@ -104,12 +104,12 @@ class _SignupScreenState extends ConsumerState<SignupScreen> with TickerProvider
                   constraints: const BoxConstraints(maxWidth: 420),
                   padding: const EdgeInsets.all(32.0),
                   decoration: BoxDecoration(
-                    color: surfaceColor.withOpacity(0.75),
+                    color: surfaceColor.withValues(alpha: 0.75),
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: borderDefault.withOpacity(0.5)),
+                    border: Border.all(color: borderDefault.withValues(alpha: 0.5)),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.4),
+                        color: Colors.black.withValues(alpha: 0.4),
                         blurRadius: 40,
                         offset: const Offset(0, 20),
                       ),
@@ -129,7 +129,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> with TickerProvider
                               onPressed: () => context.pop(),
                               style: IconButton.styleFrom(
                                 backgroundColor: backgroundColor,
-                                side: BorderSide(color: borderDefault.withOpacity(0.6)),
+                                side: BorderSide(color: borderDefault.withValues(alpha: 0.6)),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 padding: const EdgeInsets.all(10),
                               ),
@@ -139,10 +139,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> with TickerProvider
 
                         const SizedBox(height: 20),
                         
-                        Column(
+                        const Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
+                            Text(
                               'Register Operator',
                               style: TextStyle(
                                 fontSize: 24,
@@ -151,8 +151,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> with TickerProvider
                                 color: textPrimary,
                               ),
                             ),
-                            const SizedBox(height: 6),
-                            const Text(
+                            SizedBox(height: 6),
+                            Text(
                               'Initialize a secure corporate ledger account wrapper.',
                               style: TextStyle(
                                 fontSize: 13,
@@ -312,7 +312,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> with TickerProvider
                           style: ElevatedButton.styleFrom(
                             backgroundColor: primaryAccent,
                             foregroundColor: backgroundColor,
-                            disabledBackgroundColor: primaryAccent.withOpacity(0.3),
+                            disabledBackgroundColor: primaryAccent.withValues(alpha: 0.3),
                             elevation: 0,
                             padding: const EdgeInsets.symmetric(vertical: 15),
                             shape: RoundedRectangleBorder(
@@ -366,8 +366,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> with TickerProvider
   }) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(color: textSecondary.withOpacity(0.35), fontSize: 14),
-      prefixIcon: Icon(prefixIcon, size: 18, color: textSecondary.withOpacity(0.7)),
+      hintStyle: TextStyle(color: textSecondary.withValues(alpha: 0.35), fontSize: 14),
+      prefixIcon: Icon(prefixIcon, size: 18, color: textSecondary.withValues(alpha: 0.7)),
       suffixIcon: suffixIcon,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       filled: true,
@@ -379,7 +379,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> with TickerProvider
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: borderDefault.withOpacity(0.7)),
+        borderSide: BorderSide(color: borderDefault.withValues(alpha: 0.7)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
@@ -414,8 +414,8 @@ class _AmbientBackgroundPainter extends CustomPainter {
       center: Alignment.center,
       radius: 1.2,
       colors: [
-        const Color(0xFF1F2124).withOpacity(0.35),
-        const Color(0xFF0B0C0E).withOpacity(0.0),
+        const Color(0xFF1F2124).withValues(alpha: 0.35),
+        const Color(0xFF0B0C0E).withValues(alpha: 0.0),
       ],
     );
 
@@ -429,8 +429,8 @@ class _AmbientBackgroundPainter extends CustomPainter {
       center: Alignment.center,
       radius: 0.8,
       colors: [
-        const Color(0xFF2E3136).withOpacity(0.18),
-        const Color(0xFF0B0C0E).withOpacity(0.0),
+        const Color(0xFF2E3136).withValues(alpha: 0.18),
+        const Color(0xFF0B0C0E).withValues(alpha: 0.0),
       ],
     );
 

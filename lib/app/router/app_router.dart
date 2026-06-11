@@ -29,22 +29,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state.matchedLocation == RouteConstants.login ||
           state.matchedLocation == RouteConstants.signup;
 
-      // Not logged in → force login
       if (!loggedIn && !isAuthRoute) {
         return RouteConstants.login;
       }
 
-      // Logged in → block auth screens
       if (loggedIn && isAuthRoute) {
-        final hasCashbook = user!.currentCashbookId != null;
+        final hasCashbook = user.currentCashbookId != null;
         return hasCashbook
             ? RouteConstants.dashboard
             : RouteConstants.pairing;
       }
 
-      // Splash handling
       if (loggedIn && state.matchedLocation == RouteConstants.splash) {
-        final hasCashbook = user!.currentCashbookId != null;
+        final hasCashbook = user.currentCashbookId != null;
         return hasCashbook
             ? RouteConstants.dashboard
             : RouteConstants.pairing;
