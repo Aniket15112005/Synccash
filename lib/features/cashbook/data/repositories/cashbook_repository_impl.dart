@@ -9,54 +9,96 @@ class CashbookRepositoryImpl implements CashbookRepository {
 
   String _generateInviteCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    return String.fromCharCodes(Iterable.generate(6, (_) => chars.codeUnitAt(Random().nextInt(chars.length))));
+    return String.fromCharCodes(
+      Iterable.generate(6, (_) => chars.codeUnitAt(Random().nextInt(chars.length))),
+    );
   }
 
   @override
   Future<CashbookEntity> createCashbook(String userId) async {
+    if (userId.isEmpty) throw Exception('User not authenticated.');
+
     final code = _generateInviteCode();
     final docRef = _firestore.collection('cashbooks').doc();
+
     final model = CashbookModel(
       id: docRef.id,
       inviteCode: code,
       ownerId: userId,
+      participantId: null,
       totalBalance: 0.0,
       totalIncome: 0.0,
       totalExpense: 0.0,
     );
-    
-    await _firestore.runTransaction((transaction) async {
-      transaction.set(docRef, model.toJson());
-      transaction.update(_firestore.collection('users').doc(userId), {'currentCashbookId': docRef.id});
-    });
+
+    // Write cashbook doc
+    await docRef.set(model.toJson());
+
+    // Use set+merge so it works whether the user doc exists or not
+    await _firestore
+        .collection('users')
+        .doc(userId)
+        .set({'currentCashbookId': docRef.id}, SetOptions(merge: true));
+
     return model;
   }
 
   @override
   Future<CashbookEntity> joinCashbook(String userId, String inviteCode) async {
-    final query = await _firestore.collection('cashbooks')
-        .where('inviteCode', isEqualTo: inviteCode.toUpperCase().trim())
+    if (userId.isEmpty) throw Exception('User not authenticated.');
+
+    final cleanCode = inviteCode.toUpperCase().trim();
+
+    final query = await _firestore
+        .collection('cashbooks')
+        .where('inviteCode', isEqualTo: cleanCode)
         .limit(1)
         .get();
 
-    if (query.docs.isEmpty) throw Exception('Validation Failed: Code not recognized.');
+    if (query.docs.isEmpty) {
+      throw Exception('Validation Failed: Code not recognized.');
+    }
+
     final doc = query.docs.first;
     final cashbook = CashbookModel.fromJson(doc.data(), doc.id);
 
-    if (cashbook.participantId != null) throw Exception('Terminal Access Denied: Channel Busy.');
+    // Block if already has a participant (null AND empty string both mean "free")
+    final pid = cashbook.participantId;
+    if (pid != null && pid.isNotEmpty) {
+      throw Exception('Terminal Access Denied: Channel Busy.');
+    }
 
-    await _firestore.runTransaction((transaction) async {
-      transaction.update(doc.reference, {'participantId': userId});
-      transaction.update(_firestore.collection('users').doc(userId), {'currentCashbookId': doc.id});
-    });
+    // Block owner from joining their own cashbook
+    if (cashbook.ownerId == userId) {
+      throw Exception('Cannot join your own cashbook.');
+    }
 
-    return cashbook;
+    // Direct update — no transaction needed
+    await doc.reference.update({'participantId': userId});
+
+    // Use set+merge so it works whether the user doc exists or not
+    await _firestore
+        .collection('users')
+        .doc(userId)
+        .set({'currentCashbookId': doc.id}, SetOptions(merge: true));
+
+    return CashbookModel(
+      id: doc.id,
+      inviteCode: cashbook.inviteCode,
+      ownerId: cashbook.ownerId,
+      participantId: userId,
+      totalBalance: cashbook.totalBalance,
+      totalIncome: cashbook.totalIncome,
+      totalExpense: cashbook.totalExpense,
+    );
   }
 
   @override
   Stream<CashbookEntity> watchCashbook(String cashbookId) {
-    return _firestore.collection('cashbooks').doc(cashbookId).snapshots().map((doc) {
-      return CashbookModel.fromJson(doc.data()!, doc.id);
-    });
+    return _firestore
+        .collection('cashbooks')
+        .doc(cashbookId)
+        .snapshots()
+        .map((doc) => CashbookModel.fromJson(doc.data()!, doc.id));
   }
 }

@@ -1,7 +1,10 @@
+// lib/features/pairing/presentation/pairing_screen.dart
+
 import 'dart:math';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
 import 'package:synccash/features/cashbook/presentation/providers/cashbook_provider.dart';
 
 class PairingScreen extends ConsumerStatefulWidget {
@@ -40,10 +43,12 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
     if (_createLoading) return;
     setState(() => _createLoading = true);
     try {
-      final user = ref.read(authProvider).value;
-      if (user != null) {
-        await ref.read(cashbookRepositoryProvider).createCashbook(user.uid);
+      // Use FirebaseAuth.instance.currentUser — synchronous, always reliable
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || user.uid.isEmpty) {
+        throw Exception('Please sign out and sign back in to continue.');
       }
+      await ref.read(cashbookRepositoryProvider).createCashbook(user.uid);
     } catch (e) {
       if (mounted) {
         _showError(e.toString());
@@ -53,13 +58,17 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
   }
 
   Future<void> _joinLedger() async {
-    final code = _codeController.text.trim();
+    final code = _codeController.text.trim().toUpperCase();
     if (code.length != 6 || _joinLoading) return;
     _codeFocus.unfocus();
     setState(() => _joinLoading = true);
     try {
-      final user = ref.read(authProvider).value;
-      await ref.read(cashbookRepositoryProvider).joinCashbook(user!.uid, code);
+      // Use FirebaseAuth.instance.currentUser — synchronous, always reliable
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || user.uid.isEmpty) {
+        throw Exception('Please sign out and sign back in to continue.');
+      }
+      await ref.read(cashbookRepositoryProvider).joinCashbook(user.uid, code);
     } catch (e) {
       if (mounted) {
         _showError(e.toString());
@@ -228,7 +237,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
                   Text('Join via Invite',
                       style: TextStyle(color: Color(0xFFe5e7eb), fontSize: 15, fontWeight: FontWeight.w600)),
                   SizedBox(height: 2),
-                  Text('Enter your 6-digit secure token',
+                  Text('Enter your 6-character secure token',
                       style: TextStyle(color: Color(0xFF6b7280), fontSize: 12)),
                 ],
               )),
@@ -259,7 +268,8 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
                   child: TextField(
                     controller: _codeController,
                     focusNode: _codeFocus,
-                    keyboardType: TextInputType.number,
+                    keyboardType: TextInputType.visiblePassword,
+                    textCapitalization: TextCapitalization.characters,
                     maxLength: 6,
                     style: const TextStyle(
                       color: Color(0xFFe5e7eb),
@@ -279,15 +289,15 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
                       counterText: '',
                       contentPadding: EdgeInsets.zero,
                     ),
-                    onChanged: (v) {
-                      final digits = v.replaceAll(RegExp(r'\D'), '');
-                      if (digits != v) {
-                        _codeController.value = _codeController.value.copyWith(
-                          text: digits,
-                          selection: TextSelection.collapsed(offset: digits.length),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+                      TextInputFormatter.withFunction((oldValue, newValue) {
+                        return newValue.copyWith(
+                          text: newValue.text.toUpperCase(),
+                          selection: newValue.selection,
                         );
-                      }
-                    },
+                      }),
+                    ],
                   ),
                 ),
                 if (isReady)
@@ -304,7 +314,7 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
 
             Padding(
               padding: const EdgeInsets.only(left: 4, top: 6, bottom: 12),
-              child: Text('${code.length}/6 digits entered',
+              child: Text('${code.length}/6 characters entered',
                   style: const TextStyle(color: Color(0xFF374151), fontSize: 11)),
             ),
 

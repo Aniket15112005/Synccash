@@ -20,48 +20,95 @@ exports.notifyTransactionAdded = onDocumentCreated(
     const db = getFirestore();
     const messaging = getMessaging();
 
-    // 1. Get the cashbook to find both user IDs
+    // 1. Get cashbook
     const cashbookDoc = await db.collection("cashbooks").doc(cashbookId).get();
     if (!cashbookDoc.exists) return;
 
     const cashbook = cashbookDoc.data();
 
-    // ownerId + participantId are the two members
-    const ownerId = cashbook.ownerId;
-    const participantId = cashbook.participantId;
-    const memberIds = [ownerId, participantId].filter(Boolean);
+    // 2. Identify sender
+    const senderId =
+      transaction.createdBy ||
+      transaction.userId ||
+      transaction.addedBy ||
+      transaction.uid;
 
-    // 2. The sender is the one who created the transaction
-    const senderId = transaction.createdBy || transaction.userId || transaction.addedBy;
-
-    // 3. Recipients = the other person only
-    const recipientIds = memberIds.filter((id) => id !== senderId);
-    if (recipientIds.length === 0) return;
-
-    // 4. Collect all FCM tokens of recipients
-    const userDocs = await Promise.all(
-      recipientIds.map((uid) => db.collection("users").doc(uid).get())
-    );
-
-    const allTokens = [];
-    userDocs.forEach((doc) => {
-      if (doc.exists) {
-        const tokens = doc.data().fcmTokens || [];
-        allTokens.push(...tokens);
-      }
-    });
-
-    if (allTokens.length === 0) {
-      console.log("No FCM tokens found for recipients:", recipientIds);
+    if (!senderId) {
+      console.error(
+        "❌ Cannot determine senderId. Transaction is missing createdBy/userId/addedBy/uid."
+      );
       return;
     }
-    const uniqueTokens = [...new Set(allTokens)];
 
-    // 5. Build notification content
+    // 3. Fixed notification receiver — only this user ever gets notified.
+    //    Set notificationReceiverId on your cashbook document in Firestore.
+    //    If not set, falls back to the other member (original behaviour).
+    const notificationReceiverId =
+      cashbook.notificationReceiverId ||
+      [cashbook.ownerId, cashbook.participantId]
+        .filter(Boolean)
+        .find((id) => id !== senderId);
+
+    if (!notificationReceiverId) {
+      console.log("No recipient found — cashbook may only have one member.");
+      return;
+    }
+
+    // 4. Never notify the sender — even if they are somehow the designated receiver
+    if (notificationReceiverId === senderId) {
+      console.log(
+        `Sender (${senderId}) is the designated receiver — no notification sent.`
+      );
+      return;
+    }
+
+    console.log(
+      `senderId: ${senderId} | notificationReceiverId: ${notificationReceiverId}`
+    );
+
+    // 5. Fetch receiver's FCM tokens
+    const receiverDoc = await db
+      .collection("users")
+      .doc(notificationReceiverId)
+      .get();
+
+    if (!receiverDoc.exists) {
+      console.log("Receiver user document not found:", notificationReceiverId);
+      return;
+    }
+
+    const rawTokens = receiverDoc.data().fcmTokens || [];
+    if (rawTokens.length === 0) {
+      console.log("No FCM tokens for receiver:", notificationReceiverId);
+      return;
+    }
+
+    // Deduplicate — one device should never get two notifications
+    const tokens = [...new Set(rawTokens)];
+
+    // 6. SAFETY NET — also fetch sender's tokens and strip them out.
+    //    Guards against edge cases where sender's token ends up in receiver's list.
+    const senderDoc = await db.collection("users").doc(senderId).get();
+    const senderTokenSet = new Set(
+      senderDoc.exists ? (senderDoc.data().fcmTokens || []) : []
+    );
+    const safeTokens = tokens.filter((t) => !senderTokenSet.has(t));
+
+    if (safeTokens.length === 0) {
+      console.log("No safe tokens to send to after stripping sender tokens.");
+      return;
+    }
+
+    console.log(
+      `Sending to ${safeTokens.length} token(s) for receiver ${notificationReceiverId}`
+    );
+
+    // 7. Build notification payload
     const isIncome = transaction.type === "income";
-    const amount = transaction.amount || 0;
+    const amount = Number(transaction.amount) || 0;
     const category = transaction.category || transaction.note || "Transaction";
-    const senderName = transaction.addedByName || "Your partner";
+    const senderName =
+      transaction.addedByName || transaction.createdByName || "Your partner";
 
     const formattedAmount = new Intl.NumberFormat("en-IN", {
       style: "currency",
@@ -75,59 +122,77 @@ exports.notifyTransactionAdded = onDocumentCreated(
 
     const body = `${senderName} added ${category} to SyncCash`;
 
-    // 6. Send to each token, clean up stale ones
-    const sendPromises = allTokens.map((token) =>
+    const baseMessage = {
+      notification: { title, body },
+      android: {
+        priority: "high",
+        notification: {
+          channelId: "synccash_transactions",
+          sound: "default",
+          priority: "high",
+          visibility: "PUBLIC",
+          color: isIncome ? "#22C55E" : "#EF4444",
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            alert: { title, body },
+            sound: "default",
+            badge: 1,
+          },
+        },
+      },
+      data: {
+        cashbookId,
+        transactionId: event.params.transactionId,
+        type: transaction.type || "expense",
+        amount: String(amount),
+      },
+    };
+
+    // 8. Send and collect stale tokens
+    const staleTokens = [];
+
+    const sendPromises = safeTokens.map((token) =>
       messaging
-        .send({
-          token,
-          notification: { title, body },
-          android: {
-            priority: "high",
-            notification: {
-              channelId: "synccash_transactions",
-              sound: "default",
-              priority: "high",
-              visibility: "PUBLIC",
-              color: isIncome ? "#22C55E" : "#EF4444",
-            },
-          },
-          apns: {
-            payload: {
-              aps: {
-                alert: { title, body },
-                sound: "default",
-                badge: 1,
-              },
-            },
-          },
-          data: {
-            cashbookId,
-            transactionId: event.params.transactionId,
-            type: transaction.type || "expense",
-            amount: String(amount),
-          },
-        })
-        .catch(async (err) => {
+        .send({ ...baseMessage, token })
+        .catch((err) => {
           if (
             err.code === "messaging/invalid-registration-token" ||
             err.code === "messaging/registration-token-not-registered"
           ) {
-            // Remove stale token from Firestore
-            const snapshot = await db
-              .collection("users")
-              .where("fcmTokens", "array-contains", token)
-              .get();
-            snapshot.forEach((doc) => {
-              doc.ref.update({ fcmTokens: FieldValue.arrayRemove(token) });
-            });
-            console.log("Removed stale token:", token.slice(0, 20) + "...");
+            staleTokens.push(token);
+            console.log("Stale token queued:", token.slice(0, 20) + "...");
           } else {
-            console.error("FCM send error:", err.code, err.message);
+            console.error("FCM error:", err.code, err.message);
           }
         })
     );
 
     await Promise.all(sendPromises);
-    console.log(`✅ Notified ${allTokens.length} device(s) for cashbook ${cashbookId}`);
+
+    // 9. Batch-remove stale tokens
+    if (staleTokens.length > 0) {
+      const staleSnapshots = await Promise.all(
+        staleTokens.map((token) =>
+          db.collection("users").where("fcmTokens", "array-contains", token).get()
+        )
+      );
+      const batch = db.batch();
+      staleSnapshots.forEach((snapshot, i) => {
+        snapshot.forEach((doc) => {
+          batch.update(doc.ref, {
+            fcmTokens: FieldValue.arrayRemove(staleTokens[i]),
+          });
+        });
+      });
+      await batch.commit();
+      console.log(`🗑️ Removed ${staleTokens.length} stale token(s)`);
+    }
+
+    console.log(
+      `✅ Notified receiver (${notificationReceiverId}) | sender (${senderId}) excluded`
+    );
   }
 );
