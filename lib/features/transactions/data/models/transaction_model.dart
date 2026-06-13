@@ -14,18 +14,15 @@ class TransactionModel extends TransactionEntity {
     required super.description,
   });
 
-  /// Safely parse Firestore JSON maps into a clean Dart Entity Model object
   factory TransactionModel.fromJson(Map<String, dynamic> json, String documentId) {
     return TransactionModel(
       transactionId: documentId,
       cashbookId: json['cashbookId'] as String? ?? '',
       createdBy: json['createdBy'] as String? ?? '',
-      // Safe defaults to protect against null accounts or missing values:
       creatorName: json['creatorName'] as String? ?? 'Partner',
       category: json['category'] as String? ?? 'General',
       description: json['description'] as String? ?? '',
       type: json['type'] as String? ?? 'OUTFLOW',
-      // Convert integers to doubles safely to avoid runtime casting dropouts
       amount: (json['amount'] ?? 0.0).toDouble(),
       createdAt: json['createdAt'] != null
           ? (json['createdAt'] as Timestamp).toDate()
@@ -33,7 +30,11 @@ class TransactionModel extends TransactionEntity {
     );
   }
 
-  /// Convert model fields cleanly to map structures for database transactions
+  factory TransactionModel.fromFirestore(
+      DocumentSnapshot<Map<String, dynamic>> doc) {
+    return TransactionModel.fromJson(doc.data()!, doc.id);
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'transactionId': transactionId,

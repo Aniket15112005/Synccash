@@ -15,7 +15,7 @@ class SyncCashApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.dark, // Defaulting to premium dark theme for fintech feel
+      themeMode: ThemeMode.dark,
       routerConfig: router,
     );
   }

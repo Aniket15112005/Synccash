@@ -7,7 +7,9 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepositoryImpl();
 });
 
-final authProvider = StreamProvider<UserEntity?>((ref) {
+// REPLACE WITH (add keepAlive so the stream isn't cancelled on navigation):
+final authProvider = StreamProvider.autoDispose<UserEntity?>((ref) {
+  ref.keepAlive();   // ← prevents stream from restarting on widget unmount
   return ref.read(authRepositoryProvider).authStateChanges;
 });
 

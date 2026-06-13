@@ -11,8 +11,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:synccash/features/cashbook/domain/entities/cashbook_entity.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 
-// ── Backup file model ─────────────────────────────────────────────────────────
-
 class SyncCashBackup {
   static const String currentVersion = '1.0.0';
   static const String fileExtension  = 'synccash';
@@ -102,12 +100,8 @@ class BackupValidationException implements Exception {
   String toString() => message;
 }
 
-// ── Backup service ────────────────────────────────────────────────────────────
-
 class BackupService {
   static final _fileDateFmt = DateFormat('yyyyMMdd_HHmmss');
-
-  // ── Create & share backup ─────────────────────────────────────────────────
 
   static Future<void> createBackup({
     required BuildContext context,
@@ -129,7 +123,6 @@ class BackupService {
         '.${SyncCashBackup.fileExtension}';
 
     if (kIsWeb) {
-      // Web / iOS PWA: use in-memory XFile — no path_provider needed
       await SharePlus.instance.share(
         ShareParams(
           files: [
@@ -138,12 +131,10 @@ class BackupService {
                 mimeType: SyncCashBackup.mimeType)
           ],
           subject: fileName,
-          text:
-              'SyncCash backup — ${transactions.length} transactions',
+          text: 'SyncCash backup — ${transactions.length} transactions',
         ),
       );
     } else {
-      // Android / iOS native: write to temp file then share
       final dir  = await getTemporaryDirectory();
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(bytes, flush: true);
@@ -151,56 +142,79 @@ class BackupService {
         ShareParams(
           files: [XFile(file.path, mimeType: SyncCashBackup.mimeType)],
           subject: fileName,
-          text:
-              'SyncCash backup — ${transactions.length} transactions',
+          text: 'SyncCash backup — ${transactions.length} transactions',
         ),
       );
     }
   }
 
-  // ── Pick & parse backup file ──────────────────────────────────────────────
-
   static Future<SyncCashBackup?> pickAndParseBackup(
       BuildContext context) async {
     FilePickerResult? result;
+
+    // FIX: Use FileType.any on ALL platforms (web, iOS, Android).
+    // FileType.custom causes a dark/greyed-out picker on Android because
+    // the system file manager doesn't recognise .synccash as a known MIME type.
+    // We validate the extension ourselves after the user picks.
     try {
       result = await FilePicker.platform.pickFiles(
-        type:              FileType.custom,
-        allowedExtensions: [SyncCashBackup.fileExtension, 'json'],
-        withData:          true,
-        dialogTitle:       'Select SyncCash Backup File',
+        type:        FileType.any,
+        withData:    true,
+        dialogTitle: 'Select SyncCash Backup File',
       );
     } catch (_) {
-      // Fallback: no extension filter (some platforms don't support it)
-      result = await FilePicker.platform.pickFiles(withData: true);
+      result = null;
     }
 
     if (result == null || result.files.isEmpty) return null;
 
     final picked = result.files.first;
-    final bytes  = picked.bytes;
+
+    final pickedName = picked.name.toLowerCase();
+    if (!pickedName.endsWith('.${SyncCashBackup.fileExtension}') &&
+        !pickedName.endsWith('.json')) {
+      throw BackupValidationException(
+          'Wrong file type selected. Please pick a file ending in '
+          '.${SyncCashBackup.fileExtension}');
+    }
+
+    Uint8List? bytes = picked.bytes;
+
+    if ((bytes == null || bytes.isEmpty) && !kIsWeb && picked.path != null) {
+      try {
+        bytes = await File(picked.path!).readAsBytes();
+      } catch (_) {}
+    }
 
     if (bytes == null || bytes.isEmpty) {
       throw BackupValidationException(
-          'Could not read the selected file. Please try again.');
+          'Could not read the selected file.\n\n'
+          'On iPhone: open the Files app, locate the backup, then try again. '
+          'Make sure the file has fully downloaded from iCloud first.');
     }
 
-    final raw = utf8.decode(bytes);
+    String raw;
+    try {
+      raw = utf8.decode(bytes, allowMalformed: false);
+    } catch (_) {
+      throw BackupValidationException(
+          'The file could not be read — it may be corrupted or not a valid '
+          'SyncCash backup.');
+    }
+
     Map<String, dynamic> jsonMap;
     try {
       jsonMap = jsonDecode(raw) as Map<String, dynamic>;
     } catch (_) {
       throw BackupValidationException(
-          'Invalid backup file. The file is not a valid SyncCash backup.');
+          'Invalid backup file. The selected file is not a valid SyncCash backup.');
     }
 
-    for (final key in [
-      'version', 'exportedAt', 'cashbookId', 'transactions'
-    ]) {
+    for (final key in ['version', 'exportedAt', 'cashbookId', 'transactions']) {
       if (!jsonMap.containsKey(key)) {
         throw BackupValidationException(
-            'Invalid backup file — missing "$key" field. '
-            'Make sure you selected a SyncCash backup file.');
+            'Invalid backup — missing "$key" field. '
+            'Make sure you selected the correct .${SyncCashBackup.fileExtension} file.');
       }
     }
 

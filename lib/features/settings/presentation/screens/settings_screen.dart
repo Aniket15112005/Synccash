@@ -8,6 +8,7 @@ import 'package:synccash/app/theme/app_colors.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
     show currentCashbookIdProvider;
 import 'package:synccash/features/cashbook/presentation/providers/cashbook_provider.dart';
+import 'package:synccash/features/settings/services/backup_frequency_service.dart';
 import 'package:synccash/features/settings/services/backup_service.dart';
 import 'package:synccash/features/settings/services/export_service.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart'
@@ -47,7 +48,16 @@ class _SettingsSheetState extends ConsumerState<SettingsSheet> {
         _SettingsPage.import =>
           _ImportSheet(key: const ValueKey('import'), onBack: _back),
         _SettingsPage.backup =>
-          _BackupSheet(key: const ValueKey('backup'), onBack: _back),
+          _BackupSheet(
+            key: const ValueKey('backup'),
+            onBack: _back,
+            onNavigate: _navigate,
+          ),
+        _SettingsPage.backupFrequency =>
+          _BackupFrequencySheet(
+            key: const ValueKey('backupFrequency'),
+            onBack: () => setState(() => _page = _SettingsPage.backup),
+          ),
       },
     );
   }
@@ -63,7 +73,7 @@ class _SettingsSheetState extends ConsumerState<SettingsSheet> {
   }
 }
 
-enum _SettingsPage { main, export, import, backup }
+enum _SettingsPage { main, export, import, backup, backupFrequency }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main settings page
@@ -463,7 +473,12 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
 
 class _BackupSheet extends ConsumerStatefulWidget {
   final VoidCallback onBack;
-  const _BackupSheet({super.key, required this.onBack});
+  final void Function(_SettingsPage) onNavigate;
+  const _BackupSheet({
+    super.key,
+    required this.onBack,
+    required this.onNavigate,
+  });
 
   @override
   ConsumerState<_BackupSheet> createState() => _BackupSheetState();
@@ -471,8 +486,28 @@ class _BackupSheet extends ConsumerStatefulWidget {
 
 class _BackupSheetState extends ConsumerState<_BackupSheet> {
   bool _busy = false;
+  String _frequencyLabel = 'Never';
 
-  Future<void> _doBackup() async {
+  @override
+  void initState() {
+    super.initState();
+    _loadFrequency();
+    _checkAutoBackup();
+  }
+
+  Future<void> _loadFrequency() async {
+    final freq = await BackupFrequencyService.getFrequency();
+    if (mounted) setState(() => _frequencyLabel = freq.label);
+  }
+
+  Future<void> _checkAutoBackup() async {
+    final due = await BackupFrequencyService.isBackupDue();
+    if (!due || !mounted) return;
+    await Future.delayed(const Duration(milliseconds: 600));
+    if (mounted) _doBackup(auto: true);
+  }
+
+  Future<void> _doBackup({bool auto = false}) async {
     if (_busy) return;
     HapticFeedback.mediumImpact();
     setState(() => _busy = true);
@@ -493,10 +528,15 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
         transactions: transactions,
       );
 
+      // Record the backup time so the frequency scheduler resets.
+      await BackupFrequencyService.recordBackup();
+
       if (mounted) {
+        final msg = auto
+            ? 'Auto-backup created — ${transactions.length} transactions saved.'
+            : 'Backup created — ${transactions.length} transactions saved.';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              'Backup created — ${transactions.length} transactions saved.'),
+          content: Text(msg),
           backgroundColor: AppColors.income,
           behavior: SnackBarBehavior.floating,
           shape:
@@ -563,8 +603,195 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
             loading: _busy,
             onTap: _doBackup,
           ).animate().fadeIn(delay: 100.ms, duration: 220.ms),
+          const SizedBox(height: 16),
+          const _SectionLabel('SCHEDULE'),
+          const SizedBox(height: 8),
+          _SettingsTile(
+            icon: Icons.schedule_rounded,
+            iconColor: const Color(0xFF6366F1),
+            title: 'Backup Frequency',
+            subtitle: _frequencyLabel,
+            onTap: () => widget.onNavigate(_SettingsPage.backupFrequency),
+            trailing: const _ChevronIcon(),
+          ).animate().fadeIn(delay: 140.ms, duration: 220.ms).slideX(
+              begin: 0.04, end: 0, curve: Curves.easeOut),
           const SizedBox(height: 24),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Backup Frequency page
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BackupFrequencySheet extends StatefulWidget {
+  final VoidCallback onBack;
+  const _BackupFrequencySheet({super.key, required this.onBack});
+
+  @override
+  State<_BackupFrequencySheet> createState() => _BackupFrequencySheetState();
+}
+
+class _BackupFrequencySheetState extends State<_BackupFrequencySheet> {
+  BackupFrequency _selected = BackupFrequency.never;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    BackupFrequencyService.getFrequency().then((freq) {
+      if (mounted) setState(() { _selected = freq; _loading = false; });
+    });
+  }
+
+  Future<void> _select(BackupFrequency freq) async {
+    HapticFeedback.selectionClick();
+    setState(() => _selected = freq);
+    await BackupFrequencyService.setFrequency(freq);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Backup frequency set to "${freq.label}"'),
+        backgroundColor: const Color(0xFF6366F1),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        duration: const Duration(seconds: 2),
+      ));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SheetScaffold(
+      title: 'Backup Frequency',
+      onBack: widget.onBack,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _InfoBanner(
+            icon: Icons.info_outline_rounded,
+            text:
+                'When a frequency is set, a backup will be triggered automatically '
+                'the next time you open the Backup screen after the interval has passed. '
+                'Set to Never to only back up manually.',
+            color: Color(0xFF6366F1),
+          ),
+          const SizedBox(height: 20),
+          const _SectionLabel('FREQUENCY'),
+          const SizedBox(height: 8),
+          if (_loading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            ...BackupFrequency.values.map((freq) {
+              final isSelected = _selected == freq;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _FrequencyOptionTile(
+                  freq: freq,
+                  selected: isSelected,
+                  onTap: () => _select(freq),
+                ).animate().fadeIn(
+                    delay: Duration(
+                        milliseconds:
+                            60 + BackupFrequency.values.indexOf(freq) * 40),
+                    duration: 220.ms),
+              );
+            }),
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
+  }
+}
+
+class _FrequencyOptionTile extends StatelessWidget {
+  final BackupFrequency freq;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FrequencyOptionTile({
+    required this.freq,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const accent = Color(0xFF6366F1);
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: selected
+              ? accent.withValues(alpha: 0.10)
+              : Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected
+                ? accent.withValues(alpha: 0.45)
+                : Colors.white.withValues(alpha: 0.07),
+            width: selected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected ? accent : const Color(0xFF4B5563),
+                  width: 2,
+                ),
+                color: selected ? accent : Colors.transparent,
+              ),
+              child: selected
+                  ? const Icon(Icons.check, size: 13, color: Colors.white)
+                  : null,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    freq.label,
+                    style: TextStyle(
+                      color: selected
+                          ? const Color(0xFFF0F1F3)
+                          : const Color(0xFFD1D5DB),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    freq.subtitle,
+                    style: TextStyle(
+                      color: selected
+                          ? accent.withValues(alpha: 0.7)
+                          : const Color(0xFF6B7280),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -9,6 +9,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:synccash/core/services/notification_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -17,6 +18,20 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (title == null) return;
 
   final plugin = FlutterLocalNotificationsPlugin();
+
+  // Must create the channel in the background isolate too (Android 8+)
+  await plugin
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(const AndroidNotificationChannel(
+        'synccash_transactions',
+        'SyncCash Transactions',
+        description: 'Income and expense alerts from your shared cashbook.',
+        importance: Importance.high,
+        enableVibration: true,
+        playSound: true,
+      ));
+
   await plugin.initialize(
     const InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -53,8 +68,6 @@ class FCMService {
   static final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   static final FirebaseFirestore  _firestore = FirebaseFirestore.instance;
 
-  // ── Public API ─────────────────────────────────────────────────────────────
-
   static Future<void> initFCM() async {
     if (_initialized) return;
 
@@ -62,8 +75,10 @@ class FCMService {
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     }
 
-    // Request permission with timeout — prevents hanging on iOS PWA
-    // if the user dismisses or ignores the permission dialog
+    // FIX: Initialize NotificationService here so the Android channel is
+    // created and foreground messages are wired up before any notification arrives.
+    await NotificationService.initialize();
+
     NotificationSettings settings;
     try {
       settings = await _messaging.requestPermission(
@@ -74,7 +89,7 @@ class FCMService {
         carPlay:       false,
         criticalAlert: false,
         provisional:   false,
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 8));
     } on TimeoutException {
       if (kDebugMode) debugPrint('⚠️ FCM: permission request timed out — continuing without notifications');
       return;
@@ -87,13 +102,12 @@ class FCMService {
       debugPrint('🔔 FCM permission: ${settings.authorizationStatus}');
     }
 
-    if (!kIsWeb) {
+    if (!kIsWeb && (Platform.isIOS || Platform.isMacOS)) {
       try {
         await _messaging.getAPNSToken().timeout(const Duration(seconds: 5));
       } catch (_) {}
     }
 
-    // Get token with timeout — prevents hanging if SW isn't ready yet on web
     String? token;
     try {
       token = await _getToken().timeout(const Duration(seconds: 20));
@@ -153,8 +167,6 @@ class FCMService {
     }
   }
 
-  // ── Private helpers ────────────────────────────────────────────────────────
-
   static Future<String?> _getToken() async {
     try {
       return kIsWeb
@@ -190,9 +202,6 @@ class FCMService {
         await userRef.update({
           'fcmTokens': FieldValue.arrayRemove([oldToken]),
         });
-        if (kDebugMode) {
-          debugPrint('🗑️ Removed old token: ${oldToken.substring(0, 20)}...');
-        }
       }
 
       await userRef.set(
@@ -242,21 +251,15 @@ class FCMService {
         SetOptions(merge: true),
       );
 
-      await prefs.setString(_kPrefKey, newToken);
+      await prefs.setString(_kPrefKey, token);
 
       if (_isIOSOrPWA) {
         _cacheReceiverOnCashbook(user.uid, newToken).ignore();
-      }
-
-      if (kDebugMode) {
-        debugPrint('✅ FCM token replaced for ${user.uid} (platform: $_platform)');
       }
     } catch (e) {
       if (kDebugMode) debugPrint('❌ FCMService._replaceToken error: $e');
     }
   }
-
-  // ── Receiver cashbook cache ────────────────────────────────────────────────
 
   static Future<void> _cacheReceiverOnCashbook(
       String userId, String token) async {
@@ -267,10 +270,7 @@ class FCMService {
         if (cashbookId != null) break;
         await Future.delayed(Duration(seconds: attempt + 1));
       }
-      if (cashbookId == null) {
-        if (kDebugMode) debugPrint('⚠️ Could not get cashbookId after retries — skipping cache');
-        return;
-      }
+      if (cashbookId == null) return;
 
       await _firestore.collection('cashbooks').doc(cashbookId).set(
         {
@@ -279,10 +279,6 @@ class FCMService {
         },
         SetOptions(merge: true),
       );
-
-      if (kDebugMode) {
-        debugPrint('📌 Receiver cached on cashbook $cashbookId (platform: $_platform)');
-      }
     } catch (e) {
       if (kDebugMode) debugPrint('❌ FCMService._cacheReceiverOnCashbook error: $e');
     }
@@ -292,13 +288,10 @@ class FCMService {
     try {
       final cashbookId = await _getCurrentCashbookId(userId);
       if (cashbookId == null) return;
-
       await _firestore
           .collection('cashbooks')
           .doc(cashbookId)
           .update({'iosReceiverTokens': []});
-
-      if (kDebugMode) debugPrint('🗑️ Receiver tokens cleared on cashbook');
     } catch (e) {
       if (kDebugMode) debugPrint('❌ FCMService._clearReceiverTokensOnCashbook error: $e');
     }

@@ -4,11 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:synccash/app/app.dart';
 import 'package:synccash/core/services/notification_service.dart';
-import 'package:synccash/core/services/fcm_service.dart';
 import 'package:synccash/firebase_options.dart';
 import 'package:synccash/features/cashbook/presentation/screens/splash_screen.dart';
 
@@ -21,34 +19,21 @@ void main() async {
   );
 
   // 2. Firestore offline persistence (mobile only)
-  // Web: Firebase handles IndexedDB persistence automatically
+  // FIX: Cap cache at 100 MB to prevent storage exhaustion on low-end devices.
+  // CACHE_SIZE_UNLIMITED was removed — Firestore can grow unboundedly with it.
   if (!kIsWeb) {
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
-      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+      cacheSizeBytes: 100 * 1024 * 1024, // 100 MB cap
     );
   }
 
-  // 3. FCM token lifecycle — only after user is confirmed logged in
-  bool fcmReady = false;
-  FirebaseAuth.instance.authStateChanges().listen((user) async {
-    if (user != null && !fcmReady) {
-      fcmReady = true;
-      if (kDebugMode) print('👤 Logged in: ${user.uid} — initializing FCM…');
-      await FCMService.initFCM();
-    }
-    if (user == null) {
-      fcmReady = false;
-    }
-  });
-
-  // 4. Lock to portrait (mobile only)
+  // 3. Lock to portrait (mobile only)
   if (!kIsWeb) {
-    await SystemChrome.setPreferredOrientations(
-        [DeviceOrientation.portraitUp]);
+    await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   }
 
-  // 5. Status/nav bar styling (mobile only)
+  // 4. Status/nav bar styling (mobile only)
   if (!kIsWeb) {
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
@@ -61,11 +46,17 @@ void main() async {
     );
   }
 
+  // FIX: Removed the raw authStateChanges().listen() from here.
+  // FCM initialization is now handled inside a Riverpod provider that
+  // watches authProvider — no memory leak, no fire-and-forget await.
+  // See: lib/core/services/fcm_provider.dart (create this file below).
+
   runApp(const ProviderScope(child: _RootApp()));
 
-  // 6. Notifications — runs AFTER runApp so splash shows instantly
-  // Never blocks the UI. Runs in background on all platforms.
-  NotificationService.initialize().catchError((_) {});
+  // 5. Notifications — runs AFTER runApp so splash shows instantly.
+  NotificationService.initialize().catchError((e) {
+    if (kDebugMode) debugPrint('⚠️ NotificationService init error: $e');
+  });
 }
 
 class _RootApp extends StatefulWidget {

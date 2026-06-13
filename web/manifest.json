@@ -2,7 +2,7 @@
     "id": "/",
     "name": "SyncCash",
     "short_name": "SyncCash",
-    "start_url": ".",
+    "start_url": "/",
     "display": "standalone",
     "background_color": "#0A0E17",
     "theme_color": "#0A0E17",

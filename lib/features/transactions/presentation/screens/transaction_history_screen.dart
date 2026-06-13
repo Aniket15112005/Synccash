@@ -239,6 +239,7 @@ class _TransactionHistoryScreenState
               data: (allTxs) {
                 final filtered =
                     _applyFilters(allTxs, _typeFilter, _searchQuery);
+                final flatList = _getFlat(filtered);
 
                 return SliverMainAxisGroup(
                   slivers: [
@@ -266,11 +267,10 @@ class _TransactionHistoryScreenState
                       SliverPadding(
                         padding: const EdgeInsets.fromLTRB(20, 6, 20, 40),
                         sliver: SliverList.builder(
-                          itemCount: _getFlat(filtered).length,
+                          itemCount: flatList.length,
                           addAutomaticKeepAlives: false,
-                          addRepaintBoundaries:   false,
                           itemBuilder: (context, i) {
-                            final item = _getFlat(filtered)[i];
+                            final item = flatList[i];
                             if (item is _GroupHeader) {
                               return _DateSectionHeader(
                                 label: item.dateLabel,

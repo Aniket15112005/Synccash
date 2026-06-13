@@ -12,7 +12,6 @@ import 'package:synccash/features/dashboard/presentation/screens/dashboard_scree
 import 'package:synccash/features/transactions/presentation/screens/add_transaction_screen.dart';
 import 'package:synccash/features/transactions/presentation/screens/transaction_history_screen.dart';
 
-// Reusable fade transition — lightweight on iOS PWA (no JIT)
 CustomTransitionPage<void> _fadePage({
   required GoRouterState state,
   required Widget child,
@@ -25,29 +24,49 @@ CustomTransitionPage<void> _fadePage({
     reverseTransitionDuration: const Duration(milliseconds: 180),
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
       return FadeTransition(
-        opacity: CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOut,
-        ),
+        opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
         child: child,
       );
     },
   );
 }
 
+// ── Step 1: A ChangeNotifier that wraps the auth stream ──────────────────────
+// GoRouter's refreshListenable only re-runs the redirect — it does NOT
+// recreate the router. This is the correct pattern.
+class _AuthNotifier extends ChangeNotifier {
+  _AuthNotifier(this._ref) {
+    // Listen to the auth stream and notify GoRouter to re-evaluate redirects.
+    _ref.listen<AsyncValue<dynamic>>(
+      authProvider,
+      (_, __) => notifyListeners(),
+    );
+  }
+  final Ref _ref;
+}
+
+final _authNotifierProvider = Provider<_AuthNotifier>((ref) {
+  return _AuthNotifier(ref);
+});
+
+// ── Step 2: Router is created ONCE and never recreated ───────────────────────
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authProvider);
+  final notifier = ref.watch(_authNotifierProvider);
 
   return GoRouter(
     navigatorKey: NavigationService.navigatorKey,
     initialLocation: RouteConstants.splash,
+    refreshListenable: notifier,  // re-runs redirect only, no router rebuild
 
     redirect: (BuildContext context, GoRouterState state) {
-      final user = authState.maybeWhen(
-        data: (u) => u,
-        orElse: () => null,
-      );
+      final authState = ref.read(authProvider);
 
+      // ── CRITICAL FIX: Do NOT redirect while auth is still loading ──────────
+      // Without this, unauthenticated redirect fires before Firebase resolves
+      // the persisted session, causing a visible flash to /login on every open.
+      if (authState.isLoading) return null;
+
+      final user = authState.asData?.value;
       final loggedIn = user != null;
 
       final isAuthRoute =
@@ -57,15 +76,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (!loggedIn && !isAuthRoute) return RouteConstants.login;
 
       if (loggedIn && isAuthRoute) {
-        final hasCashbook = user.currentCashbookId != null;
-        return hasCashbook
+        return user.currentCashbookId != null
             ? RouteConstants.dashboard
             : RouteConstants.pairing;
       }
 
       if (loggedIn && state.matchedLocation == RouteConstants.splash) {
-        final hasCashbook = user.currentCashbookId != null;
-        return hasCashbook
+        return user.currentCashbookId != null
             ? RouteConstants.dashboard
             : RouteConstants.pairing;
       }
@@ -79,52 +96,43 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _fadePage(
           state: state,
           child: const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+            backgroundColor: Color(0xFF080a0e),
+            body: Center(
+              child: CircularProgressIndicator(color: Color(0xFF4f6ef7)),
+            ),
           ),
           duration: const Duration(milliseconds: 150),
         ),
       ),
       GoRoute(
         path: RouteConstants.login,
-        pageBuilder: (context, state) => _fadePage(
-          state: state,
-          child: const LoginScreen(),
-        ),
+        pageBuilder: (context, state) =>
+            _fadePage(state: state, child: const LoginScreen()),
       ),
       GoRoute(
         path: RouteConstants.signup,
-        pageBuilder: (context, state) => _fadePage(
-          state: state,
-          child: const SignupScreen(),
-        ),
+        pageBuilder: (context, state) =>
+            _fadePage(state: state, child: const SignupScreen()),
       ),
       GoRoute(
         path: RouteConstants.pairing,
-        pageBuilder: (context, state) => _fadePage(
-          state: state,
-          child: const PairingScreen(),
-        ),
+        pageBuilder: (context, state) =>
+            _fadePage(state: state, child: const PairingScreen()),
       ),
       GoRoute(
         path: RouteConstants.dashboard,
-        pageBuilder: (context, state) => _fadePage(
-          state: state,
-          child: const DashboardScreen(),
-        ),
+        pageBuilder: (context, state) =>
+            _fadePage(state: state, child: const DashboardScreen()),
       ),
       GoRoute(
         path: RouteConstants.addTransaction,
-        pageBuilder: (context, state) => _fadePage(
-          state: state,
-          child: const AddTransactionScreen(),
-        ),
+        pageBuilder: (context, state) =>
+            _fadePage(state: state, child: const AddTransactionScreen()),
       ),
       GoRoute(
         path: RouteConstants.history,
-        pageBuilder: (context, state) => _fadePage(
-          state: state,
-          child: const TransactionHistoryScreen(),
-        ),
+        pageBuilder: (context, state) =>
+            _fadePage(state: state, child: const TransactionHistoryScreen()),
       ),
     ],
   );

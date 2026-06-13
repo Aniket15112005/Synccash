@@ -377,42 +377,23 @@ class TransactionRepositoryImpl implements TransactionRepository {
 
   @override
 
-  Stream<List<TransactionEntity>> getTransactionsStream(
-
-      String cashbookId) {
-
-    return _firestore
-
-        .collection('cashbooks')
-
-        .doc(cashbookId)
-
-        .collection('transactions')
-
-        .orderBy('createdAt', descending: true)
-
-        .snapshots()
-
-        .map(
-
-          (snap) => snap.docs
-
-              .map(
-
-                (doc) => TransactionModel.fromJson(
-
-                  doc.data(),
-
-                  doc.id,
-
-                ),
-
-              )
-
-              .toList(),
-
-        );
-
-  }
+  // REPLACE WITH:
+@override
+Stream<List<TransactionEntity>> getTransactionsStream(
+  String cashbookId, {
+  int limit = 50,
+}) {
+  return FirebaseFirestore.instance
+      .collection('cashbooks')
+      .doc(cashbookId)
+      .collection('transactions')
+      .orderBy('createdAt', descending: true)
+      .limit(limit)
+      .snapshots()
+            .map((snap) => snap.docs
+          .map<TransactionEntity>(
+              (d) => TransactionModel.fromFirestore(d))
+          .toList());
+}
 
 }

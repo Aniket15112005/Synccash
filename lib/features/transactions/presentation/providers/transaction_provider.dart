@@ -12,25 +12,36 @@ class TransactionDateFilter {
   });
 }
 
-/// 1. Transaction Repository Provider
 final transactionRepositoryProvider =
     Provider<TransactionRepositoryImpl>((ref) {
   return TransactionRepositoryImpl();
 });
 
-/// 2. Stream Provider
+const _kTransactionPageSize = 50;
+
+class TransactionLimitNotifier extends Notifier<int> {
+  @override
+  int build() => _kTransactionPageSize;
+
+  void increment() => state += _kTransactionPageSize;
+  void set(int value) => state = value;
+}
+
+final transactionLimitProvider =
+    NotifierProvider<TransactionLimitNotifier, int>(
+        TransactionLimitNotifier.new);
+
 final transactionsStreamProvider =
     StreamProvider.family<List<TransactionEntity>, String>(
         (ref, cashbookId) {
-  final repo = ref.read(transactionRepositoryProvider);
-  return repo.getTransactionsStream(cashbookId);
+  final repo  = ref.read(transactionRepositoryProvider);
+  final limit = ref.watch(transactionLimitProvider);
+  return repo.getTransactionsStream(cashbookId, limit: limit);
 });
 
-/// 3. CATEGORY FILTER
 class SelectedCategoryNotifier extends Notifier<String?> {
   @override
   String? build() => null;
-
   void setFilter(String? value) => state = value;
 }
 
@@ -38,11 +49,9 @@ final selectedCategoryFilterProvider =
     NotifierProvider<SelectedCategoryNotifier, String?>(
         SelectedCategoryNotifier.new);
 
-/// 4. NAME FILTER
 class SelectedNameNotifier extends Notifier<String?> {
   @override
   String? build() => null;
-
   void setFilter(String? value) => state = value;
 }
 
@@ -50,30 +59,19 @@ final selectedNameFilterProvider =
     NotifierProvider<SelectedNameNotifier, String?>(
         SelectedNameNotifier.new);
 
-/// 5. DATE FILTER
-class SelectedDateNotifier
-    extends Notifier<TransactionDateFilter?> {
-
+class SelectedDateNotifier extends Notifier<TransactionDateFilter?> {
   @override
   TransactionDateFilter? build() => null;
-
-  void setFilter(TransactionDateFilter? value) {
-    state = value;
-  }
+  void setFilter(TransactionDateFilter? value) => state = value;
 }
 
 final selectedDateFilterProvider =
-    NotifierProvider<
-        SelectedDateNotifier,
-        TransactionDateFilter?>(
-      SelectedDateNotifier.new,
-    );
+    NotifierProvider<SelectedDateNotifier, TransactionDateFilter?>(
+        SelectedDateNotifier.new);
 
-/// 5.1 DESCRIPTION FILTER
 class SelectedDescriptionNotifier extends Notifier<String?> {
   @override
   String? build() => null;
-
   void setFilter(String? value) => state = value;
 }
 
@@ -120,46 +118,27 @@ List<TransactionEntity> _applyTransactionFilters(
 
   return data.where((tx) {
     if (categoryLower != null &&
-        tx.category.toLowerCase() != categoryLower) {
-      return false;
-    }
-
+        tx.category.toLowerCase() != categoryLower) return false;
     if (nameLower != null &&
         nameLower.isNotEmpty &&
-        !tx.creatorName.toLowerCase().trim().contains(nameLower)) {
-      return false;
-    }
-
-    if (startDate != null && tx.createdAt.isBefore(startDate)) {
-      return false;
-    }
-
-    if (endBoundary != null && tx.createdAt.isAfter(endBoundary)) {
-      return false;
-    }
-
+        !tx.creatorName.toLowerCase().trim().contains(nameLower)) return false;
+    if (startDate != null && tx.createdAt.isBefore(startDate)) return false;
+    if (endBoundary != null && tx.createdAt.isAfter(endBoundary)) return false;
     if (descriptionLower != null &&
         descriptionLower.isNotEmpty &&
-        !tx.description.toLowerCase().trim().contains(descriptionLower)) {
-      return false;
-    }
-
+        !tx.description.toLowerCase().trim().contains(descriptionLower)) return false;
     return true;
   }).toList();
 }
 
-/// 6. FILTERED PROVIDER
 final filteredTransactionsProvider =
     Provider.family<AsyncValue<List<TransactionEntity>>, String>(
   (ref, cashbookId) {
-    final asyncTransactions =
-        ref.watch(transactionsStreamProvider(cashbookId));
-
+    final asyncTransactions = ref.watch(transactionsStreamProvider(cashbookId));
     final activeCategory = ref.watch(selectedCategoryFilterProvider);
     final activeName = ref.watch(selectedNameFilterProvider);
     final activeDate = ref.watch(selectedDateFilterProvider);
-    final activeDescription =
-        ref.watch(selectedDescriptionFilterProvider);
+    final activeDescription = ref.watch(selectedDescriptionFilterProvider);
 
     return asyncTransactions.whenData(
       (data) => _applyTransactionFilters(

@@ -31,17 +31,13 @@
 </head>
 <body>
 
- <script>
-  const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  window.flutterConfiguration = {
-    renderer: _isMobile ? 'html' : 'canvaskit',
-  };
-  // Do NOT manually register any service worker here.
-  // Flutter's bootstrap handles flutter_service_worker.js
-  // firebase_messaging plugin handles firebase-messaging-sw.js internally
-</script>
+  <script>
+    const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    window.flutterConfiguration = {
+      renderer: _isMobile ? 'html' : 'canvaskit',
+    };
+  </script>
 
-<script src="flutter_bootstrap.js" async></script>
   <script src="flutter_bootstrap.js" async></script>
 
 </body>

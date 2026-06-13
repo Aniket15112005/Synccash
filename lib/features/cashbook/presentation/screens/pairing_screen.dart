@@ -25,10 +25,21 @@ class _PairingScreenState extends ConsumerState<PairingScreen>
   @override
   void initState() {
     super.initState();
-    _bgController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 12),
-    )..repeat();
+    // REPLACE WITH:
+_bgController = AnimationController(
+  vsync: this,
+  duration: const Duration(seconds: 12),
+)..repeat();
+
+// Pause animation when keyboard appears (user is typing the join code).
+// This eliminates GPU contention during text input.
+_codeFocus.addListener(() {
+  if (_codeFocus.hasFocus) {
+    _bgController.stop();
+  } else {
+    _bgController.repeat();
+  }
+});
   }
 
   @override
