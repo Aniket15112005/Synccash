@@ -107,6 +107,7 @@ class _AddFAB extends StatelessWidget {
         HapticFeedback.lightImpact();
         onTap();
       },
+      behavior: HitTestBehavior.opaque,
       child: Container(
         height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 22),

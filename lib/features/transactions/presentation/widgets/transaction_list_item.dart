@@ -1,6 +1,7 @@
 // lib/features/transactions/presentation/widgets/transaction_list_item.dart
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,8 +21,6 @@ class TransactionListItem extends ConsumerWidget {
   final TransactionEntity transaction;
   final String? currentUserId;
 
-  /// Pass [showTimeline] = true when rendering inside the history screen
-  /// so the vertical connector line is drawn.
   final bool showTimeline;
   final bool isLastInGroup;
 
@@ -56,9 +55,17 @@ class TransactionListItem extends ConsumerWidget {
   void _showActions(BuildContext ctx, WidgetRef ref) {
     HapticFeedback.lightImpact();
 
-    // Resolve creator check — fall back to FirebaseAuth if prop is null
     final uid = currentUserId ?? FirebaseAuth.instance.currentUser?.uid;
     final isCreator = uid != null && uid == transaction.createdBy;
+    final isAndroid = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+    // Android: can only edit their own entry.
+    // iOS/web: can edit any entry.
+    final canEdit = isAndroid ? isCreator : true;
+
+    // Android: cannot delete anything.
+    // iOS/web: can delete any entry.
+    final canDelete = !isAndroid;
 
     showModalBottomSheet(
       context: ctx,
@@ -67,7 +74,8 @@ class TransactionListItem extends ConsumerWidget {
       useSafeArea: true,
       builder: (sheetCtx) => _ActionSheet(
         transaction: transaction,
-        isCreator: isCreator,
+        canEdit: canEdit,
+        canDelete: canDelete,
         onViewDetails: () {
           Navigator.pop(sheetCtx);
           showModalBottomSheet(
@@ -164,7 +172,6 @@ class TransactionListItem extends ConsumerWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Timeline column ──────────────────────────────────────────
             if (showTimeline)
               SizedBox(
                 width: 28,
@@ -196,7 +203,6 @@ class TransactionListItem extends ConsumerWidget {
                 ]),
               ),
 
-            // ── Content ──────────────────────────────────────────────────
             Expanded(
               child: Padding(
                 padding: EdgeInsets.only(
@@ -207,12 +213,10 @@ class TransactionListItem extends ConsumerWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Left: meta + title
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Tags row
                           Row(children: [
                             _MiniTag(
                               label: transaction.category.toUpperCase(),
@@ -224,7 +228,6 @@ class TransactionListItem extends ConsumerWidget {
                             ),
                           ]),
                           const SizedBox(height: 5),
-                          // Title
                           Text(
                             title,
                             maxLines: 1,
@@ -239,7 +242,6 @@ class TransactionListItem extends ConsumerWidget {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          // Date · Time
                           Text(
                             '${_dateFmt.format(transaction.createdAt)}  ·  $timeStr',
                             style: const TextStyle(
@@ -253,7 +255,6 @@ class TransactionListItem extends ConsumerWidget {
 
                     const SizedBox(width: 12),
 
-                    // Right: amount
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
@@ -317,14 +318,16 @@ class _MiniTag extends StatelessWidget {
 class _ActionSheet extends StatelessWidget {
   const _ActionSheet({
     required this.transaction,
-    required this.isCreator,
+    required this.canEdit,
+    required this.canDelete,
     required this.onViewDetails,
     required this.onEdit,
     required this.onDelete,
   });
 
   final TransactionEntity transaction;
-  final bool isCreator;
+  final bool canEdit;
+  final bool canDelete;
   final VoidCallback onViewDetails;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -344,7 +347,6 @@ class _ActionSheet extends StatelessWidget {
         border: Border.all(color: const Color(0xFF1F2937)),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        // Handle
         Container(
           margin: const EdgeInsets.only(top: 12),
           width: 32, height: 3,
@@ -354,7 +356,6 @@ class _ActionSheet extends StatelessWidget {
           ),
         ),
 
-        // Summary card
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
           child: Container(
@@ -409,24 +410,27 @@ class _ActionSheet extends StatelessWidget {
           ),
         ),
 
-        // Actions
         const SizedBox(height: 8),
 
-        // View Details — always visible to both users
+        // View Details — always visible to everyone
         _SheetAction(
           icon: Icons.receipt_long_outlined,
           label: 'View Details',
           onTap: onViewDetails,
         ),
 
-        // Edit & Delete — only visible to the creator of this entry
-        if (isCreator) ...[
+        // Edit — Android: own entries only. iOS/web: any entry.
+        if (canEdit) ...[
           _SheetDivider(),
           _SheetAction(
             icon: Icons.edit_outlined,
             label: 'Edit',
             onTap: onEdit,
           ),
+        ],
+
+        // Delete — iOS/web only, any entry. Android: never shown.
+        if (canDelete) ...[
           _SheetDivider(),
           _SheetAction(
             icon: Icons.delete_outline_rounded,
@@ -562,7 +566,6 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
     );
     if (picked != null && mounted) {
       setState(() {
-        // Keep the original time-of-day, just change the date
         _selectedDate = DateTime(
           picked.year,
           picked.month,
@@ -580,16 +583,6 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
     if (amount == null || amount <= 0) return;
     setState(() => _loading = true);
     try {
-      // Include lastEditedBy in the SAME entity update so the repository
-      // writes everything in one Firestore call.
-      // One write = one Cloud Function invocation (was two separate writes
-      // = two invocations, cutting Cloud Function calls by 50% per edit).
-      //
-      // ⚠️  Your TransactionRepositoryImpl must serialize `lastEditedBy`
-      //     when it converts the entity to a Firestore map (e.g. toJson /
-      //     toMap).  Add this field to your model's toMap():
-      //         if (entity.lastEditedBy != null)
-      //           'lastEditedBy': entity.lastEditedBy,
       final currentUser = FirebaseAuth.instance.currentUser;
 
       await widget.ref.read(transactionRepositoryProvider).updateTransaction(
@@ -635,7 +628,6 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // Handle
           Container(
             width: 32, height: 3,
             decoration: BoxDecoration(
@@ -658,7 +650,6 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
           ),
           const SizedBox(height: 20),
 
-          // Amount field
           _StyledField(
             controller: _amountCtrl,
             label: 'Amount',
@@ -666,11 +657,9 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
           ),
           const SizedBox(height: 12),
 
-          // Description field
           _StyledField(controller: _descCtrl, label: 'Description'),
           const SizedBox(height: 12),
 
-          // Date picker row
           GestureDetector(
             onTap: _pickDate,
             behavior: HitTestBehavior.opaque,
@@ -729,7 +718,6 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
 
           const SizedBox(height: 20),
 
-          // Save button
           SizedBox(
             width: double.infinity,
             height: 50,

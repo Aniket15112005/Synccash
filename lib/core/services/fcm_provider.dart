@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:synccash/core/services/fcm_service.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
@@ -9,11 +8,8 @@ final fcmInitProvider = Provider<void>((ref) {
     final nextUser = next.asData?.value;
 
     if (prevUser == null && nextUser != null) {
-      // On web/iOS PWA — skip auto-init. Permission must come from a user tap.
-      // The NotificationPermissionBanner in the UI handles this.
-      if (kIsWeb) return;
-
-      // Native Android/iOS: auto-init is fine
+      // Auto-init on all platforms including iOS PWA.
+      // On iOS PWA the OS will show the system permission dialog.
       FCMService.initFCM().catchError((e) {});
     }
 

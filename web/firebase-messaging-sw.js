@@ -1,7 +1,4 @@
 // web/firebase-messaging-sw.js
-// Handles FCM push notifications only.
-// Asset caching is handled by Flutter's service worker + Firebase Hosting CDN headers.
-
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
@@ -19,19 +16,32 @@ const messaging = firebase.messaging();
 self.addEventListener('install',  () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(clients.claim()));
 
-// Background push notifications
-messaging.onBackgroundMessage((payload) => {
+// Background push notifications.
+// IMPORTANT: This handler is ONLY called when the PWA is closed or not focused.
+// When the PWA is open and focused, Flutter's onMessage handler fires instead.
+// We check for focused clients to be safe and avoid double notifications.
+messaging.onBackgroundMessage(async (payload) => {
+  // If any PWA window is visible and focused, let the Flutter foreground
+  // handler deal with it — returning here prevents a double notification.
+  const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+  for (const client of allClients) {
+    if (client.visibilityState === 'visible') {
+      console.log('[SW] PWA is focused — skipping SW notification, Flutter handler will show it');
+      return;
+    }
+  }
+
   const title = payload.data?.title || 'SyncCash';
   const body  = payload.data?.body  || '';
 
-  // ── CHANGED: unique tag per notification so rapid events don't erase each other ──
+  // Unique tag per notification so rapid events don't collapse each other
   const tag = 'synccash-' + (payload.data?.cashbookId || 'tx') + '-' + Date.now();
 
   return self.registration.showNotification(title, {
     body,
     icon:    '/icons/Icon-192.png',
     badge:   '/icons/Icon-192.png',
-    tag,                          // ← was fixed string 'synccash-transaction'
+    tag,
     vibrate: [200, 100, 200],
     data:    payload.data || {},
   });

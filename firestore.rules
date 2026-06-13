@@ -2,7 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper using your actual field names: ownerId + participantId
     function isCashbookMember(database, cashbookId) {
       let cb = get(/databases/$(database)/documents/cashbooks/$(cashbookId)).data;
       return request.auth != null
@@ -19,36 +18,39 @@ service cloud.firestore {
     // ── Cashbooks ──────────────────────────────────────────────────────────
     match /cashbooks/{cashbookId} {
 
-      // Any authenticated user can QUERY (needed for invite code lookup in joinCashbook)
       allow list: if request.auth != null;
 
-      // Only owner or participant can read a specific cashbook document
       allow get: if request.auth != null
                  && (request.auth.uid == resource.data.ownerId
                      || request.auth.uid == resource.data.participantId);
 
-      // Any authenticated user can create (they become owner)
       allow create: if request.auth != null
                     && request.auth.uid == request.resource.data.ownerId;
 
-      // Owner or participant can update
       allow update: if request.auth != null
                     && (request.auth.uid == resource.data.ownerId
                         || request.auth.uid == resource.data.participantId);
 
-      // Only owner can delete
       allow delete: if request.auth != null
                     && request.auth.uid == resource.data.ownerId;
 
       // ── Transactions ─────────────────────────────────────────────────────
       match /transactions/{transactionId} {
-        allow read:   if isCashbookMember(database, cashbookId);
+        allow read: if isCashbookMember(database, cashbookId);
+
         allow create: if isCashbookMember(database, cashbookId)
                       && request.auth.uid == request.resource.data.createdBy;
-        allow update: if request.auth != null
-                      && request.auth.uid == resource.data.createdBy;
-        allow delete: if request.auth != null
-                      && request.auth.uid == resource.data.createdBy;
+
+        // Android: only edit own entry.
+        // iOS/web: can edit any entry in the cashbook.
+        allow update: if isCashbookMember(database, cashbookId)
+                      && (request.auth.uid == resource.data.createdBy
+                          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.platform != "android");
+
+        // Android: cannot delete anything.
+        // iOS/web: can delete any entry in the cashbook.
+        allow delete: if isCashbookMember(database, cashbookId)
+                      && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.platform != "android";
       }
     }
 
