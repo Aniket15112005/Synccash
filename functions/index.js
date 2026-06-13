@@ -189,8 +189,10 @@ exports.onTransactionCreated = onDocumentCreated(
       ? `₹${Number(data.amount).toLocaleString("en-IN")}`
       : "";
 
-    const title = `${amount} Credited · SyncCash`;
-    const body = `${data.creatorName ?? "Someone"} | ${data.category ?? ""}`;
+    const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : "";
+
+    const title = `↓ ${amount} Income  ·  SyncCash`;
+    const body  = `${data.creatorName ?? "Someone"}  ·  ${cap(data.category ?? "")}  ·  ${formatDate(data.createdAt)}`;
 
     await sendAndClean({ receiver, title, body, cashbookId });
   }
@@ -232,8 +234,24 @@ exports.onTransactionUpdated = onDocumentUpdated(
     const receiver = await getReceiver(cashbookId, senderUid);
     if (!receiver) return;
 
-    const title = `SyncCash Entry Modified`;
-    const body = `${after.creatorName ?? "Someone"} | Updated Entry`;
+    const cap = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : "";
+    const fmt = (n) => `₹${Number(n).toLocaleString("en-IN")}`;
+
+    const changes = [];
+    if (before.amount !== after.amount) {
+      changes.push(`${fmt(before.amount)} → ${fmt(after.amount)}`);
+    }
+    if (before.description !== after.description) {
+      const bDesc = before.description || "—";
+      const aDesc = after.description || "—";
+      changes.push(`${bDesc} → ${aDesc}`);
+    }
+    if (before.category !== after.category) {
+      changes.push(`${cap(before.category)} → ${cap(after.category)}`);
+    }
+
+    const title = `❌❌❌❌❌❌ Entry Modified  ·  SyncCash`;
+    const body  = `${after.creatorName ?? "Someone"}  ·  ${changes.join("  ·  ")}`;
 
     await sendAndClean({ receiver, title, body, cashbookId });
   }

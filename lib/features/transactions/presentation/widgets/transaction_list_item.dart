@@ -1,6 +1,5 @@
 // lib/features/transactions/presentation/widgets/transaction_list_item.dart
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -480,9 +479,6 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
   late DateTime _selectedDate;
   late String _category;
 
-  // web / iOS PWA only
-  String? _selectedCreatorUid;
-  String? _selectedCreatorName;
 
   bool _loading = false;
 
@@ -500,8 +496,6 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
         ? 'Retail'
         : raw[0].toUpperCase() + raw.substring(1).toLowerCase();
 
-    _selectedCreatorUid = widget.transaction.createdBy;
-    _selectedCreatorName = widget.transaction.creatorName;
   }
 
   @override
@@ -563,8 +557,6 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
               amount:       amount,
               createdAt:    _selectedDate,
               category:     _category.toLowerCase(),
-              createdBy:    _selectedCreatorUid  ?? widget.transaction.createdBy,
-              creatorName:  _selectedCreatorName ?? widget.transaction.creatorName,
               lastEditedBy: currentUser?.uid,
             ),
           );
@@ -694,21 +686,6 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
             ),
           ),
 
-          // Creator — web / iOS PWA only (kIsWeb = true on both web and iOS PWA)
-          if (kIsWeb) ...[
-            const SizedBox(height: 12),
-            _SheetLabel('Created By'),
-            const SizedBox(height: 8),
-            _SheetCreatorSelector(
-              cashbookId:   widget.transaction.cashbookId,
-              selectedUid:  _selectedCreatorUid,
-              selectedName: _selectedCreatorName,
-              onChanged: (uid, name) => setState(() {
-                _selectedCreatorUid  = uid;
-                _selectedCreatorName = name;
-              }),
-            ),
-          ],
 
           const SizedBox(height: 20),
 
@@ -826,155 +803,6 @@ class _SheetCategoryToggle extends StatelessWidget {
   }
 }
 
-// ─── Creator selector — web / iOS PWA only ────────────────────────────────────
-// FIX: Falls back to ownerId/participantId when cashbook has no 'members' map.
-
-class _SheetCreatorSelector extends StatefulWidget {
-  const _SheetCreatorSelector({
-    required this.cashbookId,
-    required this.selectedUid,
-    required this.selectedName,
-    required this.onChanged,
-  });
-  final String cashbookId;
-  final String? selectedUid;
-  final String? selectedName;
-  final void Function(String uid, String name) onChanged;
-
-  @override
-  State<_SheetCreatorSelector> createState() =>
-      _SheetCreatorSelectorState();
-}
-
-class _SheetCreatorSelectorState extends State<_SheetCreatorSelector> {
-  List<Map<String, String>> _members = [];
-  bool _loadError = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('cashbooks')
-          .doc(widget.cashbookId)
-          .get();
-      final data = doc.data() ?? {};
-
-      // Try members map first (if stored as {uid: name} map)
-      final raw = data['members'] as Map<String, dynamic>?;
-      if (raw != null && raw.isNotEmpty) {
-        final list = raw.entries
-            .map((e) => {'uid': e.key, 'name': e.value.toString()})
-            .toList();
-        if (mounted) setState(() => _members = list);
-        return;
-      }
-
-      // Fallback: use ownerId / participantId fields + look up names
-      final uids = <String>[
-        if (data['ownerId'] != null) data['ownerId'] as String,
-        if (data['participantId'] != null) data['participantId'] as String,
-      ];
-      if (uids.isEmpty) {
-        if (mounted) setState(() => _loadError = true);
-        return;
-      }
-
-      final list = <Map<String, String>>[];
-      for (final uid in uids) {
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .get();
-        if (userDoc.exists) {
-          final d = userDoc.data()!;
-          final name = (d['displayName'] as String?)?.isNotEmpty == true
-              ? d['displayName'] as String
-              : (d['name'] as String?)?.isNotEmpty == true
-                  ? d['name'] as String
-                  : uid;
-          list.add({'uid': uid, 'name': name});
-        }
-      }
-
-      if (mounted) {
-        if (list.isEmpty) {
-          setState(() => _loadError = true);
-        } else {
-          setState(() => _members = list);
-        }
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loadError = true);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_loadError) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: Text('Could not load members',
-            style: TextStyle(color: Color(0xFF6B7280), fontSize: 13)),
-      );
-    }
-    if (_members.isEmpty) {
-      return const SizedBox(
-        height: 48,
-        child: Center(
-          child: SizedBox(
-            width: 16, height: 16,
-            child: CircularProgressIndicator(
-                strokeWidth: 1.5, color: Color(0xFF6B7280)),
-          ),
-        ),
-      );
-    }
-
-    // Guard: if stored uid is not in the loaded list, fall back to first member
-    final validUid =
-        _members.any((m) => m['uid'] == widget.selectedUid)
-            ? widget.selectedUid
-            : _members.first['uid'];
-
-    return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0C0E12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF1F2937)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: validUid,
-          dropdownColor: const Color(0xFF161922),
-          style: const TextStyle(
-              color: Color(0xFFD1D9E6), fontSize: 15),
-          isExpanded: true,
-          icon: const Icon(Icons.unfold_more_rounded,
-              size: 18, color: Color(0xFF6B7280)),
-          items: _members
-              .map((m) => DropdownMenuItem<String>(
-                    value: m['uid'],
-                    child: Text(m['name']!),
-                  ))
-              .toList(),
-          onChanged: (uid) {
-            if (uid == null) return;
-            final name =
-                _members.firstWhere((m) => m['uid'] == uid)['name']!;
-            widget.onChanged(uid, name);
-          },
-        ),
-      ),
-    );
-  }
-}
 
 // ─── Styled text field ────────────────────────────────────────────────────────
 
