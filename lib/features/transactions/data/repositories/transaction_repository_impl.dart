@@ -353,13 +353,15 @@ class TransactionRepositoryImpl implements TransactionRepository {
           expense += tx.amount;
         }
 
-        transaction.update(txRef, {
-          'amount':      tx.amount,
-          'type':        tx.type,
-          'category':    tx.category,
-          'description': tx.description,
-          'createdAt':   Timestamp.fromDate(tx.createdAt),
-          'updatedBy':   tx.createdBy,   // ✅ FIXED: was 'lastEditedBy'
+          transaction.update(txRef, {
+          'amount':       tx.amount,
+          'type':         tx.type,
+          'category':     tx.category,
+          'description':  tx.description,
+          'createdAt':    Timestamp.fromDate(tx.createdAt),
+          'createdBy':    tx.createdBy,      // ← saves creator change
+          'creatorName':  tx.creatorName,    // ← saves creator name change
+          'lastEditedBy': tx.lastEditedBy,   // ← correct field name
         });
 
         transaction.update(cashbookRef, {

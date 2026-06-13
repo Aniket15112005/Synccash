@@ -1,10 +1,11 @@
 // functions/index.js  —  SyncCash push notifications
 // Only iOS PWA receives notifications. Android APK never receives notifications.
-// Triggers: income added, income edited, income deleted → notify iOS/PWA user.
+// Triggers: income added, income edited → notify iOS/PWA user.
+// No notification for: deletions, recycle bin restores, or any iOS user action.
 
 "use strict";
 
-const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } =
+const { onDocumentCreated, onDocumentUpdated } =
   require("firebase-functions/v2/firestore");
 const { initializeApp }            = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
@@ -180,6 +181,8 @@ async function sendAndClean({ receiver, title, body, cashbookId }) {
 }
 
 // ─── TRIGGER 1: Income added ──────────────────────────────────────────────────
+// CHANGE 1: Added lastEditedBy check — if iOS user restored an Android entry,
+//           lastEditedBy = iOS uid → silent (prevents restore from firing notification).
 
 exports.onTransactionCreated = onDocumentCreated(
   { document: "cashbooks/{cashbookId}/transactions/{transactionId}", region: "us-central1" },
@@ -189,12 +192,22 @@ exports.onTransactionCreated = onDocumentCreated(
     if (data.isImport === true) return null;
 
     const { cashbookId } = event.params;
-    const senderUid      = data.createdBy ?? null;
+    const senderUid      = data.createdBy    ?? null;
+    const editorUid      = data.lastEditedBy ?? null;
     const type           = (data.type ?? "").toLowerCase();
 
     console.log(`📥 onTransactionCreated type=${type} sender=${senderUid} cashbook=${cashbookId}`);
 
     if (type !== "income") { console.log("⏭️  Not income — silent"); return; }
+
+    // CHANGE 1: if iOS user restored this entry, lastEditedBy = iOS uid → silent
+    if (editorUid && editorUid !== senderUid) {
+      const editorPlatform = await getSenderPlatform(editorUid);
+      if (editorPlatform !== "android") {
+        console.log(`⏭️  Editor platform='${editorPlatform}' (restore) — silent`);
+        return;
+      }
+    }
 
     const platform = await getSenderPlatform(senderUid);
     if (platform !== "android") { console.log(`⏭️  Sender platform='${platform}' — silent`); return; }
@@ -215,7 +228,8 @@ await sendAndClean({ receiver, title, body, cashbookId });
 );
 
 // ─── TRIGGER 2: Income edited ────────────────────────────────────────────────
-// Guard: skip if no meaningful field changed (prevents double-fire with create).
+// CHANGE 2: senderUid now reads lastEditedBy first (repository writes lastEditedBy,
+//           not updatedBy). Falls back to updatedBy then createdBy for safety.
 
 exports.onTransactionUpdated = onDocumentUpdated(
   { document: "cashbooks/{cashbookId}/transactions/{transactionId}", region: "us-central1" },
@@ -225,7 +239,8 @@ exports.onTransactionUpdated = onDocumentUpdated(
     if (!before || !after) return;
 
     const { cashbookId } = event.params;
-    const senderUid      = after.updatedBy ?? after.createdBy ?? null;
+    // CHANGE 2: read lastEditedBy (correct field) falling back to old field names
+    const senderUid      = after.lastEditedBy ?? after.updatedBy ?? after.createdBy ?? null;
     const type           = (after.type ?? "").toLowerCase();
 
     console.log(`✏️  onTransactionUpdated type=${type} sender=${senderUid} cashbook=${cashbookId}`);
@@ -268,14 +283,14 @@ const changes = [];
 if (amountChanged) {
   // Amount was changed — show old → new
   const fromAmt = before.amount != null
-    ? `₹${Number(before.amount).toLocaleString("en-IN")}` : "—";
+    ? ` ❌❌❌❌ ₹${Number(before.amount).toLocaleString("en-IN")}` : "—";
   const toAmt   = after.amount  != null
-    ? `₹${Number(after.amount).toLocaleString("en-IN")}`  : "—";
+    ? ` ₹${Number(after.amount).toLocaleString("en-IN")}`  : "—";
   changes.push(`${fromAmt} → ${toAmt}`);
 } else if (descChanged || catChanged) {
   // Amount not changed but something else was — show original amount as context
   const amt = after.amount != null
-    ? `₹${Number(after.amount).toLocaleString("en-IN")}` : "";
+    ? `❌❌❌❌ ₹${Number(after.amount).toLocaleString("en-IN")}` : "";
   if (amt) changes.push(amt);
 }
 
@@ -298,39 +313,11 @@ const changeStr = changes.join("  |  ") || "Entry updated";
 const title = `SyncCash Entry Modified`;
 const body  = `${creatorName}  |  ${changeStr}`;
 
-await sendAndClean({ receiver, title, body, cashbookId }); 
-  }
-);
-
-// ─── TRIGGER 3: Income deleted ───────────────────────────────────────────────
-
-exports.onTransactionDeleted = onDocumentDeleted(
-  { document: "cashbooks/{cashbookId}/transactions/{transactionId}", region: "us-central1" },
-  async (event) => {
-    const data = event.data?.data();
-    if (!data) return;
-
-    const { cashbookId } = event.params;
-    const senderUid      = data.deletedBy ?? data.updatedBy ?? data.createdBy ?? null;
-    const type           = (data.type ?? "").toLowerCase();
-
-    console.log(`🗑️  onTransactionDeleted type=${type} sender=${senderUid} cashbook=${cashbookId}`);
-
-    if (type !== "income") { console.log("⏭️  Not income — silent"); return; }
-
-    const platform = await getSenderPlatform(senderUid);
-    if (platform !== "android") { console.log(`⏭️  Sender platform='${platform}' — silent`); return; }
-
-    const receiver = await getReceiver(cashbookId, senderUid);
-    if (!receiver) return;
-
-    const amount      = data.amount != null ? `₹${Number(data.amount).toLocaleString("en-IN")}` : "";
-    const creatorName = data.creatorName ?? "Someone";
-    const category    = data.category ?? data.description ?? "";
-
-    const title = `${amount} Entry Removed · SyncCash`;
-    const body  = `${creatorName}  |  ${category}`;
-
 await sendAndClean({ receiver, title, body, cashbookId });
   }
 );
+
+// ─── TRIGGER 3: Deletion — removed ───────────────────────────────────────────
+// CHANGE 3: onTransactionDeleted is NOT exported.
+// No notification is sent for any deletion (soft-delete to recycle bin or
+// permanent delete from recycle bin). The trigger no longer exists.
