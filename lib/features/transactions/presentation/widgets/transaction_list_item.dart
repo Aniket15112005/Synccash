@@ -827,6 +827,7 @@ class _SheetCategoryToggle extends StatelessWidget {
 }
 
 // ─── Creator selector — web / iOS PWA only ────────────────────────────────────
+// FIX: Falls back to ownerId/participantId when cashbook has no 'members' map.
 
 class _SheetCreatorSelector extends StatefulWidget {
   const _SheetCreatorSelector({
@@ -861,12 +862,52 @@ class _SheetCreatorSelectorState extends State<_SheetCreatorSelector> {
           .collection('cashbooks')
           .doc(widget.cashbookId)
           .get();
-      final raw =
-          (doc.data() ?? {})['members'] as Map<String, dynamic>? ?? {};
-      final list = raw.entries
-          .map((e) => {'uid': e.key, 'name': e.value.toString()})
-          .toList();
-      if (mounted) setState(() => _members = list);
+      final data = doc.data() ?? {};
+
+      // Try members map first (if stored as {uid: name} map)
+      final raw = data['members'] as Map<String, dynamic>?;
+      if (raw != null && raw.isNotEmpty) {
+        final list = raw.entries
+            .map((e) => {'uid': e.key, 'name': e.value.toString()})
+            .toList();
+        if (mounted) setState(() => _members = list);
+        return;
+      }
+
+      // Fallback: use ownerId / participantId fields + look up names
+      final uids = <String>[
+        if (data['ownerId'] != null) data['ownerId'] as String,
+        if (data['participantId'] != null) data['participantId'] as String,
+      ];
+      if (uids.isEmpty) {
+        if (mounted) setState(() => _loadError = true);
+        return;
+      }
+
+      final list = <Map<String, String>>[];
+      for (final uid in uids) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .get();
+        if (userDoc.exists) {
+          final d = userDoc.data()!;
+          final name = (d['displayName'] as String?)?.isNotEmpty == true
+              ? d['displayName'] as String
+              : (d['name'] as String?)?.isNotEmpty == true
+                  ? d['name'] as String
+                  : uid;
+          list.add({'uid': uid, 'name': name});
+        }
+      }
+
+      if (mounted) {
+        if (list.isEmpty) {
+          setState(() => _loadError = true);
+        } else {
+          setState(() => _members = list);
+        }
+      }
     } catch (_) {
       if (mounted) setState(() => _loadError = true);
     }

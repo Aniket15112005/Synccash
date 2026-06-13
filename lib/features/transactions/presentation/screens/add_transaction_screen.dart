@@ -252,8 +252,8 @@ void initState() {
                               .animate()
                               .fadeIn(delay: 245.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
-                              
-                                                      // ── Creator (iOS edit only) ──────────────────────
+
+                          // ── Creator (iOS edit only) ──────────────────────
                           if (kIsWeb && widget.existingTransaction != null) ...[
                             const SizedBox(height: 24),
                             const _FieldLabel('Created By'),
@@ -852,7 +852,9 @@ class _FieldLabel extends StatelessWidget {
     );
   }
 }
+
 // ─── Creator dropdown (iOS edit only) ────────────────────────────────────────
+// FIX: Falls back to ownerId/participantId when cashbook has no 'members' map.
 
 class _CreatorDropdown extends StatefulWidget {
   final String  cashbookId;
@@ -880,16 +882,50 @@ class _CreatorDropdownState extends State<_CreatorDropdown> {
   }
 
   Future<void> _load() async {
-    final doc = await FirebaseFirestore.instance
-        .collection('cashbooks')
-        .doc(widget.cashbookId)
-        .get();
-    final data   = doc.data() ?? {};
-    final raw    = data['members'] as Map<String, dynamic>? ?? {};
-    final list   = raw.entries
-        .map((e) => {'uid': e.key, 'name': e.value.toString()})
-        .toList();
-    if (mounted) setState(() => _members = list);
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(widget.cashbookId)
+          .get();
+      final data = doc.data() ?? {};
+
+      // Try members map first (if stored as {uid: name} map)
+      final raw = data['members'] as Map<String, dynamic>?;
+      if (raw != null && raw.isNotEmpty) {
+        final list = raw.entries
+            .map((e) => {'uid': e.key, 'name': e.value.toString()})
+            .toList();
+        if (mounted) setState(() => _members = list);
+        return;
+      }
+
+      // Fallback: use ownerId / participantId + look up names from users collection
+      final uids = <String>[
+        if (data['ownerId'] != null) data['ownerId'] as String,
+        if (data['participantId'] != null) data['participantId'] as String,
+      ];
+      if (uids.isEmpty) return;
+
+      final list = <Map<String, String>>[];
+      for (final uid in uids) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .get();
+        if (userDoc.exists) {
+          final d = userDoc.data()!;
+          final name = (d['displayName'] as String?)?.isNotEmpty == true
+              ? d['displayName'] as String
+              : (d['name'] as String?)?.isNotEmpty == true
+                  ? d['name'] as String
+                  : uid;
+          list.add({'uid': uid, 'name': name});
+        }
+      }
+      if (mounted && list.isNotEmpty) setState(() => _members = list);
+    } catch (_) {
+      // silently fail — dropdown stays hidden
+    }
   }
 
   @override
