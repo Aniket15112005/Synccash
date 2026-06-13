@@ -2,11 +2,21 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Helpers ────────────────────────────────────────────────────────────
+
     function isCashbookMember(database, cashbookId) {
       let cb = get(/databases/$(database)/documents/cashbooks/$(cashbookId)).data;
       return request.auth != null
           && (request.auth.uid == cb.ownerId
               || request.auth.uid == cb.participantId);
+    }
+
+    // iOS PWA and web builds both run with kIsWeb = true in Flutter,
+    // so their platform field is stored as anything other than "android".
+    // Android native builds store platform = "android".
+    function isIosUser(database) {
+      return request.auth != null
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.platform != "android";
     }
 
     // ── Users ──────────────────────────────────────────────────────────────
@@ -34,23 +44,50 @@ service cloud.firestore {
       allow delete: if request.auth != null
                     && request.auth.uid == resource.data.ownerId;
 
-      // ── Transactions ─────────────────────────────────────────────────────
+      // ── Active Transactions ───────────────────────────────────────────────
       match /transactions/{transactionId} {
         allow read: if isCashbookMember(database, cashbookId);
 
+        // Android: can only create entries where they are the creator.
+        // iOS/web: can also create entries with a different createdBy
+        //          (needed when restoring a deleted transaction from the recycle bin).
         allow create: if isCashbookMember(database, cashbookId)
-                      && request.auth.uid == request.resource.data.createdBy;
+                      && (request.auth.uid == request.resource.data.createdBy
+                          || isIosUser(database));
 
-        // Android: only edit own entry.
-        // iOS/web: can edit any entry in the cashbook.
+        // Update rules:
+        //   1. Must be a cashbook member.
+        //   2. Android users can only edit their OWN entries.
+        //      iOS/web users can edit any entry in the cashbook.
+        //   3. The `createdBy` (creator) field may only be changed by iOS/web users.
+        //      Android users are allowed to edit amount, description, date, and
+        //      category — but NOT the creator.
         allow update: if isCashbookMember(database, cashbookId)
                       && (request.auth.uid == resource.data.createdBy
-                          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.platform != "android");
+                          || isIosUser(database))
+                      && (request.resource.data.createdBy == resource.data.createdBy
+                          || isIosUser(database));
 
         // Android: cannot delete anything.
-        // iOS/web: can delete any entry in the cashbook.
+        // iOS/web: can delete any entry (soft-delete moves it to recycle bin).
         allow delete: if isCashbookMember(database, cashbookId)
-                      && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.platform != "android";
+                      && isIosUser(database);
+      }
+
+      // ── Recycle Bin (deleted_transactions) ────────────────────────────────
+      match /deleted_transactions/{transactionId} {
+
+        // Both users can read — Android can see what was deleted
+        // (useful if you ever want to show them a read-only view).
+        allow read: if isCashbookMember(database, cashbookId);
+
+        // iOS/web only: soft-delete writes the document here.
+        allow create: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+
+        // iOS/web only: permanent delete removes the document.
+        allow delete: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
       }
     }
 

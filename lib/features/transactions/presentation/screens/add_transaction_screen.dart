@@ -8,6 +8,8 @@ import 'package:intl/intl.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
+import 'package:flutter/foundation.dart';          // kIsWeb
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class _C {
   static const bg       = Color(0xFF08090B);
@@ -23,7 +25,8 @@ class _C {
 }
 
 class AddTransactionScreen extends ConsumerStatefulWidget {
-  const AddTransactionScreen({super.key});
+  final TransactionEntity? existingTransaction;
+  const AddTransactionScreen({super.key, this.existingTransaction});
 
   @override
   ConsumerState<AddTransactionScreen> createState() =>
@@ -36,26 +39,42 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   final _amountCtrl = TextEditingController();
   final _descCtrl   = TextEditingController();
 
-  String   _type         = 'expense';
+   String   _type         = 'expense';
   String   _category     = 'Retail';
   bool     _submitting   = false;
   DateTime _selectedDate = DateTime.now();
+  // iOS only — creator override
+  String?  _selectedCreatorUid;
+  String?  _selectedCreatorName;
 
   late final AnimationController _btnCtrl;
   late final Animation<double>   _btnScale;
 
-  @override
-  void initState() {
-    super.initState();
-    _btnCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 120),
-      reverseDuration: const Duration(milliseconds: 200),
-    );
-    _btnScale = Tween<double>(begin: 1.0, end: 0.96).animate(
-      CurvedAnimation(parent: _btnCtrl, curve: Curves.easeInOut),
-    );
+ @override
+void initState() {
+  super.initState();
+  _btnCtrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 120),
+    reverseDuration: const Duration(milliseconds: 200),
+  );
+  _btnScale = Tween<double>(begin: 1.0, end: 0.96).animate(
+    CurvedAnimation(parent: _btnCtrl, curve: Curves.easeInOut),
+  );
+
+  // Pre-fill if editing
+  final tx = widget.existingTransaction;
+  if (tx != null) {
+    _type          = tx.type;
+    _category      = tx.category[0].toUpperCase() + tx.category.substring(1); // 'retail' → 'Retail'
+    _selectedDate  = tx.createdAt;
+    _amountCtrl.text = tx.amount.toStringAsFixed(0);
+    _descCtrl.text   = tx.description;
+    // iOS creator
+    _selectedCreatorUid  = tx.createdBy;
+    _selectedCreatorName = tx.creatorName;
   }
+}
 
   @override
   void dispose() {
@@ -123,7 +142,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     }
   }
 
-  Future<void> _submit() async {
+    Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final user = ref.read(authProvider).value;
     if (user == null) return;
@@ -135,18 +154,25 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     setState(() => _submitting = true);
 
     try {
+      final existing = widget.existingTransaction;
       final tx = TransactionEntity(
-        transactionId: '',
-        cashbookId:    user.currentCashbookId!,
-        createdBy:     user.uid,
-        creatorName:   user.displayName,
+        transactionId: existing?.transactionId ?? '',
+        cashbookId:    existing?.cashbookId ?? user.currentCashbookId!,
+        createdBy:     _selectedCreatorUid  ?? existing?.createdBy  ?? user.uid,
+        creatorName:   _selectedCreatorName ?? existing?.creatorName ?? user.displayName,
         createdAt:     _selectedDate,
         amount:        double.parse(_amountCtrl.text.trim()),
         type:          _type,
         category:      _category.toLowerCase(),
         description:   _descCtrl.text.trim(),
+       lastEditedBy:  user.uid,   // so Cloud Function knows who edited
       );
-      await ref.read(transactionRepositoryProvider).addTransaction(tx);
+
+      if (existing != null) {
+        await ref.read(transactionRepositoryProvider).updateTransaction(tx);
+      } else {
+        await ref.read(transactionRepositoryProvider).addTransaction(tx);
+      }
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -226,6 +252,22 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               .animate()
                               .fadeIn(delay: 245.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                              
+                                                      // ── Creator (iOS edit only) ──────────────────────
+                          if (kIsWeb && widget.existingTransaction != null) ...[
+                            const SizedBox(height: 24),
+                            const _FieldLabel('Created By'),
+                            const SizedBox(height: 8),
+                            _CreatorDropdown(
+                              cashbookId:      widget.existingTransaction!.cashbookId,
+                              selectedUid:     _selectedCreatorUid,
+                              selectedName:    _selectedCreatorName,
+                              onChanged: (uid, name) => setState(() {
+                                _selectedCreatorUid  = uid;
+                                _selectedCreatorName = name;
+                              }),
+                            ),
+                          ],
                           const SizedBox(height: 36),
                           ScaleTransition(
                             scale: _btnScale,
@@ -806,6 +848,77 @@ class _FieldLabel extends StatelessWidget {
       style: const TextStyle(
         fontSize: 12, color: _C.textSec,
         fontWeight: FontWeight.w600, letterSpacing: 0.2,
+      ),
+    );
+  }
+}
+// ─── Creator dropdown (iOS edit only) ────────────────────────────────────────
+
+class _CreatorDropdown extends StatefulWidget {
+  final String  cashbookId;
+  final String? selectedUid;
+  final String? selectedName;
+  final void Function(String uid, String name) onChanged;
+  const _CreatorDropdown({
+    required this.cashbookId,
+    required this.selectedUid,
+    required this.selectedName,
+    required this.onChanged,
+  });
+
+  @override
+  State<_CreatorDropdown> createState() => _CreatorDropdownState();
+}
+
+class _CreatorDropdownState extends State<_CreatorDropdown> {
+  List<Map<String, String>> _members = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final doc = await FirebaseFirestore.instance
+        .collection('cashbooks')
+        .doc(widget.cashbookId)
+        .get();
+    final data   = doc.data() ?? {};
+    final raw    = data['members'] as Map<String, dynamic>? ?? {};
+    final list   = raw.entries
+        .map((e) => {'uid': e.key, 'name': e.value.toString()})
+        .toList();
+    if (mounted) setState(() => _members = list);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_members.isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: _C.bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _C.border),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: widget.selectedUid,
+          dropdownColor: _C.surface,
+          style: const TextStyle(color: _C.textPri, fontSize: 15),
+          isExpanded: true,
+          items: _members.map((m) => DropdownMenuItem(
+            value: m['uid'],
+            child: Text(m['name']!),
+          )).toList(),
+          onChanged: (uid) {
+            if (uid == null) return;
+            final name = _members
+                .firstWhere((m) => m['uid'] == uid)['name']!;
+            widget.onChanged(uid, name);
+          },
+        ),
       ),
     );
   }

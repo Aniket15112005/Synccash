@@ -1,6 +1,9 @@
+// lib/features/transactions/presentation/widgets/transaction_action_sheet.dart
+
 import 'package:flutter/material.dart';
 import 'package:synccash/app/theme/app_colors.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
+import 'package:synccash/features/transactions/presentation/screens/add_transaction_screen.dart';
 import 'package:synccash/features/transactions/presentation/widgets/transaction_list_item.dart';
 
 class TransactionActionWrapper extends StatelessWidget {
@@ -15,6 +18,17 @@ class TransactionActionWrapper extends StatelessWidget {
     required this.onDelete,
   });
 
+  void _openEdit(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddTransactionScreen(
+          existingTransaction: transaction,
+        ),
+      ),
+    );
+  }
+
   void _showActionSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -23,6 +37,7 @@ class TransactionActionWrapper extends StatelessWidget {
       builder: (_) => _TransactionActionSheet(
         transaction: transaction,
         onDelete: () => _confirmDelete(context),
+        onEdit: () => _openEdit(context),
       ),
     );
   }
@@ -31,11 +46,14 @@ class TransactionActionWrapper extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Delete transaction?',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+            style:
+                TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
         content: Text(
-          'This will permanently remove the ₹${transaction.amount.toStringAsFixed(0)} '
+          'This will permanently remove the '
+          '₹${transaction.amount.toStringAsFixed(0)} '
           '${transaction.type} entry. This cannot be undone.',
           style: const TextStyle(fontSize: 14, height: 1.5),
         ),
@@ -47,7 +65,8 @@ class TransactionActionWrapper extends StatelessWidget {
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.expense,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
               elevation: 0,
             ),
             onPressed: () async {
@@ -55,7 +74,8 @@ class TransactionActionWrapper extends StatelessWidget {
               Navigator.pop(context); // close action sheet
               await onDelete();
             },
-            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.w600)),
+            child: const Text('Delete',
+                style: TextStyle(fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -79,12 +99,19 @@ class TransactionActionWrapper extends StatelessWidget {
 class _TransactionActionSheet extends StatelessWidget {
   final TransactionEntity transaction;
   final VoidCallback onDelete;
-  const _TransactionActionSheet({required this.transaction, required this.onDelete});
+  final VoidCallback onEdit;
+
+  const _TransactionActionSheet({
+    required this.transaction,
+    required this.onDelete,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
     final bool isIncome = transaction.type == 'income';
-    final Color typeColor = isIncome ? AppColors.income : AppColors.expense;
+    final Color typeColor =
+        isIncome ? AppColors.income : AppColors.expense;
     final theme = Theme.of(context);
 
     return Container(
@@ -102,7 +129,8 @@ class _TransactionActionSheet extends StatelessWidget {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
+                color: theme.colorScheme.onSurfaceVariant
+                    .withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -119,7 +147,9 @@ class _TransactionActionSheet extends StatelessWidget {
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(
-                    isIncome ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
+                    isIncome
+                        ? Icons.arrow_downward_rounded
+                        : Icons.arrow_upward_rounded,
                     color: typeColor,
                     size: 20,
                   ),
@@ -129,16 +159,23 @@ class _TransactionActionSheet extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(transaction.category,
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
+                      Text(
+                        transaction.category,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       const SizedBox(height: 2),
                       Text(
                         transaction.description.isNotEmpty
                             ? transaction.description
                             : transaction.creatorName,
-                        style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: theme
+                                .colorScheme.onSurfaceVariant),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -146,7 +183,8 @@ class _TransactionActionSheet extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${isIncome ? '+' : '-'}₹${transaction.amount.toStringAsFixed(0)}',
+                  '${isIncome ? '+' : '-'}₹'
+                  '${transaction.amount.toStringAsFixed(0)}',
                   style: TextStyle(
                     fontWeight: FontWeight.w800,
                     fontSize: 17,
@@ -160,7 +198,19 @@ class _TransactionActionSheet extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Divider(
-                height: 24, color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3)),
+              height: 24,
+              color: theme.colorScheme.outlineVariant
+                  .withValues(alpha: 0.3),
+            ),
+          ),
+          _ActionTile(
+            icon: Icons.edit_outlined,
+            label: 'Edit transaction',
+            color: theme.colorScheme.onSurface,
+            onTap: () {
+              Navigator.pop(context); // close sheet
+              onEdit(); // open edit screen
+            },
           ),
           _ActionTile(
             icon: Icons.delete_outline_rounded,
@@ -186,7 +236,13 @@ class _ActionTile extends StatelessWidget {
   final String label;
   final Color color;
   final VoidCallback onTap;
-  const _ActionTile({required this.icon, required this.label, required this.color, required this.onTap});
+
+  const _ActionTile({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -194,7 +250,8 @@ class _ActionTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(
+            horizontal: 20, vertical: 14),
         child: Row(
           children: [
             Container(
@@ -207,7 +264,14 @@ class _ActionTile extends StatelessWidget {
               child: Icon(icon, color: color, size: 18),
             ),
             const SizedBox(width: 14),
-            Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: color)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: color,
+              ),
+            ),
           ],
         ),
       ),

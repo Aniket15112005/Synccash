@@ -1,38 +1,142 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <base href="/">
+  <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="description" content="SyncCash — Shared real-time cashbook for two.">
-  <meta name="theme-color" content="#0A0E17">
+  <meta name="description" content="Shared real-time cashbook for two.">
 
-  <!-- PWA -->
+  <!-- iOS PWA / Home Screen -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="SyncCash">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-  <meta name="msapplication-TileColor" content="#0A0E17">
 
-  <link rel="icon" type="image/png" href="favicon.png"/>
-  <title>SyncCash</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+
+  <link rel="icon" type="image/png" href="favicon.png">
   <link rel="manifest" href="manifest.json">
+
+  <title>SyncCash</title>
 
   <style>
     html, body {
-      background-color: #0A0E17;
       margin: 0;
       padding: 0;
+      width: 100%;
       height: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: manipulation;
+      -webkit-touch-callout: none;
+      background-color: #0A0E17;
+    }
+
+    @media all and (display-mode: standalone) {
+      html, body {
+        height: 100lvh;
+      }
+    }
+
+    flutter-view,
+    canvas {
+      touch-action: manipulation;
     }
   </style>
 </head>
 <body>
+  <script>
+    (function () {
+      // Unregister stale Flutter service workers (keeps firebase-messaging-sw.js separate).
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (regs) {
+          regs.forEach(function (reg) {
+            if (reg.active && reg.active.scriptURL.indexOf('firebase-messaging-sw.js') === -1) {
+              reg.unregister();
+            }
+          });
+        });
+      }
+
+      // iOS standalone PWA: fix misaligned canvas hit-testing (Flutter #115829).
+      var isIos =
+        /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var isStandalone =
+        window.navigator.standalone === true ||
+        window.matchMedia('(display-mode: standalone)').matches;
+
+      if (isIos && isStandalone) {
+        function resetViewportScroll() {
+          requestAnimationFrame(function () {
+            window.scrollTo(0, 0);
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0;
+          });
+        }
+
+        function installTouchWorkaround() {
+          var noop = function () {};
+          var opts = { capture: true, passive: true };
+          window.addEventListener('touchstart', noop, opts);
+          document.addEventListener('touchstart', noop, opts);
+          document.body.addEventListener('touchstart', noop, opts);
+        }
+
+        if (document.body) {
+          installTouchWorkaround();
+        } else {
+          document.addEventListener('DOMContentLoaded', installTouchWorkaround);
+        }
+
+        resetViewportScroll();
+
+        window.addEventListener('pageshow', resetViewportScroll);
+        window.addEventListener('resize', resetViewportScroll);
+        window.addEventListener('orientationchange', resetViewportScroll);
+        window.addEventListener('focusout', resetViewportScroll, true);
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden) {
+            resetViewportScroll();
+          }
+        });
+
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', resetViewportScroll);
+        }
+      }
+
+      // WebGL context loss: reload only if context is not restored within 2s.
+      function setupGLMonitor() {
+        var canvas = document.querySelector('canvas');
+        if (!canvas) {
+          setTimeout(setupGLMonitor, 500);
+          return;
+        }
+
+        canvas.addEventListener('webglcontextlost', function (e) {
+          e.preventDefault();
+          var reloaded = false;
+          var reloadTimer = setTimeout(function () {
+            if (!reloaded) {
+              reloaded = true;
+              window.location.reload();
+            }
+          }, 2000);
+
+          canvas.addEventListener('webglcontextrestored', function () {
+            clearTimeout(reloadTimer);
+          }, { once: true });
+        }, false);
+      }
+
+      window.addEventListener('load', setupGLMonitor);
+    })();
+  </script>
 
   <script src="flutter_bootstrap.js" async></script>
-
 </body>
 </html>

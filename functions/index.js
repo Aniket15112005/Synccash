@@ -13,6 +13,21 @@ const { getMessaging }             = require("firebase-admin/messaging");
 initializeApp();
 const db = getFirestore();
 
+// ─── Helper: format date like a bank timestamp ────────────────────────────────
+
+function formatDate(timestamp) {
+  if (!timestamp) return "";
+  const date   = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  const day    = date.getDate();
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const month  = months[date.getMonth()];
+  const hours  = date.getHours();
+  const mins   = date.getMinutes().toString().padStart(2, "0");
+  const ampm   = hours >= 12 ? "PM" : "AM";
+  const hour12 = hours % 12 || 12;
+  return `${day} ${month}, ${hour12}:${mins} ${ampm}`;
+}
+
 // ─── Helper: get sender's platform ───────────────────────────────────────────
 
 async function getSenderPlatform(uid) {
@@ -171,6 +186,7 @@ exports.onTransactionCreated = onDocumentCreated(
   async (event) => {
     const data = event.data?.data();
     if (!data) return;
+    if (data.isImport === true) return null;
 
     const { cashbookId } = event.params;
     const senderUid      = data.createdBy ?? null;
@@ -186,11 +202,15 @@ exports.onTransactionCreated = onDocumentCreated(
     const receiver = await getReceiver(cashbookId, senderUid);
     if (!receiver) return;
 
-    const amount = data.amount != null ? `₹${Number(data.amount).toLocaleString("en-IN")}` : "";
-    const note   = data.note ?? data.description ?? data.category ?? "";
-    const body   = [amount, note].filter(Boolean).join(" • ") || "A new income entry was added";
+    const amount      = data.amount != null ? `₹${Number(data.amount).toLocaleString("en-IN")}` : "";
+    const creatorName = data.creatorName ?? "Someone";
+    const category    = data.category ?? data.description ?? "";
+    const dateStr     = formatDate(data.createdAt);
 
-    await sendAndClean({ receiver, title: " Income Logged ", body, cashbookId });
+const title = `${amount} Credited · SyncCash`;
+const body  = `${creatorName}  |  ${[category, dateStr].filter(Boolean).join("  |  ")}`;
+
+await sendAndClean({ receiver, title, body, cashbookId });
   }
 );
 
@@ -232,11 +252,53 @@ exports.onTransactionUpdated = onDocumentUpdated(
     const receiver = await getReceiver(cashbookId, senderUid);
     if (!receiver) return;
 
-    const amount = after.amount != null ? `₹${Number(after.amount).toLocaleString("en-IN")}` : "";
-    const note   = after.note ?? after.description ?? after.category ?? "";
-    const body   = [amount, note].filter(Boolean).join(" • ") || "An income entry was updated";
+   const creatorName = after.creatorName ?? "Someone";
 
-    await sendAndClean({ receiver, title: "Transaction Updated", body, cashbookId });
+const amountChanged = before.amount !== after.amount;
+
+const beforeDesc  = before.description ?? before.note ?? "";
+const afterDesc   = after.description  ?? after.note  ?? "";
+const descChanged = beforeDesc !== afterDesc;
+
+const catChanged  = before.category !== after.category;
+
+const changes = [];
+
+// ── Amount ────────────────────────────────────────────────────────────────────
+if (amountChanged) {
+  // Amount was changed — show old → new
+  const fromAmt = before.amount != null
+    ? `₹${Number(before.amount).toLocaleString("en-IN")}` : "—";
+  const toAmt   = after.amount  != null
+    ? `₹${Number(after.amount).toLocaleString("en-IN")}`  : "—";
+  changes.push(`${fromAmt} → ${toAmt}`);
+} else if (descChanged || catChanged) {
+  // Amount not changed but something else was — show original amount as context
+  const amt = after.amount != null
+    ? `₹${Number(after.amount).toLocaleString("en-IN")}` : "";
+  if (amt) changes.push(amt);
+}
+
+// ── Description ───────────────────────────────────────────────────────────────
+if (descChanged) {
+  const fromDesc = beforeDesc || "(empty)";
+  const toDesc   = afterDesc  || "(empty)";
+  changes.push(`"${fromDesc}" → "${toDesc}"`);
+}
+
+// ── Category (Retail, Wholesale, etc.) ────────────────────────────────────────
+if (catChanged) {
+  const fromCat = before.category || "(none)";
+  const toCat   = after.category  || "(none)";
+  changes.push(`${fromCat} → ${toCat}`);
+}
+
+const changeStr = changes.join("  |  ") || "Entry updated";
+
+const title = `SyncCash Entry Modified`;
+const body  = `${creatorName}  |  ${changeStr}`;
+
+await sendAndClean({ receiver, title, body, cashbookId }); 
   }
 );
 
@@ -262,10 +324,13 @@ exports.onTransactionDeleted = onDocumentDeleted(
     const receiver = await getReceiver(cashbookId, senderUid);
     if (!receiver) return;
 
-    const amount = data.amount != null ? `₹${Number(data.amount).toLocaleString("en-IN")}` : "";
-    const note   = data.note ?? data.description ?? data.category ?? "";
-    const body   = [amount, note].filter(Boolean).join(" • ") || "An income entry was deleted";
+    const amount      = data.amount != null ? `₹${Number(data.amount).toLocaleString("en-IN")}` : "";
+    const creatorName = data.creatorName ?? "Someone";
+    const category    = data.category ?? data.description ?? "";
 
-    await sendAndClean({ receiver, title: " Income Entry Deleted", body, cashbookId });
+    const title = `${amount} Entry Removed · SyncCash`;
+    const body  = `${creatorName}  |  ${category}`;
+
+await sendAndClean({ receiver, title, body, cashbookId });
   }
 );

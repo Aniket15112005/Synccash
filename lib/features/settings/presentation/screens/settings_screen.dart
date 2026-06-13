@@ -1,4 +1,5 @@
 // lib/features/settings/presentation/screens/settings_screen.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,9 +13,11 @@ import 'package:synccash/features/settings/services/backup_frequency_service.dar
 import 'package:synccash/features/settings/services/backup_service.dart';
 import 'package:synccash/features/settings/services/export_service.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart'
-    show transactionsStreamProvider, transactionRepositoryProvider;
+    show transactionsStreamProvider;
 import 'package:intl/intl.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
+import 'package:flutter/foundation.dart';
+import 'package:synccash/features/settings/presentation/screens/widgets/recycle_bin_sheet.dart';
 
 class SettingsSheet extends ConsumerStatefulWidget {
   const SettingsSheet({super.key});
@@ -41,24 +44,38 @@ class _SettingsSheetState extends ConsumerState<SettingsSheet> {
         ),
       ),
       child: switch (_page) {
-        _SettingsPage.main =>
-          _MainSheet(key: const ValueKey('main'), onNavigate: _navigate),
-        _SettingsPage.export =>
-          _ExportSheet(key: const ValueKey('export'), onBack: _back),
-        _SettingsPage.import =>
-          _ImportSheet(key: const ValueKey('import'), onBack: _back),
-        _SettingsPage.backup =>
-          _BackupSheet(
-            key: const ValueKey('backup'),
-            onBack: _back,
-            onNavigate: _navigate,
-          ),
-        _SettingsPage.backupFrequency =>
-          _BackupFrequencySheet(
-            key: const ValueKey('backupFrequency'),
-            onBack: () => setState(() => _page = _SettingsPage.backup),
-          ),
-      },
+  _SettingsPage.main =>
+    _MainSheet(
+      key: const ValueKey('main'),
+      onNavigate: _navigate,
+    ),
+  _SettingsPage.export =>
+    _ExportSheet(
+      key: const ValueKey('export'),
+      onBack: _back,
+    ),
+  _SettingsPage.import =>
+    _ImportSheet(
+      key: const ValueKey('import'),
+      onBack: _back,
+    ),
+  _SettingsPage.backup =>
+    _BackupSheet(
+      key: const ValueKey('backup'),
+      onBack: _back,
+      onNavigate: _navigate,
+    ),
+  _SettingsPage.backupFrequency =>
+    _BackupFrequencySheet(
+      key: const ValueKey('backupFrequency'),
+      onBack: () => setState(() => _page = _SettingsPage.backup),
+    ),
+  _SettingsPage.recycleBin =>
+    RecycleBinSheet(
+      key: const ValueKey('recycleBin'),
+      onBack: _back,
+    ),
+},
     );
   }
 
@@ -73,7 +90,7 @@ class _SettingsSheetState extends ConsumerState<SettingsSheet> {
   }
 }
 
-enum _SettingsPage { main, export, import, backup, backupFrequency }
+enum _SettingsPage { main, export, import, backup, backupFrequency, recycleBin  }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main settings page
@@ -120,6 +137,18 @@ class _MainSheet extends StatelessWidget {
             trailing: const _ChevronIcon(),
           ).animate().fadeIn(delay: 140.ms, duration: 220.ms).slideX(
               begin: 0.04, end: 0, curve: Curves.easeOut),
+                        if (kIsWeb) ...[
+            const SizedBox(height: 8),
+            _SettingsTile(
+              icon: Icons.delete_sweep_rounded,
+              iconColor: const Color(0xFFf87171),
+              title: 'Recycle Bin',
+              subtitle: 'Restore or permanently remove deleted entries',
+              onTap: () => onNavigate(_SettingsPage.recycleBin),
+              trailing: const _ChevronIcon(),
+            ).animate().fadeIn(delay: 180.ms, duration: 220.ms).slideX(
+                begin: 0.04, end: 0, curve: Curves.easeOut),
+          ],
           const SizedBox(height: 24),
         ],
       ),
@@ -282,23 +311,30 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
       final cashbookId = ref.read(currentCashbookIdProvider);
       if (cashbookId == null) throw Exception('No active cashbook.');
 
-      final repo = ref.read(transactionRepositoryProvider);
+      
       var imported = 0;
-      for (final tx in backup.transactions) {
-        final adapted = TransactionEntity(
-          transactionId: tx.transactionId,
-          cashbookId: cashbookId,
-          createdBy: tx.createdBy,
-          creatorName: tx.creatorName,
-          createdAt: tx.createdAt,
-          amount: tx.amount,
-          type: tx.type,
-          category: tx.category,
-          description: tx.description,
-        );
-        await repo.addTransaction(adapted);
-        imported++;
-      }
+       
+
+final db = FirebaseFirestore.instance;
+for (final tx in backup.transactions) {
+  await db
+      .collection('cashbooks')
+      .doc(cashbookId)
+      .collection('transactions')
+      .doc(tx.transactionId)
+      .set({
+    'cashbookId':   cashbookId,
+    'createdBy':    tx.createdBy,
+    'creatorName':  tx.creatorName,
+    'createdAt':    Timestamp.fromDate(tx.createdAt),
+    'amount':       tx.amount,
+    'type':         tx.type,
+    'category':     tx.category,
+    'description':  tx.description,
+    'isImport':     true,   // ← tells Cloud Function to stay silent
+  });
+  imported++;
+}
 
       if (mounted) {
         Navigator.pop(context);
