@@ -251,7 +251,8 @@ class FCMService {
         SetOptions(merge: true),
       );
 
-      await prefs.setString(_kPrefKey, token);
+     // ✅ CORRECT
+    await prefs.setString(_kPrefKey, newToken);
 
       if (_isIOSOrPWA) {
         _cacheReceiverOnCashbook(user.uid, newToken).ignore();
@@ -275,7 +276,8 @@ class FCMService {
       await _firestore.collection('cashbooks').doc(cashbookId).set(
         {
           'iosReceiverId':     userId,
-          'iosReceiverTokens': [token],
+          // ✅ CORRECT
+          'iosReceiverTokens': FieldValue.arrayUnion([token]),
         },
         SetOptions(merge: true),
       );

@@ -24,11 +24,14 @@ messaging.onBackgroundMessage((payload) => {
   const title = payload.data?.title || 'SyncCash';
   const body  = payload.data?.body  || '';
 
+  // ── CHANGED: unique tag per notification so rapid events don't erase each other ──
+  const tag = 'synccash-' + (payload.data?.cashbookId || 'tx') + '-' + Date.now();
+
   return self.registration.showNotification(title, {
     body,
     icon:    '/icons/Icon-192.png',
     badge:   '/icons/Icon-192.png',
-    tag:     'synccash-transaction',
+    tag,                          // ← was fixed string 'synccash-transaction'
     vibrate: [200, 100, 200],
     data:    payload.data || {},
   });

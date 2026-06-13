@@ -8,9 +8,12 @@ import 'package:synccash/features/auth/presentation/providers/auth_provider.dart
 import 'package:synccash/features/auth/presentation/screens/login_screen.dart';
 import 'package:synccash/features/auth/presentation/screens/signup_screen.dart';
 import 'package:synccash/features/cashbook/presentation/screens/pairing_screen.dart';
+import 'package:synccash/features/cashbook/presentation/screens/splash_screen.dart';
 import 'package:synccash/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:synccash/features/transactions/presentation/screens/add_transaction_screen.dart';
 import 'package:synccash/features/transactions/presentation/screens/transaction_history_screen.dart';
+
+// ── Page transition helper ────────────────────────────────────────────────────
 
 CustomTransitionPage<void> _fadePage({
   required GoRouterState state,
@@ -31,12 +34,29 @@ CustomTransitionPage<void> _fadePage({
   );
 }
 
-// ── Step 1: A ChangeNotifier that wraps the auth stream ──────────────────────
-// GoRouter's refreshListenable only re-runs the redirect — it does NOT
-// recreate the router. This is the correct pattern.
+// ── Splash notifier ───────────────────────────────────────────────────────────
+// Tracks whether the splash animation has finished.
+// GoRouter waits for this before redirecting away from '/'.
+
+class _SplashNotifier extends ChangeNotifier {
+  bool _done = false;
+  bool get done => _done;
+
+  void complete() {
+    if (_done) return;
+    _done = true;
+    notifyListeners(); // triggers GoRouter to re-evaluate redirect
+  }
+}
+
+final _splashNotifierProvider = Provider<_SplashNotifier>((ref) {
+  return _SplashNotifier();
+});
+
+// ── Auth notifier ─────────────────────────────────────────────────────────────
+
 class _AuthNotifier extends ChangeNotifier {
   _AuthNotifier(this._ref) {
-    // Listen to the auth stream and notify GoRouter to re-evaluate redirects.
     _ref.listen<AsyncValue<dynamic>>(
       authProvider,
       (_, __) => notifyListeners(),
@@ -49,38 +69,48 @@ final _authNotifierProvider = Provider<_AuthNotifier>((ref) {
   return _AuthNotifier(ref);
 });
 
-// ── Step 2: Router is created ONCE and never recreated ───────────────────────
+// ── Router ────────────────────────────────────────────────────────────────────
+
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final notifier = ref.watch(_authNotifierProvider);
+  final authNotifier  = ref.watch(_authNotifierProvider);
+  final splashNotifier = ref.watch(_splashNotifierProvider);
 
   return GoRouter(
     navigatorKey: NavigationService.navigatorKey,
     initialLocation: RouteConstants.splash,
-    refreshListenable: notifier,  // re-runs redirect only, no router rebuild
+
+    // Both auth changes AND splash completion trigger redirect re-evaluation
+    refreshListenable: Listenable.merge([authNotifier, splashNotifier]),
 
     redirect: (BuildContext context, GoRouterState state) {
+      // ── Wait for splash animation to finish first ────────────────────────
+      // This prevents the redirect from firing mid-animation even if auth
+      // resolves quickly (e.g. cached session on reload).
+      if (!splashNotifier.done) return null;
+
       final authState = ref.read(authProvider);
 
-      // ── CRITICAL FIX: Do NOT redirect while auth is still loading ──────────
-      // Without this, unauthenticated redirect fires before Firebase resolves
-      // the persisted session, causing a visible flash to /login on every open.
+      // ── Wait for auth to resolve ─────────────────────────────────────────
       if (authState.isLoading) return null;
 
-      final user = authState.asData?.value;
+      final user     = authState.asData?.value;
       final loggedIn = user != null;
 
       final isAuthRoute =
           state.matchedLocation == RouteConstants.login ||
           state.matchedLocation == RouteConstants.signup;
 
+      // Not logged in → always go to login
       if (!loggedIn && !isAuthRoute) return RouteConstants.login;
 
+      // Logged in but on auth screen → go to dashboard or pairing
       if (loggedIn && isAuthRoute) {
         return user.currentCashbookId != null
             ? RouteConstants.dashboard
             : RouteConstants.pairing;
       }
 
+      // Logged in and still on splash → go to dashboard or pairing
       if (loggedIn && state.matchedLocation == RouteConstants.splash) {
         return user.currentCashbookId != null
             ? RouteConstants.dashboard
@@ -91,19 +121,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     },
 
     routes: [
+      // ── Splash ─────────────────────────────────────────────────────────────
       GoRoute(
         path: RouteConstants.splash,
         pageBuilder: (context, state) => _fadePage(
           state: state,
-          child: const Scaffold(
-            backgroundColor: Color(0xFF080a0e),
-            body: Center(
-              child: CircularProgressIndicator(color: Color(0xFF4f6ef7)),
-            ),
+          child: SplashScreen(
+            // When animation ends, mark splash done → redirect fires
+            onComplete: () => ref.read(_splashNotifierProvider).complete(),
           ),
-          duration: const Duration(milliseconds: 150),
+          duration: const Duration(milliseconds: 0), // no fade over splash
         ),
       ),
+
+      // ── Auth ────────────────────────────────────────────────────────────────
       GoRoute(
         path: RouteConstants.login,
         pageBuilder: (context, state) =>
@@ -114,6 +145,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) =>
             _fadePage(state: state, child: const SignupScreen()),
       ),
+
+      // ── App ─────────────────────────────────────────────────────────────────
       GoRoute(
         path: RouteConstants.pairing,
         pageBuilder: (context, state) =>

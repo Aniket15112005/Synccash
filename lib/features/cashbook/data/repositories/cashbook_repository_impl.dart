@@ -93,12 +93,13 @@ class CashbookRepositoryImpl implements CashbookRepository {
     );
   }
 
-  @override
-  Stream<CashbookEntity> watchCashbook(String cashbookId) {
-    return _firestore
-        .collection('cashbooks')
-        .doc(cashbookId)
-        .snapshots()
-        .map((doc) => CashbookModel.fromJson(doc.data()!, doc.id));
-  }
+@override
+Stream<CashbookEntity> watchCashbook(String cashbookId) {
+  return _firestore
+      .collection('cashbooks')
+      .doc(cashbookId)
+      .snapshots()
+      .where((doc) => doc.exists && doc.data() != null)
+      .map((doc) => CashbookModel.fromJson(doc.data()!, doc.id));
+}
 }

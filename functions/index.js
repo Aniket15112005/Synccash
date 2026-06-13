@@ -4,12 +4,15 @@
 // Rules:
 //   Android adds INCOME        → iOS/PWA user notified  ✅
 //   Android edits ANY entry    → iOS/PWA user notified  ✅
+//   Android deletes INCOME     → iOS/PWA user notified  ✅  ← ADDED
 //   Android adds EXPENSE       → silent                 ❌
+//   Android deletes EXPENSE    → silent                 ❌
 //   iOS/PWA does ANYTHING      → Android never notified ❌
 
 "use strict";
 
-const { onDocumentCreated, onDocumentUpdated } =
+// ── CHANGED: added onDocumentDeleted to imports ──────────────────────────────
+const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } =
   require("firebase-functions/v2/firestore");
 const { initializeApp }            = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
@@ -51,8 +54,6 @@ async function getReceiver(cashbookId, senderUid) {
       return { uid: iosReceiverId, tokens: cachedTokens };
     }
 
-    // ✅ FIXED: your cashbook uses ownerId/participantId, not memberUids/members.
-    // Fall back to those fields so the slow path actually finds someone.
     const memberUids =
       d.memberUids ??
       d.members ??
@@ -68,7 +69,6 @@ async function getReceiver(cashbookId, senderUid) {
       const platform = uData.platform ?? "";
       const tokens   = uData.fcmTokens ?? [];
 
-      // "web" = iOS PWA, "ios" = native iOS — both are valid receivers
       const isNonAndroid = platform === "ios" || platform === "web";
 
       if (isNonAndroid && tokens.length > 0) {
@@ -123,7 +123,6 @@ async function sendAndClean({ receiver, title, body, cashbookId }) {
     return;
   }
 
-  // Clean up stale / invalid tokens automatically
   const stale = [];
   batchResponse.responses.forEach((r, i) => {
     if (!r.success) {
@@ -141,9 +140,15 @@ async function sendAndClean({ receiver, title, body, cashbookId }) {
 
   if (stale.length > 0) {
     try {
-      await db.collection("users").doc(uid).update({
-        fcmTokens: FieldValue.arrayRemove(...stale),
-      });
+      // ── CHANGED: also clean stale tokens from cashbooks doc ──────────────
+      await Promise.all([
+        db.collection("users").doc(uid).update({
+          fcmTokens: FieldValue.arrayRemove(...stale),
+        }),
+        db.collection("cashbooks").doc(cashbookId).update({
+          iosReceiverTokens: FieldValue.arrayRemove(...stale),
+        }),
+      ]);
       console.log(`  Removed ${stale.length} stale token(s) for ${uid}`);
     } catch (e) {
       console.error("Stale token cleanup error:", e.message);
@@ -247,5 +252,48 @@ exports.onTransactionUpdated = onDocumentUpdated(
       body,
       cashbookId,
     });
+  }
+);
+
+// ─── TRIGGER 3: Transaction deleted ──────────────────────────────────────────
+// ── CHANGED: entire block below is new ───────────────────────────────────────
+
+exports.onTransactionDeleted = onDocumentDeleted(
+  {
+    document: "cashbooks/{cashbookId}/transactions/{transactionId}",
+    region:   "us-central1",
+  },
+  async (event) => {
+    const data = event.data?.data();
+    if (!data) return;
+
+    const { cashbookId } = event.params;
+    const senderUid      = data.deletedBy ?? data.updatedBy ?? data.createdBy ?? null;
+    const type           = (data.type ?? "").toLowerCase();
+
+    console.log(`🗑️  onTransactionDeleted — type:${type} sender:${senderUid} cashbook:${cashbookId}`);
+
+    // Only notify on income deletion; expense deletion is silent
+    if (type !== "income") {
+      console.log("⏭️  Expense deletion — silent");
+      return;
+    }
+
+    const platform = await getSenderPlatform(senderUid);
+    if (platform !== "android") {
+      console.log(`⏭️  Sender platform '${platform}' — silent`);
+      return;
+    }
+
+    const receiver = await getReceiver(cashbookId, senderUid);
+    if (!receiver) return;
+
+    const amount = data.amount != null
+      ? `₹${Number(data.amount).toLocaleString("en-IN")}` : "";
+    const note   = data.note ?? data.description ?? data.category ?? "";
+    const body   = [amount, note].filter(Boolean).join(" • ") ||
+                   "An income entry was deleted";
+
+    await sendAndClean({ receiver, title: "🗑️ Income Entry Deleted", body, cashbookId });
   }
 );

@@ -1,9 +1,56 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // TEMPORARY TEST RULES — replace with production rules once join works
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+
+    // Helper using your actual field names: ownerId + participantId
+    function isCashbookMember(database, cashbookId) {
+      let cb = get(/databases/$(database)/documents/cashbooks/$(cashbookId)).data;
+      return request.auth != null
+          && (request.auth.uid == cb.ownerId
+              || request.auth.uid == cb.participantId);
     }
+
+    // ── Users ──────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId;
+    }
+
+    // ── Cashbooks ──────────────────────────────────────────────────────────
+    match /cashbooks/{cashbookId} {
+
+      // Any authenticated user can QUERY (needed for invite code lookup in joinCashbook)
+      allow list: if request.auth != null;
+
+      // Only owner or participant can read a specific cashbook document
+      allow get: if request.auth != null
+                 && (request.auth.uid == resource.data.ownerId
+                     || request.auth.uid == resource.data.participantId);
+
+      // Any authenticated user can create (they become owner)
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.ownerId;
+
+      // Owner or participant can update
+      allow update: if request.auth != null
+                    && (request.auth.uid == resource.data.ownerId
+                        || request.auth.uid == resource.data.participantId);
+
+      // Only owner can delete
+      allow delete: if request.auth != null
+                    && request.auth.uid == resource.data.ownerId;
+
+      // ── Transactions ─────────────────────────────────────────────────────
+      match /transactions/{transactionId} {
+        allow read:   if isCashbookMember(database, cashbookId);
+        allow create: if isCashbookMember(database, cashbookId)
+                      && request.auth.uid == request.resource.data.createdBy;
+        allow update: if request.auth != null
+                      && request.auth.uid == resource.data.createdBy;
+        allow delete: if request.auth != null
+                      && request.auth.uid == resource.data.createdBy;
+      }
+    }
+
   }
 }

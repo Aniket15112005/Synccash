@@ -12,5 +12,6 @@ final cashbookRepositoryProvider = Provider<CashbookRepository>((ref) {
 final cashbookStreamProvider = StreamProvider<CashbookEntity>((ref) {
   final cashbookId = ref.watch(currentCashbookIdProvider);
   if (cashbookId == null) return const Stream.empty();
-  return ref.read(cashbookRepositoryProvider).watchCashbook(cashbookId);
+  // ref.watch (not ref.read) ensures the stream rebuilds if the repo changes
+  return ref.watch(cashbookRepositoryProvider).watchCashbook(cashbookId);
 });

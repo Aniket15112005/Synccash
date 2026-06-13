@@ -55,6 +55,11 @@ class TransactionListItem extends ConsumerWidget {
 
   void _showActions(BuildContext ctx, WidgetRef ref) {
     HapticFeedback.lightImpact();
+
+    // Resolve creator check — fall back to FirebaseAuth if prop is null
+    final uid = currentUserId ?? FirebaseAuth.instance.currentUser?.uid;
+    final isCreator = uid != null && uid == transaction.createdBy;
+
     showModalBottomSheet(
       context: ctx,
       backgroundColor: Colors.transparent,
@@ -62,6 +67,7 @@ class TransactionListItem extends ConsumerWidget {
       useSafeArea: true,
       builder: (sheetCtx) => _ActionSheet(
         transaction: transaction,
+        isCreator: isCreator,
         onViewDetails: () {
           Navigator.pop(sheetCtx);
           showModalBottomSheet(
@@ -311,12 +317,14 @@ class _MiniTag extends StatelessWidget {
 class _ActionSheet extends StatelessWidget {
   const _ActionSheet({
     required this.transaction,
+    required this.isCreator,
     required this.onViewDetails,
     required this.onEdit,
     required this.onDelete,
   });
 
   final TransactionEntity transaction;
+  final bool isCreator;
   final VoidCallback onViewDetails;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -346,7 +354,7 @@ class _ActionSheet extends StatelessWidget {
           ),
         ),
 
-        // Summary
+        // Summary card
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
           child: Container(
@@ -357,29 +365,33 @@ class _ActionSheet extends StatelessWidget {
               border: Border.all(color: const Color(0xFF1F2937)),
             ),
             child: Row(children: [
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _MiniTag(label: transaction.category.toUpperCase()),
-                  const SizedBox(height: 7),
-                  Text(title,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _MiniTag(label: transaction.category.toUpperCase()),
+                    const SizedBox(height: 7),
+                    Text(
+                      title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Color(0xFFD1D9E6),
                         fontWeight: FontWeight.w600,
                         fontSize: 15,
-                      )),
-                  const SizedBox(height: 3),
-                  Text(
-                    '${transaction.creatorName}  ·  ${_dateFmt.format(transaction.createdAt)}',
-                    style: const TextStyle(
-                      color: Color(0xFF6B7280),
-                      fontSize: 12,
+                      ),
                     ),
-                  ),
-                ],
-              )),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${transaction.creatorName}  ·  ${_dateFmt.format(transaction.createdAt)}',
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(width: 16),
               Text(
                 '${isIncome ? '+' : '−'}₹${CurrencyFormatter.format(transaction.amount)}',
@@ -399,29 +411,38 @@ class _ActionSheet extends StatelessWidget {
 
         // Actions
         const SizedBox(height: 8),
+
+        // View Details — always visible to both users
         _SheetAction(
           icon: Icons.receipt_long_outlined,
           label: 'View Details',
           onTap: onViewDetails,
         ),
-        _SheetDivider(),
-        _SheetAction(
-          icon: Icons.edit_outlined,
-          label: 'Edit',
-          onTap: onEdit,
-        ),
-        _SheetDivider(),
-        _SheetAction(
-          icon: Icons.delete_outline_rounded,
-          label: 'Delete',
-          onTap: onDelete,
-          destructive: true,
-        ),
+
+        // Edit & Delete — only visible to the creator of this entry
+        if (isCreator) ...[
+          _SheetDivider(),
+          _SheetAction(
+            icon: Icons.edit_outlined,
+            label: 'Edit',
+            onTap: onEdit,
+          ),
+          _SheetDivider(),
+          _SheetAction(
+            icon: Icons.delete_outline_rounded,
+            label: 'Delete',
+            onTap: onDelete,
+            destructive: true,
+          ),
+        ],
+
         const SizedBox(height: 8),
       ]),
     );
   }
 }
+
+// ─── Sheet action row ──────────────────────────────────────────────────────────
 
 class _SheetAction extends StatelessWidget {
   const _SheetAction({
@@ -430,6 +451,7 @@ class _SheetAction extends StatelessWidget {
     required this.onTap,
     this.destructive = false,
   });
+
   final IconData icon;
   final String label;
   final VoidCallback onTap;
@@ -441,24 +463,31 @@ class _SheetAction extends StatelessWidget {
         ? const Color(0xFFf87171)
         : const Color(0xFFD1D9E6);
     return GestureDetector(
-      onTap: () { HapticFeedback.selectionClick(); onTap(); },
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
       behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(children: [
           Icon(icon, size: 18, color: color.withValues(alpha: 0.7)),
           const SizedBox(width: 12),
-          Text(label,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: color,
-              )),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
+          ),
         ]),
       ),
     );
   }
 }
+
+// ─── Sheet divider ────────────────────────────────────────────────────────────
 
 class _SheetDivider extends StatelessWidget {
   @override
@@ -474,8 +503,8 @@ class _SheetDivider extends StatelessWidget {
 class _EditTransactionSheet extends StatefulWidget {
   final TransactionEntity transaction;
   final WidgetRef ref;
-  const _EditTransactionSheet(
-      {required this.transaction, required this.ref});
+
+  const _EditTransactionSheet({required this.transaction, required this.ref});
 
   @override
   State<_EditTransactionSheet> createState() => _EditTransactionSheetState();
@@ -490,8 +519,7 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
   @override
   void initState() {
     super.initState();
-    _descCtrl =
-        TextEditingController(text: widget.transaction.description);
+    _descCtrl   = TextEditingController(text: widget.transaction.description);
     _amountCtrl = TextEditingController(
         text: widget.transaction.amount.toStringAsFixed(0));
     _selectedDate = widget.transaction.createdAt;
@@ -506,7 +534,7 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
 
   Future<void> _pickDate() async {
     HapticFeedback.selectionClick();
-    final now = DateTime.now();
+    final now    = DateTime.now();
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
@@ -516,9 +544,9 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: const ColorScheme.dark(
-              primary: Color(0xFF3B82F6),
+              primary:   Color(0xFF3B82F6),
               onPrimary: Colors.white,
-              surface: Color(0xFF161922),
+              surface:   Color(0xFF161922),
               onSurface: Color(0xFFD1D9E6),
             ),
             dialogTheme: const DialogThemeData(
@@ -586,9 +614,9 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
 
   bool get _isToday {
     final now = DateTime.now();
-    return _selectedDate.year == now.year &&
-        _selectedDate.month == now.month &&
-        _selectedDate.day == now.day;
+    return _selectedDate.year  == now.year  &&
+           _selectedDate.month == now.month &&
+           _selectedDate.day   == now.day;
   }
 
   @override
@@ -616,14 +644,17 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
             ),
           ),
           const SizedBox(height: 20),
+
           const Align(
             alignment: Alignment.centerLeft,
-            child: Text('Edit Transaction',
-                style: TextStyle(
-                  color: Color(0xFFD1D9E6),
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                )),
+            child: Text(
+              'Edit Transaction',
+              style: TextStyle(
+                color: Color(0xFFD1D9E6),
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
           const SizedBox(height: 20),
 
@@ -652,8 +683,7 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
               ),
               child: Row(children: [
                 Container(
-                  width: 34,
-                  height: 34,
+                  width: 34, height: 34,
                   decoration: BoxDecoration(
                     color: const Color(0xFF1F2937),
                     borderRadius: BorderRadius.circular(9),
@@ -714,9 +744,12 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
               child: _loading
                   ? const SizedBox(
                       width: 18, height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('Save Changes',
-                      style: TextStyle(fontWeight: FontWeight.w600)),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text(
+                      'Save Changes',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
             ),
           ),
           const SizedBox(height: 8),
@@ -734,6 +767,7 @@ class _StyledField extends StatelessWidget {
     required this.label,
     this.keyboardType,
   });
+
   final TextEditingController controller;
   final String label;
   final TextInputType? keyboardType;

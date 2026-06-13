@@ -32,95 +32,58 @@ String _initial(String? name) {
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
-class DashboardScreen extends ConsumerStatefulWidget {
+class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
   @override
-  ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
-}
-
-class _DashboardScreenState extends ConsumerState<DashboardScreen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _entryCtrl;
-  late final Animation<double> _fadeAnim;
-  late final Animation<Offset> _slideAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _entryCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 460),
-    );
-    _fadeAnim = CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOut);
-    _slideAnim = Tween<Offset>(
-      begin: const Offset(0, 0.045),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOutCubic));
-    _entryCtrl.forward();
-  }
-
-  @override
-  void dispose() {
-    _entryCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cashbookId = ref.watch(currentCashbookIdProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: FadeTransition(
-          opacity: _fadeAnim,
-          child: SlideTransition(
-            position: _slideAnim,
-            child: RefreshIndicator(
-              color: AppColors.primary,
-              backgroundColor: AppColors.surface,
-              strokeWidth: 1.5,
-              onRefresh: () async {
-                ref.invalidate(cashbookStreamProvider);
-                if (cashbookId != null) {
-                  ref.invalidate(filteredTransactionsProvider(cashbookId));
-                }
-              },
-              child: CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(
-                  parent: BouncingScrollPhysics(),
-                ),
-                slivers: [
-                  const SliverToBoxAdapter(
-                    child: RepaintBoundary(child: _GreetingHeader()),
-                  ),
-                  const SliverToBoxAdapter(
-                    child: RepaintBoundary(child: _BalanceCardSection()),
-                  ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 28)),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-                      child: _SectionHeader(
-                        onViewAll: () => context.push(RouteConstants.history),
-                      ),
-                    ),
-                  ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 14)),
-                  if (cashbookId != null)
-                    _DashboardTransactionsSliver(cashbookId: cashbookId)
-                  else
-                    const SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 20),
-                        child: _EmptyTransactions(),
-                      ),
-                    ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 110)),
-                ],
-              ),
+        child: RefreshIndicator(
+          color: AppColors.primary,
+          backgroundColor: AppColors.surface,
+          strokeWidth: 1.5,
+          onRefresh: () async {
+            ref.invalidate(cashbookStreamProvider);
+            if (cashbookId != null) {
+              ref.invalidate(filteredTransactionsProvider(cashbookId));
+            }
+          },
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
             ),
+            slivers: [
+              const SliverToBoxAdapter(
+                child: RepaintBoundary(child: _GreetingHeader()),
+              ),
+              const SliverToBoxAdapter(
+                child: RepaintBoundary(child: _BalanceCardSection()),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 28)),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+                  child: _SectionHeader(
+                    onViewAll: () => context.push(RouteConstants.history),
+                  ),
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 14)),
+              if (cashbookId != null)
+                _DashboardTransactionsSliver(cashbookId: cashbookId)
+              else
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20),
+                    child: _EmptyTransactions(),
+                  ),
+                ),
+              const SliverToBoxAdapter(child: SizedBox(height: 110)),
+            ],
           ),
         ),
       ),
@@ -255,7 +218,6 @@ class _GreetingHeader extends ConsumerWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // ── Greeting text ──────────────────────────────────────────────────
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -279,11 +241,8 @@ class _GreetingHeader extends ConsumerWidget {
               ),
             ],
           ),
-
-          // ── Action buttons ─────────────────────────────────────────────────
           Row(
             children: [
-              // Settings icon
               GestureDetector(
                 onTap: () => _showSettings(context),
                 behavior: HitTestBehavior.opaque,
@@ -309,10 +268,7 @@ class _GreetingHeader extends ConsumerWidget {
                   ),
                 ),
               ),
-
               const SizedBox(width: 10),
-
-              // Avatar / profile
               GestureDetector(
                 onTap: () {
                   HapticFeedback.lightImpact();
@@ -845,8 +801,8 @@ class _ProfileBottomSheet extends StatelessWidget {
                     color: theme.colorScheme.surfaceContainerLow,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color:
-                          theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+                      color: theme.colorScheme.outlineVariant
+                          .withValues(alpha: 0.3),
                       width: 0.5,
                     ),
                   ),
@@ -889,8 +845,8 @@ class _ProfileBottomSheet extends StatelessWidget {
               onTap: onLogout,
               borderRadius: BorderRadius.circular(16),
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 14),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                 child: Row(
                   children: [
                     Container(
@@ -930,8 +886,8 @@ class _ProfileBottomSheet extends StatelessWidget {
                     Icon(
                       Icons.chevron_right_rounded,
                       size: 18,
-                      color:
-                          theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                      color: theme.colorScheme.onSurfaceVariant
+                          .withValues(alpha: 0.3),
                     ),
                   ],
                 ),
