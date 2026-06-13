@@ -72,14 +72,14 @@ class ExportService {
                   pw.SizedBox(height: 16),
                   pw.Row(children: [
                     _pdfSummaryBox('Total Income',
-                        '₹${_fmt(totalIncome)}', PdfColors.green700),
+                        '${_fmt(totalIncome)}', PdfColors.green700),
                     pw.SizedBox(width: 12),
                     _pdfSummaryBox('Total Expense',
-                        '₹${_fmt(totalExpense)}', PdfColors.red700),
+                        '${_fmt(totalExpense)}', PdfColors.red700),
                     pw.SizedBox(width: 12),
                     _pdfSummaryBox(
                       'Balance',
-                      '₹${_fmt(balance)}',
+                      '${_fmt(balance)}',
                       balance >= 0 ? PdfColors.blue700 : PdfColors.red700,
                     ),
                   ]),

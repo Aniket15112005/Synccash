@@ -1,6 +1,8 @@
 // lib/features/settings/presentation/screens/settings_screen.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:synccash/features/analytics/presentation/screens/analytics_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -147,6 +149,24 @@ class _MainSheet extends StatelessWidget {
               onTap: () => onNavigate(_SettingsPage.recycleBin),
               trailing: const _ChevronIcon(),
             ).animate().fadeIn(delay: 180.ms, duration: 220.ms).slideX(
+                begin: 0.04, end: 0, curve: Curves.easeOut),
+            const SizedBox(height: 8),
+            _SettingsTile(
+              icon: Icons.analytics_rounded,
+              iconColor: const Color(0xFF5B8DEF),
+              title: 'Analytics',
+              subtitle: 'Spending insights, trends & category breakdown',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const AnalyticsScreen(),
+                  ),
+                );
+              },
+              trailing: const _ChevronIcon(),
+            ).animate().fadeIn(delay: 220.ms, duration: 220.ms).slideX(
                 begin: 0.04, end: 0, curve: Curves.easeOut),
           ],
           const SizedBox(height: 24),

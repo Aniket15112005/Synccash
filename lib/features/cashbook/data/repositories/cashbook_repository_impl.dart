@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:synccash/features/cashbook/data/models/cashbook_model.dart';
@@ -31,10 +32,8 @@ class CashbookRepositoryImpl implements CashbookRepository {
       totalExpense: 0.0,
     );
 
-    // Write cashbook doc
     await docRef.set(model.toJson());
 
-    // Use set+merge so it works whether the user doc exists or not
     await _firestore
         .collection('users')
         .doc(userId)
@@ -62,21 +61,17 @@ class CashbookRepositoryImpl implements CashbookRepository {
     final doc = query.docs.first;
     final cashbook = CashbookModel.fromJson(doc.data(), doc.id);
 
-    // Block if already has a participant (null AND empty string both mean "free")
     final pid = cashbook.participantId;
     if (pid != null && pid.isNotEmpty) {
       throw Exception('Terminal Access Denied: Channel Busy.');
     }
 
-    // Block owner from joining their own cashbook
     if (cashbook.ownerId == userId) {
       throw Exception('Cannot join your own cashbook.');
     }
 
-    // Direct update — no transaction needed
     await doc.reference.update({'participantId': userId});
 
-    // Use set+merge so it works whether the user doc exists or not
     await _firestore
         .collection('users')
         .doc(userId)
@@ -93,13 +88,85 @@ class CashbookRepositoryImpl implements CashbookRepository {
     );
   }
 
-@override
-Stream<CashbookEntity> watchCashbook(String cashbookId) {
-  return _firestore
-      .collection('cashbooks')
-      .doc(cashbookId)
-      .snapshots()
-      .where((doc) => doc.exists && doc.data() != null)
-      .map((doc) => CashbookModel.fromJson(doc.data()!, doc.id));
-}
+  @override
+  Stream<CashbookEntity> watchCashbook(String cashbookId) {
+    // Combine the cashbook doc stream (for metadata: inviteCode, ownerId, etc.)
+    // with the transactions subcollection stream (for live-computed totals).
+    // This means the balance/income/expense shown in the UI is always derived
+    // from the actual transactions that exist — immune to any drift caused by
+    // add/update/delete operations not keeping the stored totals in sync.
+
+    late StreamController<CashbookEntity> controller;
+    StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? cashbookSub;
+    StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? txSub;
+
+    CashbookModel? latestMeta;
+    List<QueryDocumentSnapshot<Map<String, dynamic>>>? latestTxDocs;
+
+    void tryEmit() {
+      if (latestMeta == null || latestTxDocs == null) return;
+
+      double totalIncome  = 0.0;
+      double totalExpense = 0.0;
+
+      for (final doc in latestTxDocs!) {
+        final data   = doc.data();
+        final type   = (data['type'] as String? ?? '').toLowerCase();
+        final amount = (data['amount'] as num? ?? 0).toDouble();
+        if (type == 'income') {
+          totalIncome += amount;
+        } else {
+          totalExpense += amount;
+        }
+      }
+
+      controller.add(CashbookModel(
+        id:           latestMeta!.id,
+        inviteCode:   latestMeta!.inviteCode,
+        ownerId:      latestMeta!.ownerId,
+        participantId: latestMeta!.participantId,
+        totalIncome:  totalIncome,
+        totalExpense: totalExpense,
+        totalBalance: totalIncome - totalExpense,
+      ));
+    }
+
+    controller = StreamController<CashbookEntity>(
+      onListen: () {
+        // Stream 1: cashbook document (metadata)
+        cashbookSub = _firestore
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .snapshots()
+            .where((doc) => doc.exists && doc.data() != null)
+            .listen(
+          (doc) {
+            latestMeta = CashbookModel.fromJson(doc.data()!, doc.id);
+            tryEmit();
+          },
+          onError: controller.addError,
+        );
+
+        // Stream 2: all active transactions (for live total computation)
+        txSub = _firestore
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .collection('transactions')
+            .snapshots()
+            .listen(
+          (snap) {
+            latestTxDocs = snap.docs;
+            tryEmit();
+          },
+          onError: controller.addError,
+        );
+      },
+      onCancel: () {
+        cashbookSub?.cancel();
+        txSub?.cancel();
+      },
+    );
+
+    return controller.stream;
+  }
 }
