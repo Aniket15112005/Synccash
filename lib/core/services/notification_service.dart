@@ -4,6 +4,9 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'notification_service_web.dart'
+    if (dart.library.io) 'notification_service_stub.dart' as web_notify;
+
 class NotificationService {
   NotificationService._();
 
@@ -17,8 +20,7 @@ class NotificationService {
   static const _kChannelDesc =
       'Income and expense alerts from your shared cashbook.';
 
-  static const AndroidNotificationChannel _channel =
-      AndroidNotificationChannel(
+  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     _kChannelId,
     _kChannelName,
     description:     _kChannelDesc,
@@ -27,56 +29,85 @@ class NotificationService {
     playSound:       true,
   );
 
+  // ─── Public API ─────────────────────────────────────────────────────────────
+
   static Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
 
-    // Request permission on ALL platforms including web / iOS PWA
-    await FirebaseMessaging.instance.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    if (kIsWeb) {
+      // Background messages are handled by firebase-messaging-sw.js.
+      // Foreground messages (PWA is open) are handled here via JS Notification API.
+      FirebaseMessaging.onMessage.listen(_onForegroundMessageWeb);
+      if (kDebugMode) debugPrint('✅ NotificationService initialized (web/PWA)');
+      return;
+    }
 
-    // Android: create high-priority notification channel
-    if (!kIsWeb) {
-      await _plugin
-          .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(_channel);
+    // ── Android: create the high-importance notification channel ──────────────
+    await _plugin
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(_channel);
 
-      const initSettings = InitializationSettings(
+    // ── Initialize flutter_local_notifications ────────────────────────────────
+    await _plugin.initialize(
+      const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
         iOS: DarwinInitializationSettings(
+          // Permissions are requested by FCMService.initFCM() — not here.
           requestAlertPermission: false,
           requestBadgePermission: false,
           requestSoundPermission: false,
         ),
-      );
-      await _plugin.initialize(
-        initSettings,
-        onDidReceiveNotificationResponse: (response) {
-          if (kDebugMode) {
-            print('🔔 Notification tapped, payload: ${response.payload}');
-          }
-        },
-      );
+      ),
+      onDidReceiveNotificationResponse: (response) {
+        if (kDebugMode) {
+          debugPrint('🔔 Notification tapped — payload: ${response.payload}');
+        }
+        // TODO: navigate to cashbook using response.payload (cashbookId)
+      },
+    );
 
-      // Foreground heads-up banner (mobile only — SW handles web)
-      FirebaseMessaging.onMessage.listen(_onForegroundMessage);
-    }
+    // ── Foreground messages while app is open ─────────────────────────────────
+    FirebaseMessaging.onMessage.listen(_onForegroundMessageMobile);
 
-    if (kDebugMode) print('✅ NotificationService initialized');
+    if (kDebugMode) debugPrint('✅ NotificationService initialized (mobile)');
   }
 
-  static void _onForegroundMessage(RemoteMessage message) {
-    final n = message.notification;
-    if (n == null) return;
+  // ─── Web foreground handler ──────────────────────────────────────────────────
+  // Called when the PWA is open and in focus.
+  // The browser suppresses service-worker notifications when the page is focused,
+  // so we call the JS Notification API directly via the platform shim.
+  // Background messages (PWA minimised / closed) are handled by the SW.
+  static void _onForegroundMessageWeb(RemoteMessage message) {
+    final title = message.data['title'] ??
+        message.notification?.title ??
+        'SyncCash';
+    final body = message.data['body'] ??
+        message.notification?.body ??
+        '';
+
+    if (kDebugMode) debugPrint('🔔 [Web foreground] $title — $body');
+
+    // Show a real OS notification via the JS Notification API.
+    // The Firestore real-time stream in your cashbook provider will also
+    // automatically refresh the transaction list — no extra action needed.
+    web_notify.showWebNotification(title, body);
+  }
+
+  // ─── Mobile foreground handler ───────────────────────────────────────────────
+  // Called on Android / iOS native when the app is open and in the foreground.
+  // Background messages are handled by firebaseMessagingBackgroundHandler
+  // in fcm_service.dart (separate isolate).
+  static void _onForegroundMessageMobile(RemoteMessage message) {
+    final title = message.data['title'] ?? message.notification?.title;
+    final body  = message.data['body']  ?? message.notification?.body;
+    if (title == null) return;
 
     _plugin.show(
       message.hashCode,
-      n.title,
-      n.body,
+      title,
+      body,
       const NotificationDetails(
         android: AndroidNotificationDetails(
           _kChannelId,

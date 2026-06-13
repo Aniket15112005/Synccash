@@ -184,7 +184,10 @@ class TransactionRepositoryImpl implements TransactionRepository {
 
       await _firestore.runTransaction((transaction) async {
 
+        // FIX: all reads must come before any writes in a Firestore transaction
         final txSnapshot = await transaction.get(txRef);
+
+        final cashbookSnapshot = await transaction.get(cashbookRef);
 
 
 
@@ -197,10 +200,6 @@ class TransactionRepositoryImpl implements TransactionRepository {
           );
 
         }
-
-
-
-        final cashbookSnapshot = await transaction.get(cashbookRef);
 
 
 
@@ -297,18 +296,82 @@ class TransactionRepositoryImpl implements TransactionRepository {
   }
 
   @override
-Future<void> updateTransaction(TransactionEntity transaction) async {
-  await _firestore
-      .collection('cashbooks')
-      .doc(transaction.cashbookId)
-      .collection('transactions')
-      .doc(transaction.transactionId)
-      .update({
-        'amount': transaction.amount,
-        'category': transaction.category,
-        'description': transaction.description,
+  Future<void> updateTransaction(TransactionEntity tx) async {
+    try {
+      final txRef = _firestore
+          .collection('cashbooks')
+          .doc(tx.cashbookId)
+          .collection('transactions')
+          .doc(tx.transactionId);
+
+      final cashbookRef =
+          _firestore.collection('cashbooks').doc(tx.cashbookId);
+
+      await _firestore.runTransaction((transaction) async {
+        final txSnapshot = await transaction.get(txRef);
+        final cashbookSnapshot = await transaction.get(cashbookRef);
+
+        if (!txSnapshot.exists) {
+          throw Exception(
+            "Transaction '${tx.transactionId}' does not exist.",
+          );
+        }
+
+        if (!cashbookSnapshot.exists) {
+          throw Exception(
+            "Cashbook '${tx.cashbookId}' does not exist.",
+          );
+        }
+
+        final cashbookData = cashbookSnapshot.data()!;
+        final oldData = txSnapshot.data()!;
+
+        final num oldAmount = (oldData['amount'] as num?) ?? tx.amount;
+        final String oldType = (oldData['type'] as String?) ?? tx.type;
+        final bool wasIncome = oldType.toLowerCase().trim() == 'income';
+        final bool isIncome = tx.type.toLowerCase().trim() == 'income';
+
+        num balance = (cashbookData['totalBalance'] as num?) ?? 0;
+        num income  = (cashbookData['totalIncome']  as num?) ?? 0;
+        num expense = (cashbookData['totalExpense'] as num?) ?? 0;
+
+        // Reverse old amount
+        if (wasIncome) {
+          balance -= oldAmount;
+          income  -= oldAmount;
+        } else {
+          balance += oldAmount;
+          expense -= oldAmount;
+        }
+
+        // Apply new amount
+        if (isIncome) {
+          balance += tx.amount;
+          income  += tx.amount;
+        } else {
+          balance -= tx.amount;
+          expense += tx.amount;
+        }
+
+        transaction.update(txRef, {
+          'amount':      tx.amount,
+          'type':        tx.type,
+          'category':    tx.category,
+          'description': tx.description,
+          'createdAt':   Timestamp.fromDate(tx.createdAt),
+          'updatedBy':   tx.createdBy,   // ✅ FIXED: was 'lastEditedBy'
+        });
+
+        transaction.update(cashbookRef, {
+          'totalBalance': balance,
+          'totalIncome':  income,
+          'totalExpense': expense,
+        });
       });
-}
+    } on FirebaseException {
+      rethrow;
+    }
+  }
 
 
 
@@ -353,5 +416,3 @@ Future<void> updateTransaction(TransactionEntity transaction) async {
   }
 
 }
-
-

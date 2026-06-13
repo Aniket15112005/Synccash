@@ -20,22 +20,16 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // 2. Firestore offline persistence
+  // 2. Firestore offline persistence (mobile only)
+  // Web: Firebase handles IndexedDB persistence automatically
   if (!kIsWeb) {
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
-      cacheSizeBytes:     Settings.CACHE_SIZE_UNLIMITED,
-    );
-  } else {
-    FirebaseFirestore.instance.settings = const Settings(
-      persistenceEnabled: true,
+      cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
   }
 
-  // 3. Notifications — runs on ALL platforms (Android, iOS, web/iOS PWA)
-  await NotificationService.initialize();
-
-  // 4. FCM token lifecycle — only after the user is confirmed logged in
+  // 3. FCM token lifecycle — only after user is confirmed logged in
   bool fcmReady = false;
   FirebaseAuth.instance.authStateChanges().listen((user) async {
     if (user != null && !fcmReady) {
@@ -48,26 +42,30 @@ void main() async {
     }
   });
 
-  // 5. Lock to portrait (mobile only)
+  // 4. Lock to portrait (mobile only)
   if (!kIsWeb) {
     await SystemChrome.setPreferredOrientations(
         [DeviceOrientation.portraitUp]);
   }
 
-  // 6. Status/nav bar styling (mobile only)
+  // 5. Status/nav bar styling (mobile only)
   if (!kIsWeb) {
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
-        statusBarColor:                    Colors.transparent,
-        statusBarIconBrightness:           Brightness.light,
-        statusBarBrightness:               Brightness.dark,
-        systemNavigationBarColor:          Color(0xFF0A0E17),
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemNavigationBarColor: Color(0xFF0A0E17),
         systemNavigationBarIconBrightness: Brightness.light,
       ),
     );
   }
 
   runApp(const ProviderScope(child: _RootApp()));
+
+  // 6. Notifications — runs AFTER runApp so splash shows instantly
+  // Never blocks the UI. Runs in background on all platforms.
+  NotificationService.initialize().catchError((_) {});
 }
 
 class _RootApp extends StatefulWidget {

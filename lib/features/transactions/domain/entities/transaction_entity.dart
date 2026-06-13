@@ -9,6 +9,11 @@ class TransactionEntity {
   final String category;
   final String description;
 
+  /// Tracks which user last edited this transaction.
+  /// Written client-side on every edit so the Cloud Function can identify
+  /// the editor in a single write (no separate Firestore update needed).
+  final String? lastEditedBy;
+
   const TransactionEntity({
     required this.transactionId,
     required this.cashbookId,
@@ -19,6 +24,7 @@ class TransactionEntity {
     required this.type,
     required this.category,
     required this.description,
+    this.lastEditedBy,
   });
 
   TransactionEntity copyWith({
@@ -31,17 +37,19 @@ class TransactionEntity {
     String? type,
     String? category,
     String? description,
+    String? lastEditedBy,
   }) {
     return TransactionEntity(
       transactionId: transactionId ?? this.transactionId,
-      cashbookId: cashbookId ?? this.cashbookId,
-      createdBy: createdBy ?? this.createdBy,
-      creatorName: creatorName ?? this.creatorName,
-      createdAt: createdAt ?? this.createdAt,
-      amount: amount ?? this.amount,
-      type: type ?? this.type,
-      category: category ?? this.category,
-      description: description ?? this.description,
+      cashbookId:    cashbookId    ?? this.cashbookId,
+      createdBy:     createdBy     ?? this.createdBy,
+      creatorName:   creatorName   ?? this.creatorName,
+      createdAt:     createdAt     ?? this.createdAt,
+      amount:        amount        ?? this.amount,
+      type:          type          ?? this.type,
+      category:      category      ?? this.category,
+      description:   description   ?? this.description,
+      lastEditedBy:  lastEditedBy  ?? this.lastEditedBy,
     );
   }
 }

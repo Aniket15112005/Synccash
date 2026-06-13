@@ -1,5 +1,6 @@
 // lib/features/transactions/presentation/widgets/transaction_list_item.dart
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +12,7 @@ import 'package:synccash/features/transactions/presentation/providers/transactio
 import 'package:synccash/features/transactions/presentation/widgets/transaction_details_sheet.dart';
 
 final _timeFmt = DateFormat('hh:mm a');
+final _dateFmt = DateFormat('dd MMM yyyy');
 
 // ─── Public widget (used by dashboard + history) ──────────────────────────────
 
@@ -231,9 +233,9 @@ class TransactionListItem extends ConsumerWidget {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          // Time
+                          // Date · Time
                           Text(
-                            timeStr,
+                            '${_dateFmt.format(transaction.createdAt)}  ·  $timeStr',
                             style: const TextStyle(
                               fontSize: 12,
                               color: Color(0xFF4B5563),
@@ -369,11 +371,13 @@ class _ActionSheet extends StatelessWidget {
                         fontSize: 15,
                       )),
                   const SizedBox(height: 3),
-                  Text(transaction.creatorName,
-                      style: const TextStyle(
-                        color: Color(0xFF6B7280),
-                        fontSize: 12,
-                      )),
+                  Text(
+                    '${transaction.creatorName}  ·  ${_dateFmt.format(transaction.createdAt)}',
+                    style: const TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 12,
+                    ),
+                  ),
                 ],
               )),
               const SizedBox(width: 16),
@@ -465,7 +469,7 @@ class _SheetDivider extends StatelessWidget {
       );
 }
 
-// ─── Edit sheet (keep your existing logic, restyled shell) ───────────────────
+// ─── Edit sheet ───────────────────────────────────────────────────────────────
 
 class _EditTransactionSheet extends StatefulWidget {
   final TransactionEntity transaction;
@@ -480,6 +484,7 @@ class _EditTransactionSheet extends StatefulWidget {
 class _EditTransactionSheetState extends State<_EditTransactionSheet> {
   late final TextEditingController _descCtrl;
   late final TextEditingController _amountCtrl;
+  late DateTime _selectedDate;
   bool _loading = false;
 
   @override
@@ -489,6 +494,7 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
         TextEditingController(text: widget.transaction.description);
     _amountCtrl = TextEditingController(
         text: widget.transaction.amount.toStringAsFixed(0));
+    _selectedDate = widget.transaction.createdAt;
   }
 
   @override
@@ -498,17 +504,75 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
     super.dispose();
   }
 
+  Future<void> _pickDate() async {
+    HapticFeedback.selectionClick();
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(now.year - 5),
+      lastDate: now,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Color(0xFF3B82F6),
+              onPrimary: Colors.white,
+              surface: Color(0xFF161922),
+              onSurface: Color(0xFFD1D9E6),
+            ),
+            dialogTheme: const DialogThemeData(
+              backgroundColor: Color(0xFF111316),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(20)),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        // Keep the original time-of-day, just change the date
+        _selectedDate = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          _selectedDate.hour,
+          _selectedDate.minute,
+          _selectedDate.second,
+        );
+      });
+    }
+  }
+
   Future<void> _save() async {
     final amount = double.tryParse(_amountCtrl.text);
     if (amount == null || amount <= 0) return;
     setState(() => _loading = true);
     try {
+      // Include lastEditedBy in the SAME entity update so the repository
+      // writes everything in one Firestore call.
+      // One write = one Cloud Function invocation (was two separate writes
+      // = two invocations, cutting Cloud Function calls by 50% per edit).
+      //
+      // ⚠️  Your TransactionRepositoryImpl must serialize `lastEditedBy`
+      //     when it converts the entity to a Firestore map (e.g. toJson /
+      //     toMap).  Add this field to your model's toMap():
+      //         if (entity.lastEditedBy != null)
+      //           'lastEditedBy': entity.lastEditedBy,
+      final currentUser = FirebaseAuth.instance.currentUser;
+
       await widget.ref.read(transactionRepositoryProvider).updateTransaction(
             widget.transaction.copyWith(
-              description: _descCtrl.text.trim(),
-              amount: amount,
+              description:  _descCtrl.text.trim(),
+              amount:       amount,
+              createdAt:    _selectedDate,
+              lastEditedBy: currentUser?.uid,
             ),
           );
+
       if (mounted) Navigator.pop(context);
     } catch (e) {
       setState(() => _loading = false);
@@ -520,8 +584,19 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
     }
   }
 
+  bool get _isToday {
+    final now = DateTime.now();
+    return _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final dateLabel = _isToday
+        ? 'Today'
+        : DateFormat('dd MMM yyyy').format(_selectedDate);
+
     return Padding(
       padding: EdgeInsets.only(
           bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -532,6 +607,7 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // Handle
           Container(
             width: 32, height: 3,
             decoration: BoxDecoration(
@@ -550,10 +626,80 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
                 )),
           ),
           const SizedBox(height: 20),
-          _StyledField(controller: _amountCtrl, label: 'Amount', keyboardType: TextInputType.number),
+
+          // Amount field
+          _StyledField(
+            controller: _amountCtrl,
+            label: 'Amount',
+            keyboardType: TextInputType.number,
+          ),
           const SizedBox(height: 12),
+
+          // Description field
           _StyledField(controller: _descCtrl, label: 'Description'),
+          const SizedBox(height: 12),
+
+          // Date picker row
+          GestureDetector(
+            onTap: _pickDate,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0C0E12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF1F2937)),
+              ),
+              child: Row(children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1F2937),
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: const Icon(
+                    Icons.calendar_today_rounded,
+                    size: 15,
+                    color: Color(0xFF9CA3AF),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Date',
+                        style: TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$dateLabel  ·  ${DateFormat('EEEE').format(_selectedDate)}',
+                        style: const TextStyle(
+                          color: Color(0xFFD1D9E6),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: Color(0xFF4B5563),
+                ),
+              ]),
+            ),
+          ),
+
           const SizedBox(height: 20),
+
+          // Save button
           SizedBox(
             width: double.infinity,
             height: 50,
@@ -579,6 +725,8 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
     );
   }
 }
+
+// ─── Styled text field ────────────────────────────────────────────────────────
 
 class _StyledField extends StatelessWidget {
   const _StyledField({

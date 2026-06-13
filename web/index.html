@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <base href="$FLUTTER_BASE_HREF">
+  <base href="/">
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
@@ -14,8 +14,6 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="SyncCash">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- PWA: splash colors while loading on iOS -->
   <meta name="msapplication-TileColor" content="#0A0E17">
 
   <link rel="icon" type="image/png" href="favicon.png"/>
@@ -23,7 +21,6 @@
   <link rel="manifest" href="manifest.json">
 
   <style>
-    /* Prevents white flash while Flutter loads */
     html, body {
       background-color: #0A0E17;
       margin: 0;
@@ -33,20 +30,19 @@
   </style>
 </head>
 <body>
-  <script>
-    // Register Firebase Messaging service worker for web/iOS PWA notifications
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker
-        .register('firebase-messaging-sw.js')
-        .then(function(reg) {
-          console.log('FCM SW registered:', reg.scope);
-        })
-        .catch(function(err) {
-          console.warn('FCM SW registration failed:', err);
-        });
-    }
-  </script>
 
+ <script>
+  const _isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  window.flutterConfiguration = {
+    renderer: _isMobile ? 'html' : 'canvaskit',
+  };
+  // Do NOT manually register any service worker here.
+  // Flutter's bootstrap handles flutter_service_worker.js
+  // firebase_messaging plugin handles firebase-messaging-sw.js internally
+</script>
+
+<script src="flutter_bootstrap.js" async></script>
   <script src="flutter_bootstrap.js" async></script>
+
 </body>
 </html>

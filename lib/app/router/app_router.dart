@@ -12,6 +12,29 @@ import 'package:synccash/features/dashboard/presentation/screens/dashboard_scree
 import 'package:synccash/features/transactions/presentation/screens/add_transaction_screen.dart';
 import 'package:synccash/features/transactions/presentation/screens/transaction_history_screen.dart';
 
+// Reusable fade transition — lightweight on iOS PWA (no JIT)
+CustomTransitionPage<void> _fadePage({
+  required GoRouterState state,
+  required Widget child,
+  Duration duration = const Duration(milliseconds: 250),
+}) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: duration,
+    reverseTransitionDuration: const Duration(milliseconds: 180),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      return FadeTransition(
+        opacity: CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOut,
+        ),
+        child: child,
+      );
+    },
+  );
+}
+
 final appRouterProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
 
@@ -53,33 +76,55 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: RouteConstants.splash,
-        builder: (context, state) => const Scaffold(
-          body: Center(child: CircularProgressIndicator()),
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          ),
+          duration: const Duration(milliseconds: 150),
         ),
       ),
       GoRoute(
         path: RouteConstants.login,
-        builder: (context, state) => const LoginScreen(),
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const LoginScreen(),
+        ),
       ),
       GoRoute(
         path: RouteConstants.signup,
-        builder: (context, state) => const SignupScreen(),
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const SignupScreen(),
+        ),
       ),
       GoRoute(
         path: RouteConstants.pairing,
-        builder: (context, state) => const PairingScreen(),
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const PairingScreen(),
+        ),
       ),
       GoRoute(
         path: RouteConstants.dashboard,
-        builder: (context, state) => const DashboardScreen(),
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const DashboardScreen(),
+        ),
       ),
       GoRoute(
         path: RouteConstants.addTransaction,
-        builder: (context, state) => const AddTransactionScreen(),
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const AddTransactionScreen(),
+        ),
       ),
       GoRoute(
         path: RouteConstants.history,
-        builder: (context, state) => const TransactionHistoryScreen(),
+        pageBuilder: (context, state) => _fadePage(
+          state: state,
+          child: const TransactionHistoryScreen(),
+        ),
       ),
     ],
   );

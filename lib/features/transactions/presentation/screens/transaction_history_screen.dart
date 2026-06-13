@@ -10,6 +10,7 @@ import 'package:synccash/features/auth/presentation/providers/auth_provider.dart
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
 import 'package:synccash/features/dashboard/presentation/widgets/synccash_filter_sheet.dart';
 import 'package:synccash/features/transactions/presentation/widgets/transaction_list_item.dart';
+import 'package:intl/intl.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Date helpers
@@ -65,12 +66,7 @@ double _sumExpense(List<dynamic> txs) => txs
     .where((tx) => tx.type == 'expense')
     .fold(0.0, (sum, tx) => sum + (tx.amount as double));
 
-String _fmt(double v) {
-  if (v >= 10000000) return '${(v / 10000000).toStringAsFixed(1)}Cr';
-  if (v >= 100000)   return '${(v / 100000).toStringAsFixed(1)}L';
-  if (v >= 1000)     return '${(v / 1000).toStringAsFixed(1)}K';
-  return v.toStringAsFixed(0);
-}
+String _fmt(double v) => NumberFormat('#,##,##0', 'en_IN').format(v);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Flat-list items

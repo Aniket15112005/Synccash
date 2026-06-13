@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:intl/intl.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
@@ -35,9 +36,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   final _amountCtrl = TextEditingController();
   final _descCtrl   = TextEditingController();
 
-  String _type       = 'expense';
-  String _category   = 'Retail';
-  bool   _submitting = false;
+  String   _type         = 'expense';
+  String   _category     = 'Retail';
+  bool     _submitting   = false;
+  DateTime _selectedDate = DateTime.now();
 
   late final AnimationController _btnCtrl;
   late final Animation<double>   _btnScale;
@@ -77,6 +79,50 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     setState(() => _category = cat);
   }
 
+  Future<void> _pickDate() async {
+    HapticFeedback.selectionClick();
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(now.year - 5),
+      lastDate: now,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.dark(
+              primary: _accentColor,
+              onPrimary: Colors.black,
+              surface: const Color(0xFF161922),
+              onSurface: _C.textPri,
+            ),
+            dialogTheme: const DialogThemeData(
+              backgroundColor: Color(0xFF111316),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(20)),
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        // Preserve today's time if same day, otherwise use midnight
+        final now = DateTime.now();
+        if (picked.year == now.year &&
+            picked.month == now.month &&
+            picked.day == now.day) {
+          _selectedDate = now;
+        } else {
+          _selectedDate = DateTime(
+              picked.year, picked.month, picked.day, 12, 0, 0);
+        }
+      });
+    }
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final user = ref.read(authProvider).value;
@@ -94,7 +140,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         cashbookId:    user.currentCashbookId!,
         createdBy:     user.uid,
         creatorName:   user.displayName,
-        createdAt:     DateTime.now(),
+        createdAt:     _selectedDate,
         amount:        double.parse(_amountCtrl.text.trim()),
         type:          _type,
         category:      _category.toLowerCase(),
@@ -169,6 +215,17 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               .animate()
                               .fadeIn(delay: 210.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                          const SizedBox(height: 24),
+                          const _FieldLabel('Date'),
+                          const SizedBox(height: 8),
+                          _DatePickerField(
+                            selectedDate: _selectedDate,
+                            accent: _accentColor,
+                            onTap: _pickDate,
+                          )
+                              .animate()
+                              .fadeIn(delay: 245.ms, duration: 280.ms)
+                              .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 36),
                           ScaleTransition(
                             scale: _btnScale,
@@ -180,7 +237,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                             ),
                           )
                               .animate()
-                              .fadeIn(delay: 260.ms, duration: 280.ms)
+                              .fadeIn(delay: 280.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                         ],
                       ),
@@ -195,6 +252,96 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     );
   }
 }
+
+// ─── Date picker field ────────────────────────────────────────────────────────
+
+class _DatePickerField extends StatelessWidget {
+  final DateTime selectedDate;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _DatePickerField({
+    required this.selectedDate,
+    required this.accent,
+    required this.onTap,
+  });
+
+  bool get _isToday {
+    final now = DateTime.now();
+    return selectedDate.year == now.year &&
+        selectedDate.month == now.month &&
+        selectedDate.day == now.day;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _isToday
+        ? 'Today'
+        : DateFormat('dd MMM yyyy').format(selectedDate);
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: BoxDecoration(
+          color: _C.bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _C.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Icons.calendar_today_rounded,
+                size: 16,
+                color: accent,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: _C.textPri,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    DateFormat('EEEE').format(selectedDate),
+                    style: const TextStyle(
+                      color: _C.textSec,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: _C.textSec.withValues(alpha: 0.5),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Ambient glow ─────────────────────────────────────────────────────────────
 
 class _AmbientGlow extends StatelessWidget {
   final Color accent;
@@ -215,6 +362,8 @@ class _AmbientGlow extends StatelessWidget {
     );
   }
 }
+
+// ─── App bar ──────────────────────────────────────────────────────────────────
 
 class _AppBar extends StatelessWidget {
   final VoidCallback onBack;
@@ -265,6 +414,8 @@ class _IconBtn extends StatelessWidget {
     );
   }
 }
+
+// ─── Type toggle ──────────────────────────────────────────────────────────────
 
 class _TypeToggle extends StatelessWidget {
   final String type;
@@ -359,6 +510,8 @@ class _TypeChip extends StatelessWidget {
   }
 }
 
+// ─── Amount field ─────────────────────────────────────────────────────────────
+
 class _AmountField extends StatefulWidget {
   final TextEditingController controller;
   final Color accent;
@@ -451,6 +604,8 @@ class _AmountFieldState extends State<_AmountField> {
   }
 }
 
+// ─── Category toggle ──────────────────────────────────────────────────────────
+
 class _CategoryToggle extends StatelessWidget {
   final String selected;
   final void Function(String) onSwitch;
@@ -503,6 +658,8 @@ class _CategoryToggle extends StatelessWidget {
     );
   }
 }
+
+// ─── Description field ────────────────────────────────────────────────────────
 
 class _DescriptionField extends StatefulWidget {
   final TextEditingController controller;
@@ -570,6 +727,8 @@ class _DescriptionFieldState extends State<_DescriptionField> {
   }
 }
 
+// ─── Submit button ────────────────────────────────────────────────────────────
+
 class _SubmitButton extends StatelessWidget {
   final String type;
   final Color accent;
@@ -633,6 +792,8 @@ class _SubmitButton extends StatelessWidget {
     );
   }
 }
+
+// ─── Field label ──────────────────────────────────────────────────────────────
 
 class _FieldLabel extends StatelessWidget {
   final String text;

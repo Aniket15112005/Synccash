@@ -42,7 +42,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     super.dispose();
   }
 
-  void _login() async {
+ void _login() async {
     if (!_formKey.currentState!.validate()) return;
 
     final cleanEmail = _emailController.text
@@ -55,31 +55,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     setState(() => _isLoading = true);
 
     try {
-      if (kDebugMode) {
-        print("AUTH DEPLOY ---> Attempting login for: '$cleanEmail'");
-      }
       await ref.read(authRepositoryProvider).signInWithEmail(
             cleanEmail,
             cleanPassword,
           );
     } catch (e) {
       final errorMessage = e.toString();
-      if (kDebugMode) {
-        print("AUTH FAILURE LOG ---> Raw Exception details: $errorMessage");
-      }
 
-      String friendlyMessage =
-          'Authentication failed. Please verify credentials or create a profile.';
+      String friendlyMessage;
 
       if (errorMessage.contains('invalid-credential') ||
           errorMessage.contains('wrong-password') ||
-          errorMessage.contains('user-not-found')) {
-        friendlyMessage = 'Invalid email address or password combination.';
-      } else if (errorMessage.contains('invalid-email') ||
-          errorMessage.contains('badly formatted') ||
-          errorMessage.contains('channel-error')) {
-        friendlyMessage =
-            'Network authentication format loop detected. Try logging in once more or use signup below.';
+          errorMessage.contains('user-not-found') ||
+          errorMessage.contains('INVALID_LOGIN_CREDENTIALS')) {
+        friendlyMessage = 'Incorrect email or password.';
+      } else if (errorMessage.contains('network-request-failed') ||
+          errorMessage.contains('XMLHttpRequest') ||
+          errorMessage.contains('Failed to fetch')) {
+        friendlyMessage = 'Network error. Check your connection and try again.';
+      } else if (errorMessage.contains('operation-not-allowed')) {
+        friendlyMessage = 'Email sign-in is not enabled. Contact support.';
+      } else if (errorMessage.contains('user-disabled')) {
+        friendlyMessage = 'This account has been disabled.';
+      } else if (errorMessage.contains('too-many-requests')) {
+        friendlyMessage = 'Too many attempts. Please wait a moment and retry.';
+      } else if (errorMessage.contains('channel-error') ||
+          errorMessage.contains('badly formatted')) {
+        friendlyMessage = 'Connection issue. Please try again.';
+      } else {
+        friendlyMessage = 'Login error: $errorMessage';
       }
 
       if (mounted) {
@@ -87,10 +91,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           SnackBar(
             content: Text(friendlyMessage),
             backgroundColor: const Color(0xFFE5484D),
-            duration: const Duration(seconds: 4),
+            duration: const Duration(seconds: 6),
             behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
           ),
         );
       }

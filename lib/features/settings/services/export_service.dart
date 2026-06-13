@@ -411,10 +411,5 @@ class ExportService {
     );
   }
 
-  static String _fmt(double v) {
-    if (v >= 10000000) return '${(v / 10000000).toStringAsFixed(2)}Cr';
-    if (v >= 100000)   return '${(v / 100000).toStringAsFixed(2)}L';
-    if (v >= 1000)     return '${(v / 1000).toStringAsFixed(2)}K';
-    return v.toStringAsFixed(2);
-  }
+  static String _fmt(double v) => NumberFormat('#,##,##0', 'en_IN').format(v);
 }
