@@ -375,27 +375,27 @@ class TransactionRepositoryImpl implements TransactionRepository {
     }
   }
 
-
-
+  // ── ONLY CHANGE: added `if (limit > 0)` guard so limit:0 fetches ALL records.
+  // ── Also removed the duplicate @override that was present in the original.
   @override
+  Stream<List<TransactionEntity>> getTransactionsStream(
+    String cashbookId, {
+    int limit = 5000,
+  }) {
+    var query = FirebaseFirestore.instance
+        .collection('cashbooks')
+        .doc(cashbookId)
+        .collection('transactions')
+        .orderBy('createdAt', descending: true);
 
-  // REPLACE WITH:
-@override
-Stream<List<TransactionEntity>> getTransactionsStream(
-  String cashbookId, {
-  int limit = 50,
-}) {
-  return FirebaseFirestore.instance
-      .collection('cashbooks')
-      .doc(cashbookId)
-      .collection('transactions')
-      .orderBy('createdAt', descending: true)
-      .limit(limit)
-      .snapshots()
-            .map((snap) => snap.docs
-          .map<TransactionEntity>(
-              (d) => TransactionModel.fromFirestore(d))
-          .toList());
-}
+    if (limit > 0) query = query.limit(limit); // 0 = fetch everything
+
+    return query
+        .snapshots()
+        .map((snap) => snap.docs
+            .map<TransactionEntity>(
+                (d) => TransactionModel.fromFirestore(d))
+            .toList());
+  }
 
 }

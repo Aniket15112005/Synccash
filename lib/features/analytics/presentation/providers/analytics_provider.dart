@@ -81,6 +81,7 @@ class AnalyticsData {
   final double incomeExpenseRatio;
   final String peakDayName;
   final double peakDayAmount;
+  final List<TransactionEntity> transactions;
 
   const AnalyticsData({
     required this.totalIncome,
@@ -105,6 +106,7 @@ class AnalyticsData {
     required this.incomeExpenseRatio,
     required this.peakDayName,
     required this.peakDayAmount,
+    required this.transactions,
   });
 
   factory AnalyticsData.from(List<TransactionEntity> txs) {
@@ -184,6 +186,7 @@ class AnalyticsData {
       incomeExpenseRatio: total == 0 ? 0.5 : income / total,
       peakDayName:  _dowName(peakDow),
       peakDayAmount: peakAmt,
+      transactions:  txs,
     );
   }
 

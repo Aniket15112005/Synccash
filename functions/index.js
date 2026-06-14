@@ -250,9 +250,63 @@ exports.onTransactionUpdated = onDocumentUpdated(
       changes.push(`${cap(before.category)} → ${cap(after.category)}`);
     }
 
-    const title = `❌❌❌❌❌❌ Entry Modified  ·  SyncCash`;
+    const title = `❌ Entry Modified  ·  SyncCash`;
     const body  = `${after.creatorName ?? "Someone"}  ·  ${changes.join("  ·  ")}`;
 
     await sendAndClean({ receiver, title, body, cashbookId });
+  }
+);
+
+// ─────────────────────────────────────────────────────────────
+// ONE-TIME BALANCE RECALCULATE (HTTP trigger)
+// Call once from Firebase Console > Functions > recalculateBalance
+// or via: curl -X POST https://<region>-<project>.cloudfunctions.net/recalculateBalance
+// ─────────────────────────────────────────────────────────────
+const { onRequest } = require('firebase-functions/v2/https');
+
+exports.recalculateBalance = onRequest(
+  { region: 'us-central1' },
+  async (req, res) => {
+    try {
+      const cashbooksSnap = await db.collection('cashbooks').get();
+      const results = [];
+
+      for (const cbDoc of cashbooksSnap.docs) {
+        const cashbookId = cbDoc.id;
+        const txSnap = await db
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('transactions')
+          .get();
+
+        let income  = 0;
+        let expense = 0;
+
+        for (const txDoc of txSnap.docs) {
+          const d      = txDoc.data();
+          const amount = Number(d.amount) || 0;
+          const type   = (d.type ?? '').toLowerCase().trim();
+          if (type === 'income') {
+            income  += amount;
+          } else {
+            expense += amount;
+          }
+        }
+
+        await db.collection('cashbooks').doc(cashbookId).update({
+          totalIncome:  income,
+          totalExpense: expense,
+          totalBalance: income - expense,
+        });
+
+        results.push({ cashbookId, income, expense, balance: income - expense });
+        console.log(`Recalculated ${cashbookId}: income=${income} expense=${expense} balance=${income - expense}`);
+      }
+
+      res.json({ ok: true, recalculated: results.length, results });
+    } catch (err) {
+      console.error('recalculateBalance error:', err.message);
+      res.status(500).json({ ok: false, error: err.message });
+    }
   }
 );

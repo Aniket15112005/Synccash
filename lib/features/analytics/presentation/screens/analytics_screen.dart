@@ -7,6 +7,7 @@ import 'package:synccash/core/utils/currency_formatter.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
     show currentCashbookIdProvider;
 import 'package:synccash/features/analytics/presentation/providers/analytics_provider.dart';
+import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const _bg        = Color(0xFF0D0F13);
@@ -51,6 +52,26 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
   @override
   void dispose() { _bgCtrl.dispose(); _entryCtrl.dispose(); super.dispose(); }
 
+  void _showDrillDown(BuildContext ctx, List<TransactionEntity> txs, String title) {
+    if (txs.isEmpty) return;
+    showModalBottomSheet(
+      context: ctx,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.2,
+        maxChildSize: 0.78,
+        expand: false,
+        builder: (_, scrollController) => _DrillDownSheet(
+          title: title,
+          transactions: txs,
+          scrollController: scrollController,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cashbookId = ref.watch(currentCashbookIdProvider);
@@ -85,7 +106,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
                     error: (e, _) => Center(child: Text('Error', style: TextStyle(color: _textSec))),
                     data: (data) => FadeTransition(
                       opacity: _entryCtrl,
-                      child: _buildBody(data, activeFilter),
+                      child: _buildBody(context, data, activeFilter),
                     ),
                   ),
                 ),
@@ -114,7 +135,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
     ),
   );
 
-  Widget _buildBody(AnalyticsData data, AnalyticsFilter filter) {
+  Widget _buildBody(BuildContext context, AnalyticsData data, AnalyticsFilter filter) {
     if (data.totalCount == 0) {
       return Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -139,12 +160,19 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
         _SpendingInsights(data: data, entryCtrl: _entryCtrl),
         const SizedBox(height: 20),
 
+        // ── BURN RATE FORECAST ────────────────────────────────────────────
+        _BurnRateForecast(data: data),
+        const SizedBox(height: 16),
+
         // ── DAY OF WEEK PATTERN ───────────────────────────────────────────
         _SectionCard(
           title: 'Spending Pattern',
           subtitle: 'Expense by day of week',
           icon: Icons.calendar_view_week_rounded,
-          child: _DayOfWeekChart(data: data),
+          child: _DayOfWeekChart(
+            data: data,
+            onDrillDown: (txs, title) => _showDrillDown(context, txs, title),
+          ),
         ),
         const SizedBox(height: 16),
 
@@ -160,12 +188,13 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
         // ── RETAIL VS WHOLESALE PIE ───────────────────────────────────────
         _SectionCard(
           title: 'Retail vs Wholesale',
-          subtitle: 'Total amount by sales type',
+          subtitle: 'Total amount by sales type — tap a section for details',
           icon: Icons.donut_large_rounded,
           child: _RetailWholesalePie(
             data: data,
             touchedIndex: _pieTouched,
             onTouch: (i) => setState(() => _pieTouched = i),
+            onDrillDown: (txs, title) => _showDrillDown(context, txs, title),
           ),
         ),
         const SizedBox(height: 16),
@@ -173,18 +202,24 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
         // ── CREATOR CHART ─────────────────────────────────────────────────
         _SectionCard(
           title: 'Entries by Creator',
-          subtitle: 'Income & expense per person',
+          subtitle: 'Income & expense per person — tap a bar for details',
           icon: Icons.people_alt_rounded,
-          child: _CreatorChart(data: data),
+          child: _CreatorChart(
+            data: data,
+            onDrillDown: (txs, title) => _showDrillDown(context, txs, title),
+          ),
         ),
         const SizedBox(height: 16),
 
         // ── MONTHLY OVERVIEW ──────────────────────────────────────────────
         _SectionCard(
           title: 'Monthly Overview',
-          subtitle: 'Income vs Expense trend',
+          subtitle: 'Income vs Expense — tap a bar for details',
           icon: Icons.bar_chart_rounded,
-          child: _MonthlyChart(data: data),
+          child: _MonthlyChart(
+            data: data,
+            onDrillDown: (txs, title) => _showDrillDown(context, txs, title),
+          ),
         ),
         const SizedBox(height: 16),
 
@@ -198,6 +233,13 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
             touchedIndex: _catTouched,
             onTouch: (i) => setState(() => _catTouched = i),
           ),
+        ),
+        const SizedBox(height: 16),
+
+        // ── RECURRING TRANSACTION DETECTOR ────────────────────────────────
+        _RecurringDetector(
+          data: data,
+          onDrillDown: (txs, title) => _showDrillDown(context, txs, title),
         ),
         const SizedBox(height: 16),
 
@@ -454,7 +496,6 @@ class _InsightCard extends StatelessWidget {
           color: _cardBg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: _cardBdr),
-          // Subtle top accent line
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
@@ -517,7 +558,8 @@ class _InsightCard extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════════
 class _DayOfWeekChart extends StatelessWidget {
   final AnalyticsData data;
-  const _DayOfWeekChart({required this.data});
+  final void Function(List<TransactionEntity>, String) onDrillDown;
+  const _DayOfWeekChart({required this.data, required this.onDrillDown});
 
   static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -588,6 +630,18 @@ class _DayOfWeekChart extends StatelessWidget {
               rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
             ),
             barTouchData: BarTouchData(
+              touchCallback: (FlTouchEvent event, BarTouchResponse? resp) {
+                if (event is! FlTapUpEvent) return;
+                if (resp == null || resp.spot == null) return;
+                final gi = resp.spot!.touchedBarGroupIndex;
+                if (gi < 0 || gi >= 7) return;
+                final dow = gi + 1;
+                final filtered = data.transactions
+                    .where((tx) => tx.createdAt.weekday == dow && tx.type != 'income')
+                    .toList()
+                  ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                onDrillDown(filtered, '${_days[gi]} · Expenses');
+              },
               touchTooltipData: BarTouchTooltipData(
                 getTooltipColor: (_) => const Color(0xFF252830),
                 getTooltipItem: (group, _, rod, __) => BarTooltipItem(
@@ -620,7 +674,6 @@ class _RatioGauge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ratio   = data.incomeExpenseRatio.clamp(0.0, 1.0);
     final total   = data.totalIncome + data.totalExpense;
     final incPct  = total > 0 ? data.totalIncome  / total * 100 : 50.0;
     final expPct  = total > 0 ? data.totalExpense / total * 100 : 50.0;
@@ -628,7 +681,6 @@ class _RatioGauge extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
       child: Column(children: [
-        // Ratio bar
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
           child: Row(children: [
@@ -781,8 +833,10 @@ class _RetailWholesalePie extends StatelessWidget {
   final AnalyticsData data;
   final int touchedIndex;
   final ValueChanged<int> onTouch;
+  final void Function(List<TransactionEntity>, String) onDrillDown;
   const _RetailWholesalePie({required this.data,
-      required this.touchedIndex, required this.onTouch});
+      required this.touchedIndex, required this.onTouch,
+      required this.onDrillDown});
 
   static Color _cc(String cat, int i) {
     final l = cat.toLowerCase();
@@ -820,7 +874,16 @@ class _RetailWholesalePie extends StatelessWidget {
                 touchCallback: (FlTouchEvent ev, PieTouchResponse? r) {
                   if (!ev.isInterestedForInteractions || r == null ||
                       r.touchedSection == null) { onTouch(-1); return; }
-                  onTouch(r.touchedSection!.touchedSectionIndex);
+                  final idx = r.touchedSection!.touchedSectionIndex;
+                  onTouch(idx);
+                  if (ev is FlTapUpEvent && idx >= 0 && idx < sorted.length) {
+                    final cat = sorted[idx].key;
+                    final filtered = data.transactions
+                        .where((tx) => tx.category == cat)
+                        .toList()
+                      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                    onDrillDown(filtered, '$cat · All Entries');
+                  }
                 },
               ),
               sections: sections, sectionsSpace: 2, centerSpaceRadius: 48,
@@ -869,7 +932,8 @@ class _LegendItem extends StatelessWidget {
 // ─── Creator bar chart ────────────────────────────────────────────────────────
 class _CreatorChart extends StatelessWidget {
   final AnalyticsData data;
-  const _CreatorChart({required this.data});
+  final void Function(List<TransactionEntity>, String) onDrillDown;
+  const _CreatorChart({required this.data, required this.onDrillDown});
   @override
   Widget build(BuildContext context) {
     final creators = data.creators;
@@ -918,7 +982,23 @@ class _CreatorChart extends StatelessWidget {
               topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
               rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
             ),
-            barTouchData: BarTouchData(touchTooltipData: BarTouchTooltipData(
+            barTouchData: BarTouchData(
+              touchCallback: (FlTouchEvent event, BarTouchResponse? resp) {
+                if (event is! FlTapUpEvent) return;
+                if (resp == null || resp.spot == null) return;
+                final gi = resp.spot!.touchedBarGroupIndex;
+                final ri = resp.spot!.touchedRodDataIndex;
+                if (gi < 0 || gi >= creators.length) return;
+                final creator = creators[gi];
+                final type = ri == 0 ? 'income' : 'expense';
+                final filtered = data.transactions
+                    .where((tx) => tx.creatorName == creator && tx.type == type)
+                    .toList()
+                  ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                final label = '$creator · ${ri == 0 ? 'Income' : 'Expense'}';
+                onDrillDown(filtered, label);
+              },
+              touchTooltipData: BarTouchTooltipData(
               getTooltipColor: (_) => const Color(0xFF252830),
               getTooltipItem: (group, gi, rod, ri) => BarTooltipItem(
                 '${creators[gi]}\n${ri == 0 ? 'Income' : 'Expense'}\n',
@@ -961,7 +1041,8 @@ class _CreatorChart extends StatelessWidget {
 // ─── Monthly chart ────────────────────────────────────────────────────────────
 class _MonthlyChart extends StatelessWidget {
   final AnalyticsData data;
-  const _MonthlyChart({required this.data});
+  final void Function(List<TransactionEntity>, String) onDrillDown;
+  const _MonthlyChart({required this.data, required this.onDrillDown});
   @override
   Widget build(BuildContext context) {
     final months = data.sortedMonths;
@@ -1012,7 +1093,25 @@ class _MonthlyChart extends StatelessWidget {
               topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
               rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
             ),
-            barTouchData: BarTouchData(touchTooltipData: BarTouchTooltipData(
+            barTouchData: BarTouchData(
+              touchCallback: (FlTouchEvent event, BarTouchResponse? resp) {
+                if (event is! FlTapUpEvent) return;
+                if (resp == null || resp.spot == null) return;
+                final gi = resp.spot!.touchedBarGroupIndex;
+                final ri = resp.spot!.touchedRodDataIndex;
+                if (gi < 0 || gi >= months.length) return;
+                final mk = months[gi];
+                final type = ri == 0 ? 'income' : 'expense';
+                final filtered = data.transactions.where((tx) {
+                  final k = '${tx.createdAt.year}-${tx.createdAt.month.toString().padLeft(2, '0')}';
+                  return k == mk && tx.type == type;
+                }).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                final parts = mk.split('-');
+                final dt = DateTime(int.parse(parts[0]), int.parse(parts[1]));
+                final label = '${DateFormat('MMMM yyyy').format(dt)} · ${ri == 0 ? 'Income' : 'Expense'}';
+                onDrillDown(filtered, label);
+              },
+              touchTooltipData: BarTouchTooltipData(
               getTooltipColor: (_) => const Color(0xFF252830),
               getTooltipItem: (group, gi, rod, ri) => BarTooltipItem(
                 '${ri == 0 ? 'Income' : 'Expense'}\n',
@@ -1185,4 +1284,922 @@ class _R extends StatelessWidget {
           textAlign: TextAlign.end)),
     ]),
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BURN RATE FORECAST
+// ═══════════════════════════════════════════════════════════════════════════════
+class _BurnRateForecast extends StatefulWidget {
+  final AnalyticsData data;
+  const _BurnRateForecast({required this.data});
+  @override
+  State<_BurnRateForecast> createState() => _BurnRateForecastState();
+}
+
+class _BurnRateForecastState extends State<_BurnRateForecast> {
+  int _periodDays = 30;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final cutoff = now.subtract(Duration(days: _periodDays));
+
+    final recentExp = widget.data.transactions
+        .where((tx) => tx.type != 'income' && tx.createdAt.isAfter(cutoff))
+        .toList();
+    final recentInc = widget.data.transactions
+        .where((tx) => tx.type == 'income' && tx.createdAt.isAfter(cutoff))
+        .toList();
+
+    final totalExp = recentExp.fold<double>(0, (s, tx) => s + tx.amount);
+    final totalInc = recentInc.fold<double>(0, (s, tx) => s + tx.amount);
+    final dailyExp = totalExp / _periodDays;
+    final dailyInc = totalInc / _periodDays;
+    final netDaily = dailyInc - dailyExp;
+    final balance  = widget.data.netBalance;
+
+    int? daysLeft;
+    if (dailyExp > 0 && balance > 0) {
+      daysLeft = (balance / dailyExp).floor();
+    }
+
+    // Colour & status
+    Color accent;
+    String statusLabel;
+    IconData statusIcon;
+    if (daysLeft == null) {
+      accent = _textSec;
+      statusLabel = balance <= 0 ? 'Balance already negative' : 'No expenses in period';
+      statusIcon = Icons.info_outline_rounded;
+    } else if (daysLeft > 60) {
+      accent = _incCol;
+      statusLabel = 'Healthy runway';
+      statusIcon = Icons.check_circle_outline_rounded;
+    } else if (daysLeft > 30) {
+      accent = _wholesale;
+      statusLabel = 'Moderate — keep an eye on spending';
+      statusIcon = Icons.warning_amber_rounded;
+    } else {
+      accent = _expCol;
+      statusLabel = 'Low runway — reduce expenses';
+      statusIcon = Icons.local_fire_department_rounded;
+    }
+
+    final progress = daysLeft == null ? 0.0 : (daysLeft / 90).clamp(0.0, 1.0);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _cardBdr),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [accent.withOpacity(0.08), Colors.transparent],
+        ),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // ── Header ───────────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Row(children: [
+            Container(
+              width: 32, height: 32,
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(Icons.local_fire_department_rounded, color: accent, size: 17),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Burn Rate Forecast',
+                    style: TextStyle(color: _textPri, fontWeight: FontWeight.w600, fontSize: 15)),
+                const Text('How long will your balance last?',
+                    style: TextStyle(color: _textSec, fontSize: 12)),
+              ]),
+            ),
+          ]),
+        ),
+
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+            // ── Period pills ─────────────────────────────────────────────
+            Row(children: [
+              const Text('Based on last', style: TextStyle(color: _textSec, fontSize: 12)),
+              const SizedBox(width: 10),
+              ...[30, 60, 90].map((d) {
+                final on = d == _periodDays;
+                return GestureDetector(
+                  onTap: () => setState(() => _periodDays = d),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    margin: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: on ? accent : _cardBdr,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: on ? accent : Colors.transparent),
+                    ),
+                    child: Text('${d}d', style: TextStyle(
+                      color: on ? Colors.white : _textSec,
+                      fontSize: 12,
+                      fontWeight: on ? FontWeight.w700 : FontWeight.normal,
+                    )),
+                  ),
+                );
+              }),
+            ]),
+
+            const SizedBox(height: 22),
+
+            // ── Big number ───────────────────────────────────────────────
+            if (daysLeft != null) ...[
+              Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                TweenAnimationBuilder<double>(
+                  key: ValueKey(_periodDays),
+                  tween: Tween(begin: 0, end: daysLeft.toDouble()),
+                  duration: const Duration(milliseconds: 900),
+                  curve: Curves.easeOut,
+                  builder: (_, v, __) => Text('~${v.toInt()}',
+                      style: TextStyle(
+                          color: accent,
+                          fontSize: 54,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -2)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10, left: 6),
+                  child: Text('days', style: TextStyle(
+                      color: accent.withOpacity(0.65),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600)),
+                ),
+              ]),
+              Text(
+                'At your current pace, your balance runs out in ~$daysLeft days',
+                style: const TextStyle(color: _textSec, fontSize: 13, height: 1.4),
+              ),
+            ] else ...[
+              Text('—', style: TextStyle(
+                  color: accent, fontSize: 54, fontWeight: FontWeight.w900)),
+              Text(statusLabel,
+                  style: const TextStyle(color: _textSec, fontSize: 13)),
+            ],
+
+            const SizedBox(height: 20),
+
+            // ── Status row ───────────────────────────────────────────────
+            Row(children: [
+              Icon(statusIcon, color: accent, size: 14),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(statusLabel,
+                    style: TextStyle(color: accent, fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ]),
+            const SizedBox(height: 8),
+
+            // ── Runway bar ───────────────────────────────────────────────
+            TweenAnimationBuilder<double>(
+              key: ValueKey(_periodDays),
+              tween: Tween(begin: 0, end: progress),
+              duration: const Duration(milliseconds: 1000),
+              curve: Curves.easeOut,
+              builder: (_, v, __) => Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: v,
+                      backgroundColor: _cardBdr,
+                      valueColor: AlwaysStoppedAnimation<Color>(accent),
+                      minHeight: 10,
+                    ),
+                  ),
+                  // 30-day and 60-day markers
+                  ...[ (1/3, '30d'), (2/3, '60d') ].map((pair) {
+                    return Positioned(
+                      left: (MediaQuery.of(context).size.width - 64) * pair.$1 - 12,
+                      top: 0,
+                      bottom: 0,
+                      child: Center(
+                        child: Container(
+                          width: 1,
+                          color: _cardBg.withOpacity(0.6),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+            const SizedBox(height: 5),
+            Row(children: [
+              const Text('0d', style: TextStyle(color: _textSec, fontSize: 10)),
+              const Spacer(),
+              const Text('30d', style: TextStyle(color: _textSec, fontSize: 10)),
+              const Spacer(),
+              const Text('60d', style: TextStyle(color: _textSec, fontSize: 10)),
+              const Spacer(),
+              const Text('90d+', style: TextStyle(color: _textSec, fontSize: 10)),
+            ]),
+
+            const SizedBox(height: 18),
+            const Divider(color: _cardBdr, height: 1),
+            const SizedBox(height: 14),
+
+            // ── Daily breakdown tiles ─────────────────────────────────────
+            Row(children: [
+              Expanded(child: _BurnTile(
+                icon: Icons.arrow_downward_rounded,
+                label: 'Daily Burn',
+                value: '₹${CurrencyFormatter.format(dailyExp)}',
+                color: _expCol,
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: _BurnTile(
+                icon: Icons.arrow_upward_rounded,
+                label: 'Daily Income',
+                value: '₹${CurrencyFormatter.format(dailyInc)}',
+                color: _incCol,
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: _BurnTile(
+                icon: netDaily >= 0
+                    ? Icons.trending_up_rounded
+                    : Icons.trending_down_rounded,
+                label: 'Net / Day',
+                value: '${netDaily >= 0 ? '+' : '-'}₹${CurrencyFormatter.format(netDaily.abs())}',
+                color: netDaily >= 0 ? _incCol : _expCol,
+              )),
+            ]),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+class _BurnTile extends StatelessWidget {
+  final IconData icon;
+  final String label, value;
+  final Color color;
+  const _BurnTile({required this.icon, required this.label,
+      required this.value, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.07),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: color.withOpacity(0.18)),
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Icon(icon, color: color, size: 13),
+      const SizedBox(height: 5),
+      Text(value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 2),
+      Text(label, style: const TextStyle(color: _textSec, fontSize: 10)),
+    ]),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RECURRING TRANSACTION DETECTOR
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class _RecurringItem {
+  final String label;
+  final String sublabel;
+  final double avgAmount;
+  final double totalAmount;
+  final int count;
+  final String type;       // 'income' or 'expense'
+  final Color color;
+  final List<String> months;
+  final String detectedBy; // 'category' or 'description'
+
+  const _RecurringItem({
+    required this.label,
+    required this.sublabel,
+    required this.avgAmount,
+    required this.totalAmount,
+    required this.count,
+    required this.type,
+    required this.color,
+    required this.months,
+    required this.detectedBy,
+  });
+}
+
+class _RecurringDetector extends StatefulWidget {
+  final AnalyticsData data;
+  final void Function(List<TransactionEntity>, String) onDrillDown;
+  const _RecurringDetector({required this.data, required this.onDrillDown});
+  @override
+  State<_RecurringDetector> createState() => _RecurringDetectorState();
+}
+
+class _RecurringDetectorState extends State<_RecurringDetector> {
+  int _tab = 0; // 0 = By Category, 1 = By Client / Description
+
+  // ── Detection: group by category, require 2+ distinct months ─────────────
+  List<_RecurringItem> _byCategory() {
+    final txs = widget.data.transactions;
+    final groups = <String, List<TransactionEntity>>{};
+    for (final tx in txs) {
+      groups.putIfAbsent(tx.category, () => []).add(tx);
+    }
+    final items = <_RecurringItem>[];
+    for (final entry in groups.entries) {
+      final list = entry.value;
+      final months = <String>{};
+      for (final tx in list) {
+        months.add('${tx.createdAt.year}-${tx.createdAt.month.toString().padLeft(2, '0')}');
+      }
+      if (months.length < 2) continue;
+
+      final incList = list.where((tx) => tx.type == 'income').toList();
+      final expList = list.where((tx) => tx.type != 'income').toList();
+
+      void addItem(List<TransactionEntity> sub, String type, Color col) {
+        if (sub.isEmpty) return;
+        final total = sub.fold<double>(0, (s, tx) => s + tx.amount);
+        items.add(_RecurringItem(
+          label: entry.key,
+          sublabel: '${months.length} months  ·  ${sub.length}× recorded',
+          avgAmount: total / sub.length,
+          totalAmount: total,
+          count: sub.length,
+          type: type,
+          color: col,
+          months: months.toList()..sort(),
+          detectedBy: 'category',
+        ));
+      }
+
+      if (expList.isNotEmpty) addItem(expList, 'expense', _expCol);
+      if (incList.isNotEmpty) addItem(incList, 'income',  _incCol);
+    }
+
+    final exp = items.where((i) => i.type == 'expense').toList()
+      ..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
+    final inc = items.where((i) => i.type == 'income').toList()
+      ..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
+    return [...exp, ...inc];
+  }
+
+  // ── Detection: group by normalised description (first 3 words) ────────────
+  List<_RecurringItem> _byDescription() {
+    final txs = widget.data.transactions
+        .where((tx) => tx.description != null && tx.description!.trim().isNotEmpty)
+        .toList();
+
+    final groups = <String, List<TransactionEntity>>{};
+    for (final tx in txs) {
+      final raw   = tx.description!.trim();
+      final words = raw.split(RegExp(r'\s+')).take(3).join(' ').toLowerCase();
+      if (words.isEmpty) continue;
+      groups.putIfAbsent(words, () => []).add(tx);
+    }
+
+    final items = <_RecurringItem>[];
+    for (final entry in groups.entries) {
+      final list = entry.value;
+      final months = <String>{};
+      for (final tx in list) {
+        months.add('${tx.createdAt.year}-${tx.createdAt.month.toString().padLeft(2, '0')}');
+      }
+      if (months.length < 2) continue;
+
+      final incList = list.where((tx) => tx.type == 'income').toList();
+      final expList = list.where((tx) => tx.type != 'income').toList();
+
+      // Display label = full description of first transaction (capitalised)
+      final raw = list.first.description!.trim();
+      final displayLabel = raw.length > 32 ? '${raw.substring(0, 30)}…' : raw;
+      final catLabel = list.map((tx) => tx.category).toSet().join(', ');
+
+      void addItem(List<TransactionEntity> sub, String type, Color col) {
+        if (sub.isEmpty) return;
+        final total = sub.fold<double>(0, (s, tx) => s + tx.amount);
+        items.add(_RecurringItem(
+          label: displayLabel,
+          sublabel: '$catLabel  ·  ${months.length} months',
+          avgAmount: total / sub.length,
+          totalAmount: total,
+          count: sub.length,
+          type: type,
+          color: col,
+          months: months.toList()..sort(),
+          detectedBy: 'description',
+        ));
+      }
+
+      if (expList.isNotEmpty) addItem(expList, 'expense', _expCol);
+      if (incList.isNotEmpty) addItem(incList, 'income',  _incCol);
+    }
+
+    final exp = items.where((i) => i.type == 'expense').toList()
+      ..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
+    final inc = items.where((i) => i.type == 'income').toList()
+      ..sort((a, b) => b.totalAmount.compareTo(a.totalAmount));
+    return [...exp, ...inc];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _tab == 0 ? _byCategory() : _byDescription();
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _cardBdr),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF1A1060), Colors.transparent],
+        ),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // ── Header ─────────────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Row(children: [
+            Container(
+              width: 32, height: 32,
+              decoration: BoxDecoration(
+                color: _c1.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: const Icon(Icons.repeat_rounded, color: _c1, size: 17),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Recurring Patterns',
+                    style: TextStyle(color: _textPri, fontWeight: FontWeight.w600, fontSize: 15)),
+                const Text('Transactions repeating across months',
+                    style: TextStyle(color: _textSec, fontSize: 12)),
+              ]),
+            ),
+          ]),
+        ),
+
+        // ── Tab selector ───────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF0D0F13),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.all(3),
+            child: Row(children: [
+              _RecurringTab(
+                label: 'By Category',
+                icon: Icons.category_rounded,
+                active: _tab == 0,
+                onTap: () => setState(() => _tab = 0),
+              ),
+              _RecurringTab(
+                label: 'By Client / Desc',
+                icon: Icons.person_search_rounded,
+                active: _tab == 1,
+                onTap: () => setState(() => _tab = 1),
+              ),
+            ]),
+          ),
+        ),
+
+        const SizedBox(height: 14),
+
+        // ── Content ────────────────────────────────────────────────────────
+        if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Column(children: [
+              const Icon(Icons.search_off_rounded, color: _cardBdr, size: 40),
+              const SizedBox(height: 10),
+              Text(
+                _tab == 1
+                    ? 'No recurring patterns found in descriptions.\nMake sure transactions have descriptions filled in.'
+                    : 'No recurring patterns found yet.\nPatterns appear when the same category appears in 2+ months.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: _textSec, fontSize: 13, height: 1.5),
+              ),
+            ]),
+          )
+        else ...[
+          // ── Expense section ─────────────────────────────────────────────
+          _RecurringSectionHeader(
+            icon: Icons.arrow_downward_rounded,
+            label: 'Expenses',
+            color: _expCol,
+            count: items.where((i) => i.type == 'expense').length,
+          ),
+          ...items.where((i) => i.type == 'expense').map((item) =>
+            _RecurringRow(
+              item: item,
+              onDrillDown: () {
+                final txs = widget.data.transactions.where((tx) {
+                  if (item.detectedBy == 'category') {
+                    return tx.category == item.label && tx.type != 'income';
+                  } else {
+                    final raw = tx.description?.trim() ?? '';
+                    final key = raw.split(RegExp(r'\s+')).take(3).join(' ').toLowerCase();
+                    final itemKey = item.label.toLowerCase().split(RegExp(r'\s+')).take(3).join(' ');
+                    return key == itemKey && tx.type != 'income';
+                  }
+                }).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                widget.onDrillDown(txs, '${item.label} · Recurring');
+              },
+            ),
+          ),
+
+          if (items.any((i) => i.type == 'income')) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Divider(color: _cardBdr, height: 1),
+            ),
+            _RecurringSectionHeader(
+              icon: Icons.arrow_upward_rounded,
+              label: 'Income',
+              color: _incCol,
+              count: items.where((i) => i.type == 'income').length,
+            ),
+            ...items.where((i) => i.type == 'income').map((item) =>
+              _RecurringRow(
+                item: item,
+                onDrillDown: () {
+                  final txs = widget.data.transactions.where((tx) {
+                    if (item.detectedBy == 'category') {
+                      return tx.category == item.label && tx.type == 'income';
+                    } else {
+                      final raw = tx.description?.trim() ?? '';
+                      final key = raw.split(RegExp(r'\s+')).take(3).join(' ').toLowerCase();
+                      final itemKey = item.label.toLowerCase().split(RegExp(r'\s+')).take(3).join(' ');
+                      return key == itemKey && tx.type == 'income';
+                    }
+                  }).toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                  widget.onDrillDown(txs, '${item.label} · Recurring');
+                },
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 8),
+        ],
+      ]),
+    );
+  }
+}
+
+class _RecurringTab extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool active;
+  final VoidCallback onTap;
+  const _RecurringTab({required this.label, required this.icon,
+      required this.active, required this.onTap});
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? _cardBg : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+          border: active ? Border.all(color: _cardBdr) : null,
+        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 13,
+              color: active ? _c1 : _textSec),
+          const SizedBox(width: 5),
+          Text(label, style: TextStyle(
+              fontSize: 12,
+              fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+              color: active ? _textPri : _textSec)),
+        ]),
+      ),
+    ),
+  );
+}
+
+class _RecurringSectionHeader extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final int count;
+  const _RecurringSectionHeader({required this.icon, required this.label,
+      required this.color, required this.count});
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+    child: Row(children: [
+      Icon(icon, color: color, size: 13),
+      const SizedBox(width: 6),
+      Text(label, style: TextStyle(
+          color: color, fontSize: 12, fontWeight: FontWeight.w700,
+          letterSpacing: 0.5)),
+      const SizedBox(width: 8),
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text('$count', style: TextStyle(
+            color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+      ),
+    ]),
+  );
+}
+
+class _RecurringRow extends StatelessWidget {
+  final _RecurringItem item;
+  final VoidCallback onDrillDown;
+  const _RecurringRow({required this.item, required this.onDrillDown});
+
+  String _monthBadge(String m) {
+    final parts = m.split('-');
+    if (parts.length < 2) return m;
+    final dt = DateTime(int.parse(parts[0]), int.parse(parts[1]));
+    return DateFormat('MMM yy').format(dt);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onDrillDown,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: item.color.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: item.color.withOpacity(0.18)),
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Icon
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: item.color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.repeat_rounded, color: item.color, size: 17),
+          ),
+          const SizedBox(width: 10),
+
+          // Details
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Expanded(
+                  child: Text(item.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: _textPri, fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(width: 8),
+                // Expense / Income badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: item.color.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    item.type == 'income' ? '↑ Income' : '↓ Expense',
+                    style: TextStyle(color: item.color, fontSize: 10, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 3),
+              Text(item.sublabel,
+                  style: const TextStyle(color: _textSec, fontSize: 11)),
+              const SizedBox(height: 8),
+
+              // Amount row
+              Row(children: [
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('₹${CurrencyFormatter.format(item.avgAmount)}',
+                      style: TextStyle(
+                          color: item.color, fontSize: 14, fontWeight: FontWeight.w800)),
+                  const Text('avg / occurrence',
+                      style: TextStyle(color: _textSec, fontSize: 10)),
+                ]),
+                const SizedBox(width: 20),
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('₹${CurrencyFormatter.format(item.totalAmount)}',
+                      style: const TextStyle(
+                          color: _textPri, fontSize: 13, fontWeight: FontWeight.w600)),
+                  const Text('total across months',
+                      style: TextStyle(color: _textSec, fontSize: 10)),
+                ]),
+                const Spacer(),
+                // Tap hint
+                Icon(Icons.chevron_right_rounded, color: item.color.withOpacity(0.5), size: 18),
+              ]),
+
+              const SizedBox(height: 8),
+
+              // Month chips
+              Wrap(
+                spacing: 5, runSpacing: 5,
+                children: item.months.map((m) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _cardBdr,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(_monthBadge(m),
+                      style: const TextStyle(color: _textSec, fontSize: 10)),
+                )).toList(),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DRILL-DOWN BOTTOM SHEET
+// ═══════════════════════════════════════════════════════════════════════════════
+class _DrillDownSheet extends StatelessWidget {
+  final String title;
+  final List<TransactionEntity> transactions;
+  final ScrollController scrollController;
+
+  const _DrillDownSheet({
+    required this.title,
+    required this.transactions,
+    required this.scrollController,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final total    = transactions.fold<double>(0, (s, tx) => s + tx.amount);
+    final hasInc   = transactions.any((tx) => tx.type == 'income');
+    final hasExp   = transactions.any((tx) => tx.type != 'income');
+    final incTotal = transactions.where((tx) => tx.type == 'income')
+        .fold<double>(0, (s, tx) => s + tx.amount);
+    final expTotal = transactions.where((tx) => tx.type != 'income')
+        .fold<double>(0, (s, tx) => s + tx.amount);
+    final isMixed  = hasInc && hasExp;
+    final color    = isMixed ? _retail
+        : (hasInc ? _incCol : _expCol);
+    final fmt      = DateFormat('dd MMM · hh:mm a');
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF181B22),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // ── Drag handle ──────────────────────────────────────────────────────
+        Container(
+          width: 38, height: 4,
+          margin: const EdgeInsets.only(top: 12, bottom: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF3A3F4B),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+
+        // ── Header ───────────────────────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.receipt_long_rounded, color: color, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title, style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text('${transactions.length} entries',
+                      style: const TextStyle(color: _textSec, fontSize: 12)),
+                ]),
+              ),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text('₹${CurrencyFormatter.format(total)}',
+                    style: TextStyle(color: color,
+                        fontSize: 17, fontWeight: FontWeight.w800)),
+                if (isMixed) ...[
+                  const SizedBox(height: 2),
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('↑₹${CurrencyFormatter.format(incTotal)}',
+                        style: const TextStyle(color: _incCol, fontSize: 11)),
+                    const SizedBox(width: 6),
+                    Text('↓₹${CurrencyFormatter.format(expTotal)}',
+                        style: const TextStyle(color: _expCol, fontSize: 11)),
+                  ]),
+                ],
+              ]),
+            ],
+          ),
+        ),
+
+        const Divider(color: Color(0xFF252830), height: 1),
+
+        // ── Transaction list ─────────────────────────────────────────────────
+        Flexible(
+          child: ListView.separated(
+            controller: scrollController,
+            padding: const EdgeInsets.fromLTRB(0, 6, 0, 24),
+            itemCount: transactions.length,
+            separatorBuilder: (_, __) =>
+                const Divider(color: Color(0xFF1E2128), height: 1, indent: 68),
+            itemBuilder: (_, i) {
+              final tx    = transactions[i];
+              final isInc = tx.type == 'income';
+              final txCol = isInc ? _incCol : _expCol;
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                child: Row(children: [
+                  Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(
+                      color: txCol.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      isInc ? Icons.arrow_upward_rounded
+                             : Icons.arrow_downward_rounded,
+                      color: txCol, size: 17,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Text(tx.category, style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600)),
+                      if (tx.description != null &&
+                          tx.description!.isNotEmpty) ...[
+                        const SizedBox(height: 1),
+                        Text(tx.description!,
+                            style: const TextStyle(
+                                color: _textSec, fontSize: 11),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ],
+                      const SizedBox(height: 2),
+                      Text(
+                        '${tx.creatorName}  ·  ${fmt.format(tx.createdAt)}',
+                        style: const TextStyle(
+                            color: Color(0xFF4A4F5C), fontSize: 11),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(width: 10),
+                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    Text(
+                      '${isInc ? '+' : '-'}₹${CurrencyFormatter.format(tx.amount)}',
+                      style: TextStyle(
+                          color: txCol,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700),
+                    ),
+                  ]),
+                ]),
+              );
+            },
+          ),
+        ),
+        SizedBox(height: MediaQuery.of(context).padding.bottom),
+      ]),
+    );
+  }
 }

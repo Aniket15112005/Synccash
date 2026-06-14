@@ -151,3 +151,36 @@ final filteredTransactionsProvider =
     );
   },
 );
+
+// ── NEW ADDITIONS BELOW — nothing above this line was changed ─────────────────
+
+// Fetches ALL transactions with no limit (limit:0 skips .limit() in the repo)
+final allTransactionsStreamProvider =
+    StreamProvider.family<List<TransactionEntity>, String>(
+        (ref, cashbookId) {
+  final repo = ref.read(transactionRepositoryProvider);
+  return repo.getTransactionsStream(cashbookId, limit: 0);
+});
+
+// Used by the history screen — all transactions with the same filters applied
+final allFilteredTransactionsProvider =
+    Provider.family<AsyncValue<List<TransactionEntity>>, String>(
+  (ref, cashbookId) {
+    final asyncTransactions =
+        ref.watch(allTransactionsStreamProvider(cashbookId));
+    final activeCategory    = ref.watch(selectedCategoryFilterProvider);
+    final activeName        = ref.watch(selectedNameFilterProvider);
+    final activeDate        = ref.watch(selectedDateFilterProvider);
+    final activeDescription = ref.watch(selectedDescriptionFilterProvider);
+
+    return asyncTransactions.whenData(
+      (data) => _applyTransactionFilters(
+        data,
+        activeCategory:    activeCategory,
+        activeName:        activeName,
+        activeDate:        activeDate,
+        activeDescription: activeDescription,
+      ),
+    );
+  },
+);

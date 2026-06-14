@@ -15,7 +15,7 @@ import 'package:synccash/features/settings/services/backup_frequency_service.dar
 import 'package:synccash/features/settings/services/backup_service.dart';
 import 'package:synccash/features/settings/services/export_service.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart'
-    show transactionsStreamProvider;
+    show transactionsStreamProvider, allTransactionsStreamProvider;
 import 'package:intl/intl.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:flutter/foundation.dart';
@@ -191,6 +191,8 @@ class _ExportSheet extends ConsumerStatefulWidget {
 class _ExportSheetState extends ConsumerState<_ExportSheet> {
   bool _busy = false;
   String? _activeFormat;
+  _DataFilter _filter = _DataFilter.all;
+  _TypeFilter _typeFilter = _TypeFilter.all;
 
   Future<void> _doExport(String format) async {
     if (_busy) return;
@@ -207,12 +209,17 @@ class _ExportSheetState extends ConsumerState<_ExportSheet> {
       final cashbook = ref.read(cashbookStreamProvider).asData?.value;
       if (cashbook == null) throw Exception('Could not load cashbook data.');
 
-      final transactions =
-          ref.read(transactionsStreamProvider(cashbookId)).asData?.value ?? [];
+      final allTx =
+          ref.read(allTransactionsStreamProvider(cashbookId)).asData?.value ?? [];
+      final startDate = _filter.startDate;
+      final dateFiltered = startDate == null
+          ? allTx
+          : allTx.where((tx) => !tx.createdAt.isBefore(startDate)).toList();
+      final transactions = _typeFilter.apply(dateFiltered);
 
       if (transactions.isEmpty) {
         if (mounted) {
-          _showSnack('No transactions to export.', isError: true);
+          _showSnack('No transactions to export for the selected range.', isError: true);
         }
         return;
       }
@@ -268,6 +275,20 @@ class _ExportSheetState extends ConsumerState<_ExportSheet> {
                 'Your transactions will be exported and the share sheet will open so you can save to Downloads, Google Drive, or any other location.',
           ),
           const SizedBox(height: 20),
+          const _SectionLabel('DATE RANGE'),
+          const SizedBox(height: 8),
+          _FilterChips(
+            active: _filter,
+            onSelect: (f) => setState(() => _filter = f),
+          ),
+          const SizedBox(height: 12),
+          const _SectionLabel('TYPE'),
+          const SizedBox(height: 8),
+          _TypeFilterChips(
+            active: _typeFilter,
+            onSelect: (f) => setState(() => _typeFilter = f),
+          ),
+          const SizedBox(height: 16),
           const _SectionLabel('FORMAT'),
           const SizedBox(height: 8),
           _ExportFormatTile(
@@ -543,6 +564,8 @@ class _BackupSheet extends ConsumerStatefulWidget {
 class _BackupSheetState extends ConsumerState<_BackupSheet> {
   bool _busy = false;
   String _frequencyLabel = 'Never';
+  _DataFilter _filter = _DataFilter.all;
+  _TypeFilter _typeFilter = _TypeFilter.all;
 
   @override
   void initState() {
@@ -575,8 +598,13 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
       final cashbook = ref.read(cashbookStreamProvider).asData?.value;
       if (cashbook == null) throw Exception('Could not load cashbook data.');
 
-      final transactions =
-          ref.read(transactionsStreamProvider(cashbookId)).asData?.value ?? [];
+      final allTx =
+          ref.read(allTransactionsStreamProvider(cashbookId)).asData?.value ?? [];
+      final startDate = _filter.startDate;
+      final dateFiltered = startDate == null
+          ? allTx
+          : allTx.where((tx) => !tx.createdAt.isBefore(startDate)).toList();
+      final transactions = _typeFilter.apply(dateFiltered);
 
       await BackupService.createBackup(
         context: context,
@@ -618,14 +646,15 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final txAsync = ref.watch(
-      currentCashbookIdProvider.select((id) => id),
-    );
-    final count = txAsync == null
-        ? 0
-        : (ref.watch(transactionsStreamProvider(txAsync)).asData?.value
-                .length ??
-            0);
+    final cashbookId = ref.watch(currentCashbookIdProvider);
+    final allTx = cashbookId == null
+        ? <TransactionEntity>[]
+        : (ref.watch(allTransactionsStreamProvider(cashbookId)).asData?.value ?? []);
+    final startDate = _filter.startDate;
+    final dateFiltered = startDate == null
+        ? allTx
+        : allTx.where((tx) => !tx.createdAt.isBefore(startDate)).toList();
+    final count = _typeFilter.apply(dateFiltered).length;
 
     return _SheetScaffold(
       title: 'Backup',
@@ -636,11 +665,25 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
           const _InfoBanner(
             icon: Icons.shield_outlined,
             text:
-                'Creates a .synccash backup file of all your transactions. '
-                'Save it to your Downloads, Google Drive, or any location you prefer.',
+                'Creates a .synccash backup file of your transactions. '
+                'Use the date range to back up a specific period.',
             color: Color(0xFF10B981),
           ),
           const SizedBox(height: 20),
+          const _SectionLabel('DATE RANGE'),
+          const SizedBox(height: 8),
+          _FilterChips(
+            active: _filter,
+            onSelect: (f) => setState(() => _filter = f),
+          ),
+          const SizedBox(height: 12),
+          const _SectionLabel('TYPE'),
+          const SizedBox(height: 8),
+          _TypeFilterChips(
+            active: _typeFilter,
+            onSelect: (f) => setState(() => _typeFilter = f),
+          ),
+          const SizedBox(height: 16),
           const _SectionLabel('CURRENT DATA'),
           const SizedBox(height: 8),
           _StatTile(
@@ -1268,6 +1311,195 @@ class _ChevronIcon extends StatelessWidget {
       Icons.arrow_forward_ios_rounded,
       size: 13,
       color: Colors.white.withValues(alpha: 0.25),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Date-range filter — shared by Backup and Export pages
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ignore_for_file: unused_element
+
+enum _DataFilter {
+  today,
+  week,
+  month,
+  year,
+  all;
+
+  String get label {
+    switch (this) {
+      case _DataFilter.today: return 'Today';
+      case _DataFilter.week:  return 'This Week';
+      case _DataFilter.month: return 'This Month';
+      case _DataFilter.year:  return 'This Year';
+      case _DataFilter.all:   return 'All Time';
+    }
+  }
+
+  /// Returns the earliest [DateTime] to include, or null for no restriction.
+  DateTime? get startDate {
+    final now = DateTime.now();
+    switch (this) {
+      case _DataFilter.today:
+        return DateTime(now.year, now.month, now.day);
+      case _DataFilter.week:
+        // Start of the current Monday
+        return DateTime(now.year, now.month, now.day - (now.weekday - 1));
+      case _DataFilter.month:
+        return DateTime(now.year, now.month, 1);
+      case _DataFilter.year:
+        return DateTime(now.year, 1, 1);
+      case _DataFilter.all:
+        return null;
+    }
+  }
+}
+
+class _FilterChips extends StatelessWidget {
+  final _DataFilter active;
+  final ValueChanged<_DataFilter> onSelect;
+  const _FilterChips({required this.active, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: _DataFilter.values.map((f) {
+          final on = f == active;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onSelect(f);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: on
+                      ? const Color(0xFF3B82F6)
+                      : Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: on
+                        ? const Color(0xFF3B82F6)
+                        : Colors.white.withValues(alpha: 0.10),
+                  ),
+                ),
+                child: Text(
+                  f.label,
+                  style: TextStyle(
+                    color: on ? Colors.white : const Color(0xFF9CA3AF),
+                    fontSize: 13,
+                    fontWeight:
+                        on ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Type filter (Income / Expense / Retail / Wholesale) — shared by Backup & Export
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum _TypeFilter {
+  all,
+  income,
+  expense,
+  retail,
+  wholesale;
+
+  String get label {
+    switch (this) {
+      case _TypeFilter.all:       return 'All';
+      case _TypeFilter.income:    return 'Income';
+      case _TypeFilter.expense:   return 'Expense';
+      case _TypeFilter.retail:    return 'Retail';
+      case _TypeFilter.wholesale: return 'Wholesale';
+    }
+  }
+
+  List<TransactionEntity> apply(List<TransactionEntity> txs) {
+    switch (this) {
+      case _TypeFilter.all:
+        return txs;
+      case _TypeFilter.income:
+        return txs.where((tx) => tx.type.toLowerCase() == 'income').toList();
+      case _TypeFilter.expense:
+        return txs.where((tx) => tx.type.toLowerCase() != 'income').toList();
+      case _TypeFilter.retail:
+        return txs
+            .where((tx) => tx.category.toLowerCase().contains('retail'))
+            .toList();
+      case _TypeFilter.wholesale:
+        return txs
+            .where((tx) => tx.category.toLowerCase().contains('wholesale'))
+            .toList();
+    }
+  }
+}
+
+class _TypeFilterChips extends StatelessWidget {
+  final _TypeFilter active;
+  final ValueChanged<_TypeFilter> onSelect;
+  const _TypeFilterChips({required this.active, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 36,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: _TypeFilter.values.map((f) {
+          final on = f == active;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onSelect(f);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: on
+                      ? const Color(0xFF8B5CF6)
+                      : Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: on
+                        ? const Color(0xFF8B5CF6)
+                        : Colors.white.withValues(alpha: 0.10),
+                  ),
+                ),
+                child: Text(
+                  f.label,
+                  style: TextStyle(
+                    color: on ? Colors.white : const Color(0xFF9CA3AF),
+                    fontSize: 13,
+                    fontWeight:
+                        on ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 }

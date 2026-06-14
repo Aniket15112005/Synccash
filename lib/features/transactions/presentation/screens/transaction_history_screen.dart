@@ -203,7 +203,7 @@ class _TransactionHistoryScreenState
 
     final txAsync = cashbookId == null
         ? const AsyncValue<List<dynamic>>.data([])
-        : ref.watch(filteredTransactionsProvider(cashbookId));
+       : ref.watch(allFilteredTransactionsProvider(cashbookId));
 
     return Scaffold(
       backgroundColor: AppColors.background,
