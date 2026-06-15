@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
@@ -13,21 +14,50 @@ import 'manage_opening_balance_screen.dart';
 import 'party_detail_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Theme
+//  Design tokens — violet accent, terminal/ledger aesthetic
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _T {
-  static const bg     = Color(0xFF080A0E);
-  static const card   = Color(0xFF0F1318);
-  static const card2  = Color(0xFF141921);
-  static const border = Color(0xFF1C2130);
-  static const muted  = Color(0xFF4A5568);
-  static const accent = Color(0xFF6C7FE4);
-  static const text   = Color(0xFFE8ECF4);
-  static const green  = Color(0xFF38D68A);
-  static const amber  = Color(0xFFF5A623);
-  static const red    = Color(0xFFE85C5C);
+  static const bg      = Color(0xFF070810);
+  static const surface = Color(0xFF0C0D1C);
+  static const panel   = Color(0xFF0F1020);
+  static const line    = Color(0xFF15172A);
+  static const line2   = Color(0xFF1D2038);
+  static const muted   = Color(0xFF454870);
+  static const muted2  = Color(0xFF717499);
+  static const accent  = Color(0xFF7C3AED);
+  static const accent2 = Color(0xFFA78BFA);
+  static const text    = Color(0xFFF0F0FC);
+  static const text2   = Color(0xFFB8BCDA);
+  static const green   = Color(0xFF22C55E);
+  static const amber   = Color(0xFFFFB800);
+  static const red     = Color(0xFFFF4D6D);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Route helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+Route _slideRoute(Widget page) => PageRouteBuilder(
+      pageBuilder: (_, a, __) => page,
+      transitionsBuilder: (_, anim, __, child) {
+        final curved =
+            CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
+        return FadeTransition(
+          opacity: Tween<double>(begin: 0.0, end: 1.0)
+              .animate(CurvedAnimation(
+                  parent: anim, curve: const Interval(0.0, 0.6))),
+          child: SlideTransition(
+            position:
+                Tween<Offset>(begin: const Offset(0.06, 0.0), end: Offset.zero)
+                    .animate(curved),
+            child: child,
+          ),
+        );
+      },
+      transitionDuration: const Duration(milliseconds: 300),
+      reverseTransitionDuration: const Duration(milliseconds: 240),
+    );
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Sales Screen
@@ -49,6 +79,16 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
     super.dispose();
   }
 
+  void _addBill(BuildContext ctx) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: ctx,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _AddBillSheet(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final billsAsync = ref.watch(filteredSaleBillsProvider);
@@ -59,148 +99,350 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
         physics: const BouncingScrollPhysics(
             parent: AlwaysScrollableScrollPhysics()),
         slivers: [
-          // ── Header ─────────────────────────────────────────────────────────
+
+          // ── Flat App Bar ─────────────────────────────────────────────────
           SliverAppBar(
-            expandedHeight: 100,
             pinned: true,
+            floating: false,
             backgroundColor: _T.bg,
             surfaceTintColor: Colors.transparent,
             elevation: 0,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_rounded,
-                  color: _T.text, size: 18),
-              onPressed: () => Navigator.of(context).pop(),
+            toolbarHeight: 56,
+            leading: GestureDetector(
+              onTap: () => Navigator.of(context).pop(),
+              child: const Icon(Icons.arrow_back_ios_rounded,
+                  color: _T.text2, size: 18),
+            ),
+            title: const Text(
+              'SALES',
+              style: TextStyle(
+                color: _T.text,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 2.5,
+              ),
             ),
             actions: [
-              _IconBtn(
+              _IconAction(
                 icon: Icons.account_balance_wallet_outlined,
-                tooltip: 'Client Balances',
-                onTap: () => Navigator.of(context)
-                    .push(_slideRoute(const ManageOpeningBalanceScreen())),
+                onTap: () => Navigator.of(context).push(
+                  _slideRoute(const ManageOpeningBalanceScreen()),
+                ),
               ),
-              const SizedBox(width: 8),
-              _IconBtn(
+              const SizedBox(width: 4),
+              _IconAction(
                 icon: Icons.add_rounded,
-                tooltip: 'New Bill',
+                filled: true,
                 onTap: () => _addBill(context),
               ),
               const SizedBox(width: 16),
             ],
-            flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.fromLTRB(56, 0, 100, 14),
-              title: const Text('Sales',
-                  style: TextStyle(
-                      color: _T.text,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 22,
-                      letterSpacing: -0.4)),
-              background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF0C0E18), Color(0xFF080A0E)],
-                  ),
-                ),
-              ),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(1),
+              child: Container(height: 1, color: _T.line),
             ),
           ),
 
-          // ── Search ─────────────────────────────────────────────────────────
+          // ── Hero outstanding strip ───────────────────────────────────────
+          SliverToBoxAdapter(
+            child: billsAsync.maybeWhen(
+              data: (bills) => _HeroStrip(bills: bills),
+              orElse: () => const SizedBox.shrink(),
+            ),
+          ),
+
+          // ── Search ───────────────────────────────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-              child: _SearchField(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+              child: _SearchRow(
                 controller: _searchCtrl,
                 onChanged: (q) =>
                     ref.read(saleBillSearchProvider.notifier).update(q),
-                hint: 'Search party or bill…',
+                onAddBill: () => _addBill(context),
               ),
             ),
           ),
 
-          // ── Content ─────────────────────────────────────────────────────────
+          // ── Divider ──────────────────────────────────────────────────────
+          SliverToBoxAdapter(
+            child: Container(height: 1, color: _T.line,
+                margin: const EdgeInsets.only(top: 10)),
+          ),
+
+          // ── Content ─────────────────────────────────────────────────────
           billsAsync.when(
             data: (bills) {
               if (bills.isEmpty) {
                 return SliverFillRemaining(
                   hasScrollBody: false,
-                  child: _EmptyState(hasSearch: _searchCtrl.text.isNotEmpty),
+                  child: _EmptyState(
+                    hasSearch: _searchCtrl.text.isNotEmpty,
+                    onAdd: () => _addBill(context),
+                  ),
                 );
               }
+
               final grouped = <String, List<SaleBillEntity>>{};
+              final displayName = <String, String>{};
               for (final b in bills) {
-                grouped.putIfAbsent(b.partyName, () => []).add(b);
+                final key = b.partyName.trim().toLowerCase();
+                if (!grouped.containsKey(key)) {
+                  grouped[key] = [];
+                  displayName[key] = b.partyName;
+                }
+                grouped[key]!.add(b);
               }
               final names = grouped.keys.toList();
+
               return SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
-                sliver: SliverList.separated(
+                padding: const EdgeInsets.fromLTRB(0, 0, 0, 120),
+                sliver: SliverList.builder(
                   itemCount: names.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 6),
-                  itemBuilder: (ctx, i) => _PartyCard(
-                    key: ValueKey(names[i]),
-                    partyName: names[i],
+                  itemBuilder: (ctx, i) => _PartyRow(
+                    key:       ValueKey(names[i]),
+                    partyName: displayName[names[i]]!,
                     bills:     grouped[names[i]]!,
                     onTap: () => Navigator.of(context).push(
-                      _slideRoute(PartyDetailScreen(partyName: names[i])),
+                      _slideRoute(PartyDetailScreen(partyName: displayName[names[i]]!)),
                     ),
-                  ),
+                  )
+                  .animate(delay: Duration(milliseconds: 30 + i * 30))
+                  .fadeIn(duration: 240.ms)
+                  .slideX(begin: -0.03, end: 0, curve: Curves.easeOutCubic),
                 ),
               );
             },
-            loading: () => const SliverFillRemaining(
+            loading: () => SliverFillRemaining(
               hasScrollBody: false,
               child: Center(
-                child: CircularProgressIndicator(
-                    color: _T.accent, strokeWidth: 1.5),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 24, height: 24,
+                      child: CircularProgressIndicator(
+                        color: _T.accent,
+                        strokeWidth: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('Loading…',
+                        style: TextStyle(color: _T.muted, fontSize: 12)),
+                  ],
+                ),
               ),
             ),
             error: (e, _) => SliverFillRemaining(
               hasScrollBody: false,
               child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text('Error: $e',
-                      style: const TextStyle(color: _T.red, fontSize: 13),
-                      textAlign: TextAlign.center),
-                ),
+                child: Text('Error: $e',
+                    style: const TextStyle(color: _T.red, fontSize: 13)),
               ),
             ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _addBill(context),
-        backgroundColor: _T.accent,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        icon: const Icon(Icons.add_rounded, size: 20),
-        label: const Text('New Bill',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+      floatingActionButton: _NewBillFAB(onTap: () => _addBill(context)),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Hero strip — total outstanding as the headline number
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _HeroStrip extends StatelessWidget {
+  final List<SaleBillEntity> bills;
+  const _HeroStrip({required this.bills});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt        = NumberFormat('#,##,##0');
+    final totalBill  = bills.fold<double>(0, (s, b) => s + b.billTotal);
+    final parties    = bills.map((b) => b.partyName).toSet().length;
+    final settled    = bills.where((b) => b.billStatus == 'settled').length;
+    final pending    = bills.length - settled;
+
+    return Container(
+      color: _T.bg,
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          // Big label
+          Row(
+            children: [
+              Container(
+                width: 6, height: 6,
+                margin: const EdgeInsets.only(right: 8, top: 1),
+                decoration: BoxDecoration(
+                  color: pending > 0 ? _T.amber : _T.green,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              Text(
+                pending > 0 ? 'OUTSTANDING' : 'ALL SETTLED',
+                style: TextStyle(
+                  color: pending > 0 ? _T.amber : _T.green,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+
+          // Big number
+          Text(
+            '₹${fmt.format(totalBill)}',
+            style: const TextStyle(
+              color: _T.text,
+              fontSize: 38,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -1.2,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Small stats in a row
+          Row(
+            children: [
+              _MiniStat(value: '$parties',
+                  label: parties == 1 ? 'client' : 'clients',
+                  color: _T.accent2),
+              _StatDot(),
+              _MiniStat(value: '${bills.length}',
+                  label: bills.length == 1 ? 'bill' : 'bills',
+                  color: _T.text2),
+              _StatDot(),
+              _MiniStat(value: '$pending',
+                  label: 'pending',
+                  color: pending > 0 ? _T.amber : _T.muted2),
+              _StatDot(),
+              _MiniStat(value: '$settled',
+                  label: 'settled',
+                  color: settled > 0 ? _T.green : _T.muted2),
+            ],
+          ),
+        ],
       ),
     );
   }
+}
 
-  void _addBill(BuildContext context) => showModalBottomSheet(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => const _AddBillSheet(),
+class _MiniStat extends StatelessWidget {
+  final String value;
+  final String label;
+  final Color  color;
+  const _MiniStat({
+      required this.value, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          Text(value,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3)),
+          const SizedBox(width: 3),
+          Text(label,
+              style: const TextStyle(
+                  color: _T.muted2, fontSize: 11)),
+        ],
+      );
+}
+
+class _StatDot extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Container(
+          width: 3, height: 3,
+          decoration: BoxDecoration(
+              color: _T.line2, shape: BoxShape.circle),
+        ),
       );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Party card with reactive streams
-//  Right side: shows Opening Balance (OB) instead of total bill amount
+//  Search row
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _PartyCard extends ConsumerStatefulWidget {
+class _SearchRow extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String>  onChanged;
+  final VoidCallback          onAddBill;
+  const _SearchRow({
+    required this.controller,
+    required this.onChanged,
+    required this.onAddBill,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: _T.surface,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: _T.line2),
+                ),
+                child: TextField(
+                  controller: controller,
+                  onChanged: onChanged,
+                  style: const TextStyle(
+                      color: _T.text, fontSize: 13, height: 1),
+                  decoration: InputDecoration(
+                    hintText: 'Search party or bill…',
+                    hintStyle:
+                        const TextStyle(color: _T.muted, fontSize: 13),
+                    prefixIcon: const Icon(Icons.search_rounded,
+                        color: _T.muted, size: 16),
+                    suffixIcon: controller.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.close_rounded,
+                                color: _T.muted, size: 14),
+                            onPressed: () {
+                              controller.clear();
+                              onChanged('');
+                            },
+                          )
+                        : null,
+                    border: InputBorder.none,
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Party row — ledger-style with left status stripe
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PartyRow extends ConsumerStatefulWidget {
   final String               partyName;
   final List<SaleBillEntity> bills;
   final VoidCallback         onTap;
 
-  const _PartyCard({
+  const _PartyRow({
     super.key,
     required this.partyName,
     required this.bills,
@@ -208,18 +450,18 @@ class _PartyCard extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<_PartyCard> createState() => _PartyCardState();
+  ConsumerState<_PartyRow> createState() => _PartyRowState();
 }
 
-class _PartyCardState extends ConsumerState<_PartyCard> {
+class _PartyRowState extends ConsumerState<_PartyRow> {
   StreamSubscription<QuerySnapshot>?    _txSub;
   StreamSubscription<DocumentSnapshot>? _partySub;
   ProviderSubscription<String?>?        _idSub;
   String?                               _cashbookId;
 
-  double _received = 0.0;
-  double _ob       = 0.0;
-  String _place    = '';
+  Map<String, double> _receivedByBill = {};
+  double _ob    = 0.0;
+  String _place = '';
 
   @override
   void initState() {
@@ -243,7 +485,8 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
 
   void _start(String cashbookId) {
     if (!mounted) return;
-    final q = widget.partyName.trim().toLowerCase();
+    final partyLow = widget.partyName.trim().toLowerCase();
+    final billIds  = widget.bills.map((b) => b.saleBillId).toSet();
 
     _txSub = FirebaseFirestore.instance
         .collection('cashbooks')
@@ -253,21 +496,30 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      double total = 0.0;
-      for (final d in snap.docs) {
-        final desc = (d['description'] as String? ?? '').toLowerCase();
-        if (desc.contains(q)) {
-          total += (d['amount'] as num?)?.toDouble() ?? 0.0;
+      final map = <String, double>{};
+      for (final doc in snap.docs) {
+        final raw      = doc.data();
+        final linkedId = raw['linkedSaleBillId'] as String?;
+        final desc     = (raw['description'] as String? ?? '').toLowerCase();
+        final amount   = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+
+        if (linkedId != null &&
+            linkedId.isNotEmpty &&
+            billIds.contains(linkedId)) {
+          map[linkedId] = (map[linkedId] ?? 0.0) + amount;
+        } else if ((linkedId == null || linkedId.isEmpty) &&
+            desc.contains(partyLow)) {
+          map['_desc'] = (map['_desc'] ?? 0.0) + amount;
         }
       }
-      setState(() => _received = total);
+      if (mounted) setState(() => _receivedByBill = map);
     });
 
     _partySub = FirebaseFirestore.instance
         .collection('cashbooks')
         .doc(cashbookId)
         .collection('parties')
-        .doc(q)
+        .doc(partyLow)
         .snapshots()
         .listen((doc) {
       if (!mounted) return;
@@ -278,10 +530,7 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
           _place = d['place'] as String? ?? '';
         });
       } else {
-        setState(() {
-          _ob    = 0.0;
-          _place = '';
-        });
+        setState(() { _ob = 0.0; _place = ''; });
       }
     });
   }
@@ -294,124 +543,213 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
     super.dispose();
   }
 
+  double get _totalReceived {
+    if (widget.bills.length == 1) {
+      return _receivedByBill.values.fold(0.0, (s, v) => s + v);
+    }
+    return _receivedByBill.entries
+        .where((e) => e.key != '_desc')
+        .fold(0.0, (s, e) => s + e.value);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final fmt        = NumberFormat('#,##,##0.00');
-    final totalBills =
-        widget.bills.fold<double>(0.0, (s, b) => s + b.billTotal);
-    final outstanding =
-        (totalBills - _received).clamp(0.0, double.infinity);
-    final settled = outstanding <= 0;
+    final fmt        = NumberFormat('#,##,##0.##');
+    final totalBill  = widget.bills.fold<double>(0.0, (s, b) => s + b.billTotal);
+    final outstanding = (totalBill - _totalReceived).clamp(0.0, double.infinity);
+    final settled    = outstanding <= 0 && totalBill > 0;
+    final partial    = !settled && _totalReceived > 0;
+
+    final Color stripe = settled ? _T.green : (partial ? _T.amber : _T.red);
+    final Color amtColor = settled ? _T.green : _T.amber;
 
     return GestureDetector(
-      onTap: widget.onTap,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0F1318), Color(0xFF0C1018)],
-          ),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: _T.border),
-        ),
-        child: Row(
-          children: [
-            _CircleAvatar(name: widget.partyName, size: 44),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.partyName,
-                      style: const TextStyle(
-                          color: _T.text,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14)),
-                  if (_place.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.location_on_rounded,
-                              color: _T.muted, size: 10),
-                          const SizedBox(width: 2),
-                          Text(_place,
-                              style: const TextStyle(
-                                  color: _T.muted, fontSize: 11)),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 5),
-                  Text(
-                    '${widget.bills.length} bill${widget.bills.length == 1 ? '' : 's'}',
-                    style: const TextStyle(color: _T.muted, fontSize: 10),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        widget.onTap();
+      },
+      child: Column(
+        children: [
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Opening balance shown as OB: amount
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: _T.accent.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: const Text('OB',
-                          style: TextStyle(
-                              color: _T.accent,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.3)),
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      '₹${_obFmt(_ob)}',
-                      style: const TextStyle(
-                          color: _T.text,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13),
-                    ),
-                  ],
+                // ── Left status stripe ───────────────────────────────────
+                Container(
+                  width: 4,
+                  color: stripe.withValues(alpha: 0.8),
                 ),
-                const SizedBox(height: 5),
-                _Pill(
-                  label: settled
-                      ? 'Settled'
-                      : '₹${fmt.format(outstanding)} due',
-                  color: settled ? _T.green : _T.amber,
+
+                // ── Content ───────────────────────────────────────────────
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                    color: _T.bg,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+
+                        // Square avatar
+                        Container(
+                          width: 38, height: 38,
+                          decoration: BoxDecoration(
+                            color: _partyColor(widget.partyName)
+                                .withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _partyColor(widget.partyName)
+                                  .withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Center(
+                            child: Text(
+                              widget.partyName.isNotEmpty
+                                  ? widget.partyName[0].toUpperCase()
+                                  : '?',
+                              style: TextStyle(
+                                color: _partyColor(widget.partyName),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+
+                        // Name + sub info
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                widget.partyName,
+                                style: const TextStyle(
+                                  color: _T.text,
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Text(
+                                    '${widget.bills.length} bill${widget.bills.length == 1 ? '' : 's'}',
+                                    style: const TextStyle(
+                                        color: _T.muted2, fontSize: 11),
+                                  ),
+                                  if (_place.isNotEmpty) ...[
+                                    const Text(' · ',
+                                        style: TextStyle(
+                                            color: _T.muted, fontSize: 11)),
+                                    Flexible(
+                                      child: Text(
+                                        _place,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                            color: _T.muted2, fontSize: 11),
+                                      ),
+                                    ),
+                                  ],
+                                  if (_ob > 0) ...[
+                                    const Text(' · ',
+                                        style: TextStyle(
+                                            color: _T.muted, fontSize: 11)),
+                                    Text('OB ₹${_shortFmt(_ob)}',
+                                        style: const TextStyle(
+                                            color: Color(0xFF2196F3),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600)),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+
+                        // Amount + status on right
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (settled)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_rounded,
+                                      color: _T.green, size: 12),
+                                  const SizedBox(width: 3),
+                                  const Text('Settled',
+                                      style: TextStyle(
+                                          color: _T.green,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700)),
+                                ],
+                              )
+                            else ...[
+                              Text(
+                                '₹${fmt.format(outstanding)}',
+                                style: TextStyle(
+                                  color: amtColor,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                partial ? 'partial' : 'pending',
+                                style: TextStyle(
+                                  color: amtColor.withValues(alpha: 0.65),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(Icons.chevron_right_rounded,
+                            color: _T.muted.withValues(alpha: 0.4),
+                            size: 14),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
-            const SizedBox(width: 4),
-            Icon(Icons.chevron_right_rounded,
-                color: _T.muted.withValues(alpha: 0.3), size: 14),
-          ],
-        ),
+          ),
+          Container(height: 1, color: _T.line),
+        ],
       ),
     );
   }
 }
 
-String _obFmt(double v) => v == v.truncateToDouble()
-    ? v.toStringAsFixed(0)
-    : v.toStringAsFixed(2);
+Color _partyColor(String name) {
+  const colors = [
+    Color(0xFF818CF8),
+    Color(0xFF34D399),
+    Color(0xFFF472B6),
+    Color(0xFFFBBF24),
+    Color(0xFF60A5FA),
+    Color(0xFFA78BFA),
+  ];
+  return name.isNotEmpty
+      ? colors[name.codeUnitAt(0) % colors.length]
+      : colors[0];
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Add bill sheet
+//  Add Bill Sheet
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AddBillSheet extends ConsumerStatefulWidget {
   const _AddBillSheet();
+
   @override
   ConsumerState<_AddBillSheet> createState() => _AddBillSheetState();
 }
@@ -425,8 +763,56 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
   DateTime _date    = DateTime.now();
   bool _submitting  = false;
 
+  Timer?  _obTimer;
+  double? _fetchedOB;
+  bool    _obFetching = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _partyCtrl.addListener(_onPartyChanged);
+  }
+
+  void _onPartyChanged() {
+    _obTimer?.cancel();
+    final name = _partyCtrl.text.trim();
+    if (name.isEmpty) {
+      if (mounted) setState(() { _fetchedOB = null; _obFetching = false; });
+      return;
+    }
+    if (mounted) setState(() => _obFetching = true);
+    _obTimer = Timer(const Duration(milliseconds: 600), () => _fetchOB(name));
+  }
+
+  Future<void> _fetchOB(String name) async {
+    final cashbookId = ref.read(currentCashbookIdProvider);
+    if (cashbookId == null || !mounted) {
+      if (mounted) setState(() => _obFetching = false);
+      return;
+    }
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('parties')
+          .doc(name.toLowerCase())
+          .get();
+      if (!mounted) return;
+      setState(() {
+        _fetchedOB = doc.exists
+            ? (doc.data()?['openingBalance'] as num?)?.toDouble() ?? 0.0
+            : 0.0;
+        _obFetching = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _obFetching = false);
+    }
+  }
+
   @override
   void dispose() {
+    _obTimer?.cancel();
+    _partyCtrl.removeListener(_onPartyChanged);
     _partyCtrl.dispose();
     _billNoCtrl.dispose();
     _totalCtrl.dispose();
@@ -446,11 +832,11 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
           colorScheme: const ColorScheme.dark(
             primary: _T.accent,
             onPrimary: Colors.white,
-            surface: Color(0xFF141921),
+            surface: Color(0xFF0F1020),
             onSurface: _T.text,
           ),
-          dialogTheme: const DialogThemeData(
-              backgroundColor: Color(0xFF080A0E)),
+          dialogTheme:
+              const DialogThemeData(backgroundColor: Color(0xFF0C0D1C)),
         ),
         child: child!,
       ),
@@ -487,8 +873,8 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
               style: const TextStyle(color: Colors.white)),
           backgroundColor: _T.red.withValues(alpha: 0.9),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         ));
       }
@@ -503,11 +889,12 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
     final dateFmt = DateFormat('dd MMM yyyy');
 
     return Container(
-      decoration: const BoxDecoration(
-        color: _T.card2,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      decoration: BoxDecoration(
+        color: _T.panel,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        border: Border.all(color: _T.line2),
       ),
-      padding: EdgeInsets.fromLTRB(20, 12, 20, 28 + bottom),
+      padding: EdgeInsets.fromLTRB(20, 16, 20, 28 + bottom),
       child: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -515,117 +902,184 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Handle
               Center(
                 child: Container(
-                  width: 40, height: 4,
+                  width: 32, height: 3,
                   margin: const EdgeInsets.only(bottom: 20),
                   decoration: BoxDecoration(
-                    color: _T.border,
+                    color: _T.line2,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-              const Text('New Sale Bill',
-                  style: TextStyle(
-                      color: _T.text,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700)),
-              const SizedBox(height: 4),
-              const Text('Fill in the bill details below',
-                  style: TextStyle(color: _T.muted, fontSize: 12)),
+
+              // Header
+              Row(
+                children: [
+                  Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(
+                      color: _T.accent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: _T.accent.withValues(alpha: 0.3)),
+                    ),
+                    child: const Icon(Icons.receipt_long_rounded,
+                        color: _T.accent2, size: 17),
+                  ),
+                  const SizedBox(width: 12),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('NEW SALE BILL',
+                          style: TextStyle(
+                              color: _T.text,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.5)),
+                      Text('Fill in the details below',
+                          style: TextStyle(
+                              color: _T.muted2, fontSize: 11)),
+                    ],
+                  ),
+                ],
+              ),
               const SizedBox(height: 20),
-              TextFormField(
+
+              _Field(
                 controller: _partyCtrl,
-                style: const TextStyle(color: _T.text),
-                decoration: _fieldDec('Party / Client Name',
-                    hint: 'e.g. ABC Traders',
-                    icon: Icons.business_rounded),
-                textCapitalization: TextCapitalization.words,
+                label: 'Party / Client Name',
+                hint: 'ABC Traders',
+                icon: Icons.business_rounded,
+                capitalization: TextCapitalization.words,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
+
+              // OB hint
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: _obFetching
+                    ? Padding(
+                        key: const ValueKey('loading'),
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Row(children: [
+                          SizedBox(
+                            width: 12, height: 12,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                                color: _T.accent),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text('Checking opening balance…',
+                              style: TextStyle(
+                                  color: _T.muted, fontSize: 11)),
+                        ]),
+                      )
+                    : _fetchedOB != null && _fetchedOB! > 0
+                        ? Padding(
+                            key: const ValueKey('ob'),
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(children: [
+                              const Icon(
+                                  Icons.account_balance_wallet_outlined,
+                                  color: Color(0xFF2196F3), size: 13),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Opening balance: ₹${_shortFmt(_fetchedOB!)}',
+                                style: const TextStyle(
+                                    color: Color(0xFF2196F3), fontSize: 11,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ]),
+                          )
+                        : const SizedBox.shrink(key: ValueKey('empty')),
+              ),
               const SizedBox(height: 12),
-              TextFormField(
+
+              _Field(
                 controller: _billNoCtrl,
-                style: const TextStyle(color: _T.text),
-                decoration: _fieldDec('Bill Number',
-                    hint: 'e.g. INV-001', icon: Icons.tag_rounded),
+                label: 'Bill Number',
+                hint: 'INV-001',
+                icon: Icons.tag_rounded,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: 12),
-              TextFormField(
+
+              _Field(
                 controller: _totalCtrl,
-                style: const TextStyle(color: _T.text),
-                decoration: _fieldDec('Bill Total (₹)',
-                    hint: '0.00',
-                    icon: Icons.currency_rupee_rounded),
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                label: 'Bill Total (₹)',
+                hint: '0.00',
+                icon: Icons.currency_rupee_rounded,
+                keyboard: const TextInputType.numberWithOptions(decimal: true),
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return 'Required';
-                  if (double.tryParse(v.trim()) == null) {
-                    return 'Enter a valid number';
-                  }
+                  if (double.tryParse(v.trim()) == null) return 'Invalid';
                   return null;
                 },
               ),
               const SizedBox(height: 12),
+
+              // Date picker
               GestureDetector(
                 onTap: _pickDate,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 14),
+                      horizontal: 14, vertical: 13),
                   decoration: BoxDecoration(
-                    color: _T.card,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: _T.border),
+                    color: _T.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _T.line2),
                   ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.calendar_today_rounded,
-                          color: _T.muted, size: 15),
-                      const SizedBox(width: 10),
-                      Text(dateFmt.format(_date),
-                          style: const TextStyle(
-                              color: _T.text, fontSize: 14)),
-                      const Spacer(),
-                      const Icon(Icons.expand_more_rounded,
-                          color: _T.muted, size: 16),
-                    ],
-                  ),
+                  child: Row(children: [
+                    const Icon(Icons.calendar_today_rounded,
+                        color: _T.muted, size: 14),
+                    const SizedBox(width: 10),
+                    Text(dateFmt.format(_date),
+                        style: const TextStyle(
+                            color: _T.text, fontSize: 13)),
+                    const Spacer(),
+                    const Icon(Icons.keyboard_arrow_down_rounded,
+                        color: _T.muted, size: 16),
+                  ]),
                 ),
               ),
               const SizedBox(height: 12),
-              TextFormField(
+
+              _Field(
                 controller: _noteCtrl,
-                style: const TextStyle(color: _T.text),
-                decoration: _fieldDec('Note (optional)',
-                    hint: 'Any details…', icon: Icons.notes_rounded),
+                label: 'Note (optional)',
+                hint: 'Any details…',
+                icon: Icons.notes_rounded,
                 maxLines: 2,
               ),
               const SizedBox(height: 20),
+
               SizedBox(
-                height: 50,
+                height: 48,
                 child: ElevatedButton(
                   onPressed: _submitting ? null : _submit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _T.accent,
                     foregroundColor: Colors.white,
                     disabledBackgroundColor:
-                        _T.accent.withValues(alpha: 0.35),
+                        _T.accent.withValues(alpha: 0.3),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                        borderRadius: BorderRadius.circular(8)),
                     elevation: 0,
                   ),
                   child: _submitting
                       ? const SizedBox(
-                          width: 20, height: 20,
+                          width: 18, height: 18,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2.5, color: Colors.white))
-                      : const Text('Save Bill',
+                              strokeWidth: 2, color: Colors.white))
+                      : const Text('SAVE BILL',
                           style: TextStyle(
-                              fontWeight: FontWeight.w700, fontSize: 15)),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                              letterSpacing: 1)),
                 ),
               ),
             ],
@@ -636,200 +1090,128 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
   }
 }
 
-InputDecoration _fieldDec(String label,
-        {String? hint, IconData? icon}) =>
-    InputDecoration(
-      labelText: label,
-      hintText: hint,
-      labelStyle: const TextStyle(color: _T.muted, fontSize: 13),
-      hintStyle: const TextStyle(color: _T.muted, fontSize: 13),
-      prefixIcon:
-          icon != null ? Icon(icon, color: _T.muted, size: 17) : null,
-      filled: true,
-      fillColor: _T.card,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _T.border),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _T.accent, width: 1.5),
-      ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _T.red),
-      ),
-      focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _T.red, width: 1.5),
-      ),
-    );
-
 // ─────────────────────────────────────────────────────────────────────────────
-//  Shared helpers
+//  Shared input field
 // ─────────────────────────────────────────────────────────────────────────────
 
-Route _slideRoute(Widget page) => PageRouteBuilder(
-      pageBuilder: (_, a, __) => page,
-      transitionsBuilder: (_, anim, __, child) => SlideTransition(
-        position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
-            .animate(
-                CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
-        child: child,
-      ),
-      transitionDuration: const Duration(milliseconds: 280),
-    );
+class _Field extends StatelessWidget {
+  final TextEditingController    controller;
+  final String                   label;
+  final String?                  hint;
+  final IconData?                icon;
+  final TextInputType?           keyboard;
+  final FormFieldValidator<String>? validator;
+  final int                      maxLines;
+  final TextCapitalization       capitalization;
 
-class _CircleAvatar extends StatelessWidget {
-  final String name;
-  final double size;
-  const _CircleAvatar({required this.name, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = [
-      const Color(0xFF4C6EF5),
-      const Color(0xFF7950F2),
-      const Color(0xFF1C7ED6),
-      const Color(0xFF0CA678),
-      const Color(0xFFE67700),
-    ];
-    final idx   = name.isNotEmpty ? name.codeUnitAt(0) % colors.length : 0;
-    final color = colors[idx];
-    return Container(
-      width: size, height: size,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            color.withValues(alpha: 0.85),
-            color.withValues(alpha: 0.45),
-          ],
-        ),
-        shape: BoxShape.circle,
-        border: Border.all(color: color.withValues(alpha: 0.2), width: 1),
-      ),
-      child: Center(
-        child: Text(
-          name.isNotEmpty ? name[0].toUpperCase() : '?',
-          style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-              fontSize: size * 0.38),
-        ),
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  final String label;
-  final Color  color;
-  const _Pill({required this.label, required this.color});
+  const _Field({
+    required this.controller,
+    required this.label,
+    this.hint,
+    this.icon,
+    this.keyboard,
+    this.validator,
+    this.maxLines = 1,
+    this.capitalization = TextCapitalization.none,
+  });
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withValues(alpha: 0.25)),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                color: color,
-                fontSize: 10,
-                fontWeight: FontWeight.w600)),
-      );
-}
-
-class _SearchField extends StatelessWidget {
-  final TextEditingController controller;
-  final ValueChanged<String>  onChanged;
-  final String                hint;
-  const _SearchField(
-      {required this.controller,
-      required this.onChanged,
-      required this.hint});
-
-  @override
-  Widget build(BuildContext context) => TextField(
+  Widget build(BuildContext context) => TextFormField(
         controller: controller,
-        onChanged: onChanged,
-        style: const TextStyle(color: _T.text, fontSize: 14),
+        style: const TextStyle(color: _T.text, fontSize: 13),
+        keyboardType: keyboard,
+        maxLines: maxLines,
+        textCapitalization: capitalization,
+        validator: validator,
         decoration: InputDecoration(
+          labelText: label,
           hintText: hint,
-          hintStyle: const TextStyle(color: _T.muted, fontSize: 14),
-          prefixIcon: const Icon(Icons.search_rounded,
-              color: _T.muted, size: 18),
-          suffixIcon: controller.text.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.close_rounded,
-                      color: _T.muted, size: 16),
-                  onPressed: () {
-                    controller.clear();
-                    onChanged('');
-                  })
+          labelStyle: const TextStyle(color: _T.muted, fontSize: 12),
+          hintStyle: const TextStyle(color: _T.muted, fontSize: 12),
+          prefixIcon: icon != null
+              ? Icon(icon, color: _T.muted, size: 15)
               : null,
           filled: true,
-          fillColor: _T.card,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          fillColor: _T.surface,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: _T.border),
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: _T.line2),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: _T.accent, width: 1.5),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: _T.red),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: _T.red, width: 1.5),
           ),
         ),
       );
 }
 
-class _EmptyState extends StatelessWidget {
-  final bool hasSearch;
-  const _EmptyState({required this.hasSearch});
+// ─────────────────────────────────────────────────────────────────────────────
+//  FAB
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _NewBillFAB extends StatelessWidget {
+  final VoidCallback onTap;
+  const _NewBillFAB({required this.onTap});
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              hasSearch
-                  ? Icons.search_off_rounded
-                  : Icons.receipt_long_outlined,
-              color: _T.border,
-              size: 52,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              hasSearch ? 'No results found' : 'No sale bills yet',
-              style: const TextStyle(
-                  color: _T.text,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            if (!hasSearch)
-              const Text('Tap New Bill to get started',
-                  style: TextStyle(color: _T.muted, fontSize: 13)),
-          ],
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: () {
+          HapticFeedback.mediumImpact();
+          onTap();
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          decoration: BoxDecoration(
+            color: _T.accent,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                color: _T.accent.withValues(alpha: 0.4),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.add_rounded, color: Colors.white, size: 18),
+              SizedBox(width: 6),
+              Text('New Bill',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      letterSpacing: 0.3)),
+            ],
+          ),
         ),
       );
 }
 
-class _IconBtn extends StatelessWidget {
+// ─────────────────────────────────────────────────────────────────────────────
+//  Icon action (app bar button)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _IconAction extends StatelessWidget {
   final IconData     icon;
-  final String       tooltip;
+  final bool         filled;
   final VoidCallback onTap;
-  const _IconBtn(
-      {required this.icon,
-      required this.tooltip,
-      required this.onTap});
+  const _IconAction({
+    required this.icon,
+    required this.onTap,
+    this.filled = false,
+  });
 
   @override
   Widget build(BuildContext context) => GestureDetector(
@@ -837,18 +1219,114 @@ class _IconBtn extends StatelessWidget {
           HapticFeedback.selectionClick();
           onTap();
         },
-        child: Tooltip(
-          message: tooltip,
-          child: Container(
-            width: 36, height: 36,
-            decoration: BoxDecoration(
-              color: _T.accent.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                  color: _T.accent.withValues(alpha: 0.18)),
-            ),
-            child: Icon(icon, color: _T.accent, size: 18),
+        child: Container(
+          width: 34, height: 34,
+          decoration: BoxDecoration(
+            color: filled
+                ? _T.accent
+                : _T.line2.withValues(alpha: 0.8),
+            borderRadius: BorderRadius.circular(7),
+            border: filled ? null : Border.all(color: _T.line2),
+          ),
+          child: Icon(icon,
+              color: filled ? Colors.white : _T.text2, size: 17),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Empty state
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EmptyState extends StatelessWidget {
+  final bool         hasSearch;
+  final VoidCallback onAdd;
+  const _EmptyState({required this.hasSearch, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64, height: 64,
+                decoration: BoxDecoration(
+                  color: _T.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _T.line2),
+                ),
+                child: Icon(
+                  hasSearch
+                      ? Icons.search_off_rounded
+                      : Icons.receipt_long_outlined,
+                  color: _T.muted,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                hasSearch ? 'No results found' : 'No bills yet',
+                style: const TextStyle(
+                    color: _T.text,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.3),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                hasSearch
+                    ? 'Try a different search term'
+                    : 'Tap New Bill to create your first sale',
+                style: const TextStyle(
+                    color: _T.muted2, fontSize: 12, height: 1.5),
+                textAlign: TextAlign.center,
+              ),
+              if (!hasSearch) ...[
+                const SizedBox(height: 24),
+                GestureDetector(
+                  onTap: onAdd,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: _T.accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                          color: _T.accent.withValues(alpha: 0.3)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_rounded,
+                            color: _T.accent2, size: 15),
+                        SizedBox(width: 6),
+                        Text('Create First Bill',
+                            style: TextStyle(
+                                color: _T.accent2,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+String _shortFmt(double v) {
+  if (v >= 10000000) return '${(v / 10000000).toStringAsFixed(1)}Cr';
+  if (v >= 100000)   return '${(v / 100000).toStringAsFixed(1)}L';
+  if (v >= 1000)     return '${(v / 1000).toStringAsFixed(1)}K';
+  return v == v.truncateToDouble()
+      ? v.toStringAsFixed(0)
+      : v.toStringAsFixed(1);
 }

@@ -34,7 +34,14 @@ class _T {
 
 class BillDetailScreen extends ConsumerStatefulWidget {
   final SaleBillEntity bill;
-  const BillDetailScreen({super.key, required this.bill});
+  /// Number of bills this party has. When > 1 the description-match
+  /// fallback is skipped so unlinked payments don't appear in every bill.
+  final int billCount;
+  const BillDetailScreen({
+    super.key,
+    required this.bill,
+    this.billCount = 1,
+  });
 
   @override
   ConsumerState<BillDetailScreen> createState() => _BillDetailScreenState();
@@ -90,6 +97,10 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
               if (linkedId != null && linkedId.isNotEmpty) {
                 return linkedId == billId;
               }
+              // Only fall back to description match when this party has
+              // exactly 1 bill; with multiple bills every bill would show
+              // the same unlinked transactions, which is incorrect.
+              if (widget.billCount > 1) return false;
               return (raw['description'] as String? ?? '')
                   .toLowerCase()
                   .contains(partyQ);
@@ -160,6 +171,84 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
     );
   }
 
+  // ── DELETE PAYMENT ENTRY ──────────────────────────────────────────────────
+  Future<void> _deletePayment(_TxItem tx) async {
+    if (_cashbookId == null) return;
+    HapticFeedback.mediumImpact();
+
+    final fmt = NumberFormat('#,##,##0.00');
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _T.card2,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Delete Payment?',
+          style: TextStyle(
+              color: _T.text, fontWeight: FontWeight.w700, fontSize: 16),
+        ),
+        content: Text(
+          'Payment of ₹${fmt.format(tx.amount)} will be permanently deleted '
+          'and the cashbook balance will be updated accordingly.',
+          style: const TextStyle(
+              color: _T.muted, fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: _T.muted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete',
+                style: TextStyle(
+                    color: _T.red, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final db          = FirebaseFirestore.instance;
+      final cashbookRef = db.collection('cashbooks').doc(_cashbookId);
+      final txRef       = cashbookRef.collection('transactions').doc(tx.id);
+
+      await db.runTransaction((txn) async {
+        final txSnap = await txn.get(txRef);
+        if (!txSnap.exists) return;
+
+        final data   = txSnap.data()!;
+        final amount = (data['amount'] as num?)?.toDouble() ?? tx.amount;
+
+        // Delete the transaction document
+        txn.delete(txRef);
+
+        // Reverse the effect on cashbook balance — income payments add to
+        // balance/income, so deleting them subtracts from both.
+        txn.update(cashbookRef, {
+          'balance': FieldValue.increment(-amount),
+          'income':  FieldValue.increment(-amount),
+        });
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snackBar('Payment entry deleted', success: true),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snackBar('Failed to delete: $e', success: false),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final fmt      = NumberFormat('#,##,##0.00');
@@ -170,7 +259,7 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
     final settled  = _settled;
     final partial  = received > 0 && remaining > 0;
     final Color remColor =
-        settled ? _T.green : (partial ? _T.amber : _T.red);
+        settled ? _T.green : _T.amber;
     final pct = widget.bill.billTotal > 0
         ? (received / widget.bill.billTotal).clamp(0.0, 1.0)
         : 0.0;
@@ -294,11 +383,12 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
                   ...List.generate(_transactions.length, (i) {
                     final tx = _transactions[i];
                     return _PaymentTile(
-                      tx:      tx,
-                      timeFmt: timeFmt,
-                      fmt:     fmt,
-                      index:   i,
-                      onTap:   () => _showPaymentDetail(tx),
+                      tx:       tx,
+                      timeFmt:  timeFmt,
+                      fmt:      fmt,
+                      index:    i,
+                      onTap:    () => _showPaymentDetail(tx),
+                      onDelete: () => _deletePayment(tx),
                     );
                   }),
 
@@ -706,7 +796,7 @@ class _BillInfoCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Payment tile  (tappable — opens detail sheet)
+//  Payment tile  (tappable — opens detail sheet; 3-dot — delete)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PaymentTile extends StatelessWidget {
@@ -715,6 +805,7 @@ class _PaymentTile extends StatelessWidget {
   final NumberFormat fmt;
   final int          index;
   final VoidCallback onTap;
+  final VoidCallback onDelete;
 
   const _PaymentTile({
     required this.tx,
@@ -722,6 +813,7 @@ class _PaymentTile extends StatelessWidget {
     required this.fmt,
     required this.index,
     required this.onTap,
+    required this.onDelete,
   });
 
   @override
@@ -757,107 +849,126 @@ class _PaymentTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(tx.description,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: _T.text, fontSize: 12.5,
-                            fontWeight: FontWeight.w500)),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Text(timeFmt.format(tx.createdAt),
-                            style: const TextStyle(
-                                color: _T.muted, fontSize: 10)),
-                        if (tx.isLinked) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 5, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: _T.green.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text('linked',
-                                style: TextStyle(
-                                    color: _T.green,
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.w600)),
-                          ),
-                        ],
-                      ],
+                    Text(
+                      tx.description.isNotEmpty
+                          ? tx.description
+                          : 'Payment received',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: _T.text,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      timeFmt.format(tx.createdAt),
+                      style: TextStyle(
+                          color: _T.muted.withValues(alpha: 0.8),
+                          fontSize: 11),
                     ),
                   ],
                 ),
               ),
-              Text('+ ₹${fmt.format(tx.amount)}',
-                  style: const TextStyle(
-                      color: _T.green,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14)),
-              const SizedBox(width: 6),
-              Icon(Icons.chevron_right_rounded,
-                  color: _T.muted.withValues(alpha: 0.3), size: 14),
+              const SizedBox(width: 10),
+              // Amount column
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '₹${fmt.format(tx.amount)}',
+                    style: const TextStyle(
+                        color: _T.green,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        letterSpacing: -0.3),
+                  ),
+                  if (tx.isLinked) ...[
+                    const SizedBox(height: 3),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.link_rounded,
+                            color: _T.green.withValues(alpha: 0.6),
+                            size: 10),
+                        const SizedBox(width: 2),
+                        Text('linked',
+                            style: TextStyle(
+                                color: _T.green.withValues(alpha: 0.6),
+                                fontSize: 9,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(width: 4),
+              // 3-dot menu
+              _PaymentPopupMenu(onDelete: onDelete),
             ],
           ),
         ),
-      )
-      .animate(delay: Duration(milliseconds: 60 + index * 45))
-      .fadeIn(duration: 260.ms)
-      .slideX(begin: 0.04, end: 0, curve: Curves.easeOutCubic);
+      );
+}
+
+class _PaymentPopupMenu extends StatelessWidget {
+  final VoidCallback onDelete;
+  const _PaymentPopupMenu({required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+        padding: EdgeInsets.zero,
+        iconSize: 18,
+        icon: Icon(
+          Icons.more_vert_rounded,
+          color: _T.muted.withValues(alpha: 0.55),
+          size: 18,
+        ),
+        color: _T.card2,
+        elevation: 8,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: _T.border)),
+        onSelected: (v) {
+          if (v == 'delete') onDelete();
+        },
+        itemBuilder: (_) => [
+          PopupMenuItem<String>(
+            value: 'delete',
+            height: 44,
+            child: Row(
+              children: [
+                const Icon(Icons.delete_outline_rounded,
+                    color: _T.red, size: 16),
+                const SizedBox(width: 10),
+                const Text('Delete Entry',
+                    style: TextStyle(
+                        color: _T.red,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
+      );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Loading shimmer
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _PaymentLoadingShimmer extends StatefulWidget {
+class _PaymentLoadingShimmer extends StatelessWidget {
   @override
-  State<_PaymentLoadingShimmer> createState() => _PaymentLoadingShimmerState();
-}
-
-class _PaymentLoadingShimmerState extends State<_PaymentLoadingShimmer>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double>   _anim;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 1200))
-      ..repeat();
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-        animation: _anim,
-        builder: (_, __) => Column(
-          children: List.generate(
-            3,
-            (i) => Container(
-              margin: const EdgeInsets.only(bottom: 7),
-              height: 62,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: LinearGradient(
-                  colors: [
-                    _T.card,
-                    Color.lerp(_T.card, _T.border, _anim.value)!,
-                    _T.card,
-                  ],
-                  stops: const [0.0, 0.5, 1.0],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
-              ),
+  Widget build(BuildContext context) => Column(
+        children: List.generate(
+          3,
+          (_) => Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            height: 64,
+            decoration: BoxDecoration(
+              color: _T.card,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _T.border),
             ),
           ),
         ),
@@ -865,7 +976,7 @@ class _PaymentLoadingShimmerState extends State<_PaymentLoadingShimmer>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Empty payments state
+//  Empty payments placeholder
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _EmptyPayments extends StatelessWidget {
@@ -874,28 +985,25 @@ class _EmptyPayments extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 32),
         decoration: BoxDecoration(
           color: _T.card,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: _T.border),
         ),
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               width: 48, height: 48,
-              decoration: BoxDecoration(
-                color: _T.muted.withValues(alpha: 0.06),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.payments_outlined,
-                  color: _T.muted.withValues(alpha: 0.4), size: 22),
+              decoration: const BoxDecoration(
+                  color: _T.border, shape: BoxShape.circle),
+              child: const Icon(Icons.payments_outlined,
+                  color: _T.muted, size: 22),
             ),
-            const SizedBox(height: 12),
-            const Text('No payments recorded yet',
+            const SizedBox(height: 10),
+            const Text('No payments recorded',
                 style: TextStyle(
-                    color: _T.muted,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500)),
+                    color: _T.text, fontWeight: FontWeight.w600, fontSize: 13)),
             const SizedBox(height: 4),
-            const Text('Use "Record Payment" below to add one',
+            const Text('Use "Record Payment" below to add one.',
                 style: TextStyle(color: _T.muted, fontSize: 11)),
           ],
         ),
@@ -909,44 +1017,42 @@ class _EmptyPayments extends StatelessWidget {
 class _SettledBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: [
-              _T.green.withValues(alpha: 0.06),
-              _T.green.withValues(alpha: 0.02),
+              _T.green.withValues(alpha: 0.08),
+              _T.green.withValues(alpha: 0.03),
             ],
           ),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: _T.green.withValues(alpha: 0.2)),
         ),
         child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 44, height: 44,
+              width: 36, height: 36,
               decoration: BoxDecoration(
-                color: _T.green.withValues(alpha: 0.1),
+                color: _T.green.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.check_circle_rounded,
-                  color: _T.green, size: 22),
+              child: const Icon(Icons.check_rounded,
+                  color: _T.green, size: 20),
             ),
-            const SizedBox(width: 14),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Bill Fully Settled',
-                      style: TextStyle(
-                          color: _T.green,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15)),
-                  SizedBox(height: 2),
-                  Text('All payments have been received for this bill.',
-                      style: TextStyle(
-                          color: _T.muted, fontSize: 12)),
-                ],
-              ),
+            const SizedBox(width: 12),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Bill Fully Settled',
+                    style: TextStyle(
+                        color: _T.green,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14)),
+                SizedBox(height: 2),
+                Text('All payments have been received.',
+                    style: TextStyle(color: _T.muted, fontSize: 11)),
+              ],
             ),
           ],
         ),
@@ -954,7 +1060,7 @@ class _SettledBanner extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Action buttons — Record Payment + Mark Settled
+//  Action buttons (record payment / settle)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ActionButtons extends ConsumerWidget {
@@ -972,9 +1078,10 @@ class _ActionButtons extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isLoading = ref.watch(saleBillActionsProvider).isLoading;
-    final enabled   = !isLoading && cashbookId != null;
     final fmt       = NumberFormat('#,##,##0.00');
+    final actState  = ref.watch(saleBillActionsProvider);
+    final isLoading = actState.isLoading;
+    final enabled   = cashbookId != null && !isLoading;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1249,7 +1356,7 @@ class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
                     const Spacer(),
                     Text('₹${fmt.format(widget.remaining)}',
                         style: const TextStyle(
-                            color: _T.accent,
+                            color: _T.amber,
                             fontWeight: FontWeight.w700,
                             fontSize: 13)),
                   ],
@@ -1364,7 +1471,7 @@ class _SummaryRow extends StatelessWidget {
           Text(value,
               style: TextStyle(
                   color: valueColor,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                   fontSize: 14)),
         ],
       );
@@ -1402,7 +1509,7 @@ class _StatusBadge extends StatelessWidget {
   const _StatusBadge({required this.settled, required this.partial});
   @override
   Widget build(BuildContext context) {
-    final Color c = settled ? _T.green : (partial ? _T.amber : _T.red);
+    final Color c = settled ? _T.green : _T.amber;
     final String label =
         settled ? 'SETTLED' : (partial ? 'PARTIAL' : 'PENDING');
     return Container(

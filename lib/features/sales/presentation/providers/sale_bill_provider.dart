@@ -45,10 +45,6 @@ final filteredSaleBillsProvider =
 });
 
 // ── linked transactions for bill detail screen ───────────────────────────────
-// FIX: Removed .orderBy('createdAt', descending: true) — that combination with
-// .where() required a Firestore composite index that may not exist, causing the
-// stream to error silently and the loading spinner to stay forever.
-// Sorting is now done in Dart after the snapshot arrives.
 
 class LinkedTransactionItem {
   final String   transactionId;
@@ -73,8 +69,6 @@ final billLinkedTransactionsProvider = StreamProvider.autoDispose
 
   if (cashbookId.isEmpty || billId.isEmpty) return Stream.value([]);
 
-  // FIX: query ONLY by linkedSaleBillId — exact match, no orderBy needed.
-  // Falls back to description match in the bill detail screen for older entries.
   return FirebaseFirestore.instance
       .collection('cashbooks')
       .doc(cashbookId)
@@ -94,7 +88,6 @@ final billLinkedTransactionsProvider = StreamProvider.autoDispose
                   description: doc['description'] as String? ?? '',
                 ))
             .toList();
-        // Sort newest-first in Dart — avoids needing a composite index
         list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
         return list;
       });
@@ -145,9 +138,6 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
     });
   }
 
-  /// Records a payment for a specific bill.
-  /// Writes a standard income transaction with [linkedSaleBillId] so that the
-  /// bill detail screen can match it exactly without relying on description text.
   Future<void> recordPayment({
     required String cashbookId,
     required String billId,
@@ -186,8 +176,6 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
     });
   }
 
-  /// Settles a bill and optionally records a final payment transaction for the
-  /// remaining amount so the bill's received total becomes equal to the bill total.
   Future<void> settleWithPayment({
     required String cashbookId,
     required String billId,
@@ -201,7 +189,6 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
     state = await AsyncValue.guard(() async {
       final db = FirebaseFirestore.instance;
 
-      // If there's still an outstanding amount, record it as a payment first
       if (remaining > 0) {
         final docRef = db
             .collection('cashbooks')
@@ -222,8 +209,48 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
         });
       }
 
-      // Mark the bill as settled
       await SaleBillRepositoryImpl(db).settleBill(cashbookId, billId);
+    });
+  }
+
+  /// Permanently deletes a sale bill document.
+  Future<void> deleteBill({
+    required String cashbookId,
+    required String billId,
+  }) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('sale_bills')
+          .doc(billId)
+          .delete();
+    });
+  }
+
+  /// Updates editable fields on a sale bill.
+  Future<void> editBill({
+    required String   cashbookId,
+    required String   billId,
+    required String   billNumber,
+    required double   billTotal,
+    required DateTime billDate,
+    String?           billNote,
+  }) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('sale_bills')
+          .doc(billId)
+          .update({
+        'billNumber': billNumber,
+        'billTotal':  billTotal,
+        'billDate':   Timestamp.fromDate(billDate),
+        'billNote':   billNote,
+      });
     });
   }
 }

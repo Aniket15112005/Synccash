@@ -58,6 +58,8 @@ class TransactionRepositoryImpl implements TransactionRepository {
 
         description: tx.description,
 
+        linkedSaleBillId: tx.linkedSaleBillId, // FIX: was missing — caused all new transactions to be unlinked
+
       );
 
 
@@ -353,15 +355,21 @@ class TransactionRepositoryImpl implements TransactionRepository {
           expense += tx.amount;
         }
 
-          transaction.update(txRef, {
+        // FIX: include linkedSaleBillId in the update map so editing a
+        // linked transaction preserves (or updates) the bill link correctly.
+        // Only writes the field when non-null to avoid clearing existing links
+        // if the edit screen hasn't pre-populated _selectedBill yet.
+        transaction.update(txRef, {
           'amount':       tx.amount,
           'type':         tx.type,
           'category':     tx.category,
           'description':  tx.description,
           'createdAt':    Timestamp.fromDate(tx.createdAt),
-          'createdBy':    tx.createdBy,      // ← saves creator change
-          'creatorName':  tx.creatorName,    // ← saves creator name change
-          'lastEditedBy': tx.lastEditedBy,   // ← correct field name
+          'createdBy':    tx.createdBy,
+          'creatorName':  tx.creatorName,
+          'lastEditedBy': tx.lastEditedBy,
+          if (tx.linkedSaleBillId != null)
+            'linkedSaleBillId': tx.linkedSaleBillId, // FIX: was never written on edit
         });
 
         transaction.update(cashbookRef, {

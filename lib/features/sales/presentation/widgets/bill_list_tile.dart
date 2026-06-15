@@ -37,7 +37,7 @@ class BillListTile extends StatelessWidget {
       pillColor = _amber;
       pillLabel = '₹${fmt.format(remaining)} due';
     } else {
-      pillColor = _red;
+      pillColor = _amber;
       pillLabel = '₹${fmt.format(remaining)} due';
     }
 
