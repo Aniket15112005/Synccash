@@ -14,6 +14,10 @@ class TransactionEntity {
   /// the editor in a single write (no separate Firestore update needed).
   final String? lastEditedBy;
 
+  /// Links this transaction to a sale bill in sale_bills sub-collection.
+  /// Null for all existing transactions — fully backward compatible.
+  final String? linkedSaleBillId;
+
   const TransactionEntity({
     required this.transactionId,
     required this.cashbookId,
@@ -25,6 +29,7 @@ class TransactionEntity {
     required this.category,
     required this.description,
     this.lastEditedBy,
+    this.linkedSaleBillId,
   });
 
   TransactionEntity copyWith({
@@ -38,6 +43,7 @@ class TransactionEntity {
     String? category,
     String? description,
     String? lastEditedBy,
+    String? linkedSaleBillId,
   }) {
     return TransactionEntity(
       transactionId: transactionId ?? this.transactionId,
@@ -50,6 +56,7 @@ class TransactionEntity {
       category:      category      ?? this.category,
       description:   description   ?? this.description,
       lastEditedBy:  lastEditedBy  ?? this.lastEditedBy,
+      linkedSaleBillId: linkedSaleBillId ?? this.linkedSaleBillId,
     );
   }
 }

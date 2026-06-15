@@ -15,11 +15,12 @@ import 'package:synccash/features/settings/services/backup_frequency_service.dar
 import 'package:synccash/features/settings/services/backup_service.dart';
 import 'package:synccash/features/settings/services/export_service.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart'
-    show transactionsStreamProvider, allTransactionsStreamProvider;
+    show allTransactionsStreamProvider;
 import 'package:intl/intl.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:flutter/foundation.dart';
 import 'package:synccash/features/settings/presentation/screens/widgets/recycle_bin_sheet.dart';
+import 'package:synccash/features/sales/presentation/screens/sales_screen.dart';
 
 class SettingsSheet extends ConsumerStatefulWidget {
   const SettingsSheet({super.key});
@@ -130,7 +131,7 @@ class _MainSheet extends StatelessWidget {
           ).animate().fadeIn(delay: 100.ms, duration: 220.ms).slideX(
               begin: 0.04, end: 0, curve: Curves.easeOut),
           const SizedBox(height: 8),
-          _SettingsTile(
+                    _SettingsTile(
             icon: Icons.cloud_done_rounded,
             iconColor: const Color(0xFF10B981),
             title: 'Backup',
@@ -139,7 +140,27 @@ class _MainSheet extends StatelessWidget {
             trailing: const _ChevronIcon(),
           ).animate().fadeIn(delay: 140.ms, duration: 220.ms).slideX(
               begin: 0.04, end: 0, curve: Curves.easeOut),
-                        if (kIsWeb) ...[
+          // ─── Sales tile (NEW) ───────────────────────────────────────
+          const SizedBox(height: 8),
+          _SettingsTile(
+            icon: Icons.receipt_long_rounded,
+            iconColor: const Color(0xFF5B8DEF),
+            title: 'Sales',
+            subtitle: 'Manage sale bills & client payments',
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const SalesScreen(),
+                ),
+              );
+            },
+            trailing: const _ChevronIcon(),
+          ).animate().fadeIn(delay: 175.ms, duration: 220.ms).slideX(
+              begin: 0.04, end: 0, curve: Curves.easeOut),
+          // ─── end Sales tile ─────────────────────────────────────────
+          if (kIsWeb) ...[
             const SizedBox(height: 8),
             _SettingsTile(
               icon: Icons.delete_sweep_rounded,

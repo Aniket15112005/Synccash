@@ -8,6 +8,9 @@ import 'package:intl/intl.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
+// ADDED: sales bill imports
+import 'package:synccash/features/sales/domain/entities/sale_bill_entity.dart';
+import 'package:synccash/features/sales/presentation/widgets/bill_no_dropdown_field.dart';
 
 class _C {
   static const bg       = Color(0xFF08090B);
@@ -41,8 +44,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   String   _category     = 'Retail';
   bool     _submitting   = false;
   DateTime _selectedDate = DateTime.now();
- 
-  
+
+  // ADDED: tracks the bill selected from the dropdown
+  SaleBillEntity? _selectedBill;
 
   late final AnimationController _btnCtrl;
   late final Animation<double>   _btnScale;
@@ -67,12 +71,19 @@ void initState() {
     _selectedDate  = tx.createdAt;
     _amountCtrl.text = tx.amount.toStringAsFixed(0);
     _descCtrl.text   = tx.description;
-    
   }
+
+  // ADDED: rebuild when description changes so BillNoDropdownField updates
+  _descCtrl.addListener(_onDescChanged);
 }
+
+  // ADDED
+  void _onDescChanged() => setState(() {});
 
   @override
   void dispose() {
+    // ADDED: remove listener before disposing
+    _descCtrl.removeListener(_onDescChanged);
     _amountCtrl.dispose();
     _descCtrl.dispose();
     _btnCtrl.dispose();
@@ -90,7 +101,11 @@ void initState() {
   void _switchCategory(String cat) {
     if (_category == cat) return;
     HapticFeedback.selectionClick();
-    setState(() => _category = cat);
+    // ADDED: clear selected bill when switching away from Wholesale
+    setState(() {
+      _category = cat;
+      if (cat != 'Wholesale') _selectedBill = null;
+    });
   }
 
   Future<void> _pickDate() async {
@@ -160,7 +175,8 @@ void initState() {
         type:          _type,
         category:      _category.toLowerCase(),
         description:   _descCtrl.text.trim(),
-       lastEditedBy:  user.uid,   // so Cloud Function knows who edited
+        lastEditedBy:  user.uid,   // so Cloud Function knows who edited
+        linkedSaleBillId: _selectedBill?.saleBillId, // ADDED
       );
 
       if (existing != null) {
@@ -236,6 +252,15 @@ void initState() {
                               .animate()
                               .fadeIn(delay: 210.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                          // ADDED: Bill dropdown — only visible for Wholesale, appears after
+                          // user types 2+ characters in description (600 ms debounce inside widget)
+                            if (_category == 'Wholesale')
+  BillNoDropdownField(
+    partyName: _descCtrl.text,
+    selectedBill: _selectedBill,
+    onBillSelected: (bill) =>
+        setState(() => _selectedBill = bill),
+  ),
                           const SizedBox(height: 24),
                           const _FieldLabel('Date'),
                           const SizedBox(height: 8),
@@ -833,4 +858,3 @@ class _FieldLabel extends StatelessWidget {
     );
   }
 }
-

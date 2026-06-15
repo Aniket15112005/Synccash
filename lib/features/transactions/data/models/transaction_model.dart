@@ -12,6 +12,7 @@ class TransactionModel extends TransactionEntity {
     required super.type,
     required super.category,
     required super.description,
+    super.linkedSaleBillId, // NEW — nullable, null for all existing docs
   });
 
   factory TransactionModel.fromJson(Map<String, dynamic> json, String documentId) {
@@ -27,6 +28,7 @@ class TransactionModel extends TransactionEntity {
       createdAt: json['createdAt'] != null
           ? (json['createdAt'] as Timestamp).toDate()
           : DateTime.now(),
+      linkedSaleBillId: json['linkedSaleBillId'] as String?, // NEW
     );
   }
 
@@ -46,6 +48,8 @@ class TransactionModel extends TransactionEntity {
       'type': type,
       'category': category.isEmpty ? 'General' : category,
       'description': description,
+      // Only written when a bill is linked — keeps existing docs unchanged
+      if (linkedSaleBillId != null) 'linkedSaleBillId': linkedSaleBillId,
     };
   }
 }

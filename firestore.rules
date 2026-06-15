@@ -89,6 +89,24 @@ service cloud.firestore {
         allow delete: if isCashbookMember(database, cashbookId)
                       && isIosUser(database);
       }
+
+      // ── Sale Bills ────────────────────────────────────────────────────────
+      match /sale_bills/{billId} {
+
+        // Both Android and iOS/PWA members can read all sale bills.
+        allow read: if isCashbookMember(database, cashbookId);
+
+        // Both Android and iOS/PWA members can create sale bills.
+        allow create: if isCashbookMember(database, cashbookId);
+
+        // Both Android and iOS/PWA members can update (e.g. settle a bill).
+        allow update: if isCashbookMember(database, cashbookId);
+
+        // Only iOS/PWA members can delete a bill.
+        allow delete: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+      }
+
     }
 
   }
