@@ -12,24 +12,24 @@ import '../providers/sale_bill_provider.dart';
 import 'bill_detail_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Design tokens — matches sales_screen (violet, ledger aesthetic)
+//  Design tokens — minimalist grey aesthetic (matches sales_screen)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _T {
-  static const bg      = Color(0xFF070810);
-  static const surface = Color(0xFF0C0D1C);
-  static const panel   = Color(0xFF0F1020);
-  static const line    = Color(0xFF15172A);
-  static const line2   = Color(0xFF1D2038);
-  static const muted   = Color(0xFF454870);
-  static const muted2  = Color(0xFF717499);
-  static const accent  = Color(0xFF7C3AED);
-  static const accent2 = Color(0xFFA78BFA);
-  static const text    = Color(0xFFF0F0FC);
-  static const text2   = Color(0xFFB8BCDA);
-  static const green   = Color(0xFF22C55E);
-  static const amber   = Color(0xFFFFB800);
-  static const red     = Color(0xFFFF4D6D);
+  static const bg      = Color(0xFF0F1011);
+  static const surface = Color(0xFF1A1B1E);
+  static const panel   = Color(0xFF1E1F22);
+  static const line    = Color(0xFF2C2D32);
+  static const line2   = Color(0xFF363840);
+  static const muted   = Color(0xFF565860);
+  static const muted2  = Color(0xFF8C8E9A);
+  static const accent  = Color(0xFF64748B);
+  static const accent2 = Color(0xFF94A3B8);
+  static const text    = Color(0xFFF1F2F5);
+  static const text2   = Color(0xFFB4B6C4);
+  static const green   = Color(0xFF4ADE80);
+  static const amber   = Color(0xFFFBBF24);
+  static const red     = Color(0xFFFC8181);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -173,21 +173,23 @@ class AllBillsScreen extends ConsumerWidget {
                     final rec  = received[bill.saleBillId] ?? 0.0;
                     final rem  =
                         (bill.billTotal - rec).clamp(0.0, double.infinity);
-                    return _BillRow(
-                      bill:      bill,
-                      received:  rec,
-                      remaining: rem,
-                      fmt:       fmt,
-                      dateFmt:   dateFmt,
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        Navigator.push(
-                            ctx,
-                            _route(BillDetailScreen(
-                                bill: bill, billCount: bills.length)));
-                      },
-                      onEdit:   () => _edit(ctx, ref, bill, cashbookId),
-                      onDelete: () => _delete(ctx, ref, bill, cashbookId),
+                    return RepaintBoundary(
+                      child: _BillRow(
+                        bill:      bill,
+                        received:  rec,
+                        remaining: rem,
+                        fmt:       fmt,
+                        dateFmt:   dateFmt,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          Navigator.push(
+                              ctx,
+                              _route(BillDetailScreen(
+                                  bill: bill, billCount: bills.length)));
+                        },
+                        onEdit:   () => _edit(ctx, ref, bill, cashbookId),
+                        onDelete: () => _delete(ctx, ref, bill, cashbookId),
+                      ),
                     );
                   },
                 ),
@@ -519,22 +521,24 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
                     final rec  = _recForBill(bill);
                     final rem  =
                         (bill.billTotal - rec).clamp(0.0, double.infinity);
-                    return _BillRow(
-                      bill:      bill,
-                      received:  rec,
-                      remaining: rem,
-                      fmt:       fmt,
-                      dateFmt:   dateFmt,
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        Navigator.push(
-                          ctx,
-                          _route(BillDetailScreen(
-                              bill: bill, billCount: _bills.length)),
-                        );
-                      },
-                      onEdit:   () => _editBill(bill),
-                      onDelete: () => _deleteBill(bill),
+                    return RepaintBoundary(
+                      child: _BillRow(
+                        bill:      bill,
+                        received:  rec,
+                        remaining: rem,
+                        fmt:       fmt,
+                        dateFmt:   dateFmt,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          Navigator.push(
+                            ctx,
+                            _route(BillDetailScreen(
+                                bill: bill, billCount: _bills.length)),
+                          );
+                        },
+                        onEdit:   () => _editBill(bill),
+                        onDelete: () => _deleteBill(bill),
+                      ),
                     );
                   },
                 ),
@@ -576,13 +580,17 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
         // Background
         Container(
           color: _T.bg,
-          child: CustomPaint(
-            painter: _DotPainter(opacity: (1 - progress) * 0.4),
-            child: const SizedBox.expand(),
+          child: RepaintBoundary(
+            child: CustomPaint(
+              painter: _DotPainter(
+                opacity: (((1 - progress) * 0.35) * 100).round() / 100,
+              ),
+              child: const SizedBox.expand(),
+            ),
           ),
         ),
 
-        // Glow blob behind initial
+        // Subtle glow blob
         if (progress < 0.8)
           Positioned(
             right: -30,
@@ -594,7 +602,7 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(colors: [
-                    _partyColor(partyName).withValues(alpha: 0.15),
+                    _partyColor(partyName).withValues(alpha: 0.10),
                     Colors.transparent,
                   ]),
                 ),
@@ -655,11 +663,11 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
                             width: 56, height: 56,
                             decoration: BoxDecoration(
                               color: _partyColor(partyName)
-                                  .withValues(alpha: 0.15),
+                                  .withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
                                 color: _partyColor(partyName)
-                                    .withValues(alpha: 0.35),
+                                    .withValues(alpha: 0.28),
                               ),
                             ),
                             child: Center(
@@ -744,11 +752,10 @@ class _BillRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settled = remaining <= 0;
-    final partial = received > 0 && remaining > 0;
+    final settled  = remaining <= 0;
+    final partial  = received > 0 && remaining > 0;
     final Color stripe =
         settled ? _T.green : (partial ? _T.amber : _T.red);
-    const Color amtColor = Colors.white;
 
     return Column(
       children: [
@@ -817,8 +824,8 @@ class _BillRow extends StatelessWidget {
                           children: [
                             Text(
                               '₹${fmt.format(bill.billTotal)}',
-                              style: TextStyle(
-                                color: amtColor,
+                              style: const TextStyle(
+                                color: _T.text,
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.4,
@@ -975,11 +982,11 @@ class _EditBillSheetState extends ConsumerState<_EditBillSheet> {
           colorScheme: const ColorScheme.dark(
             primary: _T.accent,
             onPrimary: Colors.white,
-            surface: Color(0xFF0F1020),
+            surface: Color(0xFF1E1F22),
             onSurface: _T.text,
           ),
           dialogTheme:
-              const DialogThemeData(backgroundColor: Color(0xFF0C0D1C)),
+              const DialogThemeData(backgroundColor: Color(0xFF1A1B1E)),
         ),
         child: child!,
       ),
@@ -1211,7 +1218,7 @@ class _SheetField extends StatelessWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: _T.accent, width: 1.5),
+            borderSide: const BorderSide(color: _T.accent2, width: 1.5),
           ),
           errorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
@@ -1309,7 +1316,7 @@ class _FullWidthProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settled = due <= 0;
-    final color   = settled ? _T.green : _T.accent;
+    final color   = settled ? _T.green : _T.accent2;
     return Column(
       children: [
         Stack(
@@ -1321,7 +1328,7 @@ class _FullWidthProgress extends StatelessWidget {
                 height: 3,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [color, color.withValues(alpha: 0.5)],
+                    colors: [color, color.withValues(alpha: 0.4)],
                   ),
                 ),
               ),
@@ -1374,7 +1381,7 @@ class _OBRow extends StatelessWidget {
               children: [
                 Container(
                   width: 4,
-                  color: _T.accent.withValues(alpha: 0.5),
+                  color: _T.accent.withValues(alpha: 0.45),
                 ),
                 Expanded(
                   child: Container(
@@ -1401,7 +1408,7 @@ class _OBRow extends StatelessWidget {
                         const Spacer(),
                         Text('₹${fmt.format(ob)}',
                             style: const TextStyle(
-                                color: Color(0xFF2196F3),
+                                color: Color(0xFF7BA8C4),
                                 fontSize: 15,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.3)),
@@ -1470,7 +1477,7 @@ class _SectionHeader extends StatelessWidget {
         child: Row(
           children: [
             Text(
-              '$label  ($count)',
+              count > 0 ? '$label  ($count)' : label,
               style: const TextStyle(
                 color: _T.muted2,
                 fontSize: 10,
@@ -1643,7 +1650,7 @@ class _BackBtn extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Dot painter
+//  Dot painter — subtle grid for hero background
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DotPainter extends CustomPainter {
@@ -1652,6 +1659,7 @@ class _DotPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (opacity <= 0.01) return;
     final p = Paint()
       ..color = _T.line2.withValues(alpha: opacity)
       ..strokeCap = StrokeCap.round
@@ -1669,21 +1677,21 @@ class _DotPainter extends CustomPainter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Route helper
+//  Route helper — smooth fade + subtle slide
 // ─────────────────────────────────────────────────────────────────────────────
 
 Route<void> _route(Widget page) => PageRouteBuilder<void>(
       pageBuilder: (_, __, ___) => page,
-      transitionDuration: const Duration(milliseconds: 300),
-      reverseTransitionDuration: const Duration(milliseconds: 260),
+      transitionDuration: const Duration(milliseconds: 260),
+      reverseTransitionDuration: const Duration(milliseconds: 220),
       transitionsBuilder: (_, anim, __, child) {
         final c = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
         return FadeTransition(
           opacity: Tween(begin: 0.0, end: 1.0).animate(
-              CurvedAnimation(parent: anim, curve: const Interval(0, 0.6))),
+              CurvedAnimation(parent: anim, curve: const Interval(0, 0.5))),
           child: SlideTransition(
             position:
-                Tween(begin: const Offset(0.06, 0.0), end: Offset.zero)
+                Tween(begin: const Offset(0.04, 0.0), end: Offset.zero)
                     .animate(c),
             child: child,
           ),
@@ -1692,17 +1700,17 @@ Route<void> _route(Widget page) => PageRouteBuilder<void>(
     );
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Party color (deterministic from name)
+//  Party color (deterministic from name) — muted grey-toned palette
 // ─────────────────────────────────────────────────────────────────────────────
 
 Color _partyColor(String name) {
   const colors = [
-    Color(0xFF818CF8),
-    Color(0xFF34D399),
-    Color(0xFFF472B6),
-    Color(0xFFFBBF24),
-    Color(0xFF60A5FA),
-    Color(0xFFA78BFA),
+    Color(0xFF7C9CBF),
+    Color(0xFF7BA89A),
+    Color(0xFFB097C0),
+    Color(0xFFBFA97C),
+    Color(0xFF8EA8C0),
+    Color(0xFFA09EC0),
   ];
   return name.isNotEmpty
       ? colors[name.codeUnitAt(0) % colors.length]
@@ -1723,7 +1731,7 @@ Future<bool?> _confirmDialog(
     showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF0F1020),
+        backgroundColor: const Color(0xFF1E1F22),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: const BorderSide(color: _T.line2),

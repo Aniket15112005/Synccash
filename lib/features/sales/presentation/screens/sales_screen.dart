@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -14,24 +15,107 @@ import 'manage_opening_balance_screen.dart';
 import 'party_detail_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Design tokens — violet accent, terminal/ledger aesthetic
+//  Design tokens — minimalist grey aesthetic
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _T {
-  static const bg      = Color(0xFF070810);
-  static const surface = Color(0xFF0C0D1C);
-  static const panel   = Color(0xFF0F1020);
-  static const line    = Color(0xFF15172A);
-  static const line2   = Color(0xFF1D2038);
-  static const muted   = Color(0xFF454870);
-  static const muted2  = Color(0xFF717499);
-  static const accent  = Color(0xFF7C3AED);
-  static const accent2 = Color(0xFFA78BFA);
-  static const text    = Color(0xFFF0F0FC);
-  static const text2   = Color(0xFFB8BCDA);
-  static const green   = Color(0xFF22C55E);
-  static const amber   = Color(0xFFFFB800);
-  static const red     = Color(0xFFFF4D6D);
+  static const bg      = Color(0xFF0F1011);
+  static const surface = Color(0xFF1A1B1E);
+  static const panel   = Color(0xFF1E1F22);
+  static const line    = Color(0xFF2C2D32);
+  static const line2   = Color(0xFF363840);
+  static const muted   = Color(0xFF565860);
+  static const muted2  = Color(0xFF8C8E9A);
+  static const accent  = Color(0xFF64748B);
+  static const accent2 = Color(0xFF94A3B8);
+  static const text    = Color(0xFFF1F2F5);
+  static const text2   = Color(0xFFB4B6C4);
+  static const green   = Color(0xFF4ADE80);
+  static const amber   = Color(0xFFFBBF24);
+  static const red     = Color(0xFFFC8181);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Background animation — slow-drifting translucent orbs
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BgPainter extends CustomPainter {
+  final double t;
+  _BgPainter(this.t);
+
+  static const _orbs = [
+    (0.15, 0.20, 240.0, 0.028),
+    (0.85, 0.55, 280.0, 0.022),
+    (0.50, 0.85, 200.0, 0.025),
+    (0.70, 0.12, 180.0, 0.018),
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (var i = 0; i < _orbs.length; i++) {
+      final (bx, by, r, alpha) = _orbs[i];
+      final dx = math.sin(t * 0.45 + i * 1.3) * 28.0;
+      final dy = math.cos(t * 0.35 + i * 1.0) * 22.0;
+      final center = Offset(size.width * bx + dx, size.height * by + dy);
+
+      for (var ring = 0; ring < 4; ring++) {
+        final ringAlpha = (alpha * (1.0 - ring * 0.22)).clamp(0.0, 1.0);
+        final paint = Paint()
+          ..style = PaintingStyle.fill
+          ..color = const Color(0xFF64748B).withValues(alpha: ringAlpha);
+        canvas.drawCircle(center, r + ring * 45.0, paint);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BgPainter old) => old.t != t;
+}
+
+class _AnimatedBackground extends StatefulWidget {
+  final Widget child;
+  const _AnimatedBackground({required this.child});
+
+  @override
+  State<_AnimatedBackground> createState() => _AnimatedBackgroundState();
+}
+
+class _AnimatedBackgroundState extends State<_AnimatedBackground>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 14),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        RepaintBoundary(
+          child: AnimatedBuilder(
+            animation: _ctrl,
+            builder: (_, __) => CustomPaint(
+              painter: _BgPainter(_ctrl.value * 2 * math.pi),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        ),
+        widget.child,
+      ],
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,17 +130,17 @@ Route _slideRoute(Widget page) => PageRouteBuilder(
         return FadeTransition(
           opacity: Tween<double>(begin: 0.0, end: 1.0)
               .animate(CurvedAnimation(
-                  parent: anim, curve: const Interval(0.0, 0.6))),
+                  parent: anim, curve: const Interval(0.0, 0.5))),
           child: SlideTransition(
             position:
-                Tween<Offset>(begin: const Offset(0.06, 0.0), end: Offset.zero)
+                Tween<Offset>(begin: const Offset(0.04, 0.0), end: Offset.zero)
                     .animate(curved),
             child: child,
           ),
         );
       },
-      transitionDuration: const Duration(milliseconds: 300),
-      reverseTransitionDuration: const Duration(milliseconds: 240),
+      transitionDuration: const Duration(milliseconds: 260),
+      reverseTransitionDuration: const Duration(milliseconds: 220),
     );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -93,157 +177,161 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
   Widget build(BuildContext context) {
     final billsAsync = ref.watch(filteredSaleBillsProvider);
 
-    return Scaffold(
-      backgroundColor: _T.bg,
-      body: CustomScrollView(
-        physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics()),
-        slivers: [
+    return _AnimatedBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: CustomScrollView(
+          physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics()),
+          slivers: [
 
-          // ── Flat App Bar ─────────────────────────────────────────────────
-          SliverAppBar(
-            pinned: true,
-            floating: false,
-            backgroundColor: _T.bg,
-            surfaceTintColor: Colors.transparent,
-            elevation: 0,
-            toolbarHeight: 56,
-            leading: GestureDetector(
-              onTap: () => Navigator.of(context).pop(),
-              child: const Icon(Icons.arrow_back_ios_rounded,
-                  color: _T.text2, size: 18),
-            ),
-            title: const Text(
-              'SALES',
-              style: TextStyle(
-                color: _T.text,
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 2.5,
+            // ── Flat App Bar ─────────────────────────────────────────────────
+            SliverAppBar(
+              pinned: true,
+              floating: false,
+              backgroundColor: _T.bg.withValues(alpha: 0.92),
+              surfaceTintColor: Colors.transparent,
+              elevation: 0,
+              toolbarHeight: 56,
+              leading: GestureDetector(
+                onTap: () => Navigator.of(context).pop(),
+                child: const Icon(Icons.arrow_back_ios_rounded,
+                    color: _T.text2, size: 18),
               ),
-            ),
-            actions: [
-              _IconAction(
-                icon: Icons.account_balance_wallet_outlined,
-                onTap: () => Navigator.of(context).push(
-                  _slideRoute(const ManageOpeningBalanceScreen()),
+              title: const Text(
+                'SALES',
+                style: TextStyle(
+                  color: _T.text,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 2.5,
                 ),
               ),
-              const SizedBox(width: 4),
-              _IconAction(
-                icon: Icons.add_rounded,
-                filled: true,
-                onTap: () => _addBill(context),
-              ),
-              const SizedBox(width: 16),
-            ],
-            bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(1),
-              child: Container(height: 1, color: _T.line),
-            ),
-          ),
-
-          // ── Hero outstanding strip ───────────────────────────────────────
-          SliverToBoxAdapter(
-            child: billsAsync.maybeWhen(
-              data: (bills) => _HeroStrip(bills: bills),
-              orElse: () => const SizedBox.shrink(),
-            ),
-          ),
-
-          // ── Search ───────────────────────────────────────────────────────
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-              child: _SearchRow(
-                controller: _searchCtrl,
-                onChanged: (q) =>
-                    ref.read(saleBillSearchProvider.notifier).update(q),
-                onAddBill: () => _addBill(context),
+              actions: [
+                _IconAction(
+                  icon: Icons.account_balance_wallet_outlined,
+                  onTap: () => Navigator.of(context).push(
+                    _slideRoute(const ManageOpeningBalanceScreen()),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                _IconAction(
+                  icon: Icons.add_rounded,
+                  filled: true,
+                  onTap: () => _addBill(context),
+                ),
+                const SizedBox(width: 16),
+              ],
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(1),
+                child: Container(height: 1, color: _T.line),
               ),
             ),
-          ),
 
-          // ── Divider ──────────────────────────────────────────────────────
-          SliverToBoxAdapter(
-            child: Container(height: 1, color: _T.line,
-                margin: const EdgeInsets.only(top: 10)),
-          ),
+            // ── Hero outstanding strip ───────────────────────────────────────
+            SliverToBoxAdapter(
+              child: billsAsync.maybeWhen(
+                data: (bills) => _HeroStrip(bills: bills),
+                orElse: () => const SizedBox.shrink(),
+              ),
+            ),
 
-          // ── Content ─────────────────────────────────────────────────────
-          billsAsync.when(
-            data: (bills) {
-              if (bills.isEmpty) {
-                return SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _EmptyState(
-                    hasSearch: _searchCtrl.text.isNotEmpty,
-                    onAdd: () => _addBill(context),
+            // ── Search ───────────────────────────────────────────────────────
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                child: _SearchRow(
+                  controller: _searchCtrl,
+                  onChanged: (q) =>
+                      ref.read(saleBillSearchProvider.notifier).update(q),
+                  onAddBill: () => _addBill(context),
+                ),
+              ),
+            ),
+
+            // ── Divider ──────────────────────────────────────────────────────
+            SliverToBoxAdapter(
+              child: Container(height: 1, color: _T.line,
+                  margin: const EdgeInsets.only(top: 10)),
+            ),
+
+            // ── Content ─────────────────────────────────────────────────────
+            billsAsync.when(
+              data: (bills) {
+                if (bills.isEmpty) {
+                  return SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: _EmptyState(
+                      hasSearch: _searchCtrl.text.isNotEmpty,
+                      onAdd: () => _addBill(context),
+                    ),
+                  );
+                }
+
+                final grouped = <String, List<SaleBillEntity>>{};
+                final displayName = <String, String>{};
+                for (final b in bills) {
+                  final key = b.partyName.trim().toLowerCase();
+                  if (!grouped.containsKey(key)) {
+                    grouped[key] = [];
+                    displayName[key] = b.partyName;
+                  }
+                  grouped[key]!.add(b);
+                }
+                final names = grouped.keys.toList();
+
+                return SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(0, 0, 0, 120),
+                  sliver: SliverList.builder(
+                    itemCount: names.length,
+                    itemBuilder: (ctx, i) => RepaintBoundary(
+                      child: _PartyRow(
+                        key:       ValueKey(names[i]),
+                        partyName: displayName[names[i]]!,
+                        bills:     grouped[names[i]]!,
+                        onTap: () => Navigator.of(context).push(
+                          _slideRoute(PartyDetailScreen(partyName: displayName[names[i]]!)),
+                        ),
+                      )
+                      .animate(delay: Duration(milliseconds: 30 + i * 30))
+                      .fadeIn(duration: 200.ms)
+                      .slideX(begin: -0.02, end: 0, curve: Curves.easeOutCubic),
+                    ),
                   ),
                 );
-              }
-
-              final grouped = <String, List<SaleBillEntity>>{};
-              final displayName = <String, String>{};
-              for (final b in bills) {
-                final key = b.partyName.trim().toLowerCase();
-                if (!grouped.containsKey(key)) {
-                  grouped[key] = [];
-                  displayName[key] = b.partyName;
-                }
-                grouped[key]!.add(b);
-              }
-              final names = grouped.keys.toList();
-
-              return SliverPadding(
-                padding: const EdgeInsets.fromLTRB(0, 0, 0, 120),
-                sliver: SliverList.builder(
-                  itemCount: names.length,
-                  itemBuilder: (ctx, i) => _PartyRow(
-                    key:       ValueKey(names[i]),
-                    partyName: displayName[names[i]]!,
-                    bills:     grouped[names[i]]!,
-                    onTap: () => Navigator.of(context).push(
-                      _slideRoute(PartyDetailScreen(partyName: displayName[names[i]]!)),
-                    ),
-                  )
-                  .animate(delay: Duration(milliseconds: 30 + i * 30))
-                  .fadeIn(duration: 240.ms)
-                  .slideX(begin: -0.03, end: 0, curve: Curves.easeOutCubic),
-                ),
-              );
-            },
-            loading: () => SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 24, height: 24,
-                      child: CircularProgressIndicator(
-                        color: _T.accent,
-                        strokeWidth: 1.5,
+              },
+              loading: () => SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 24, height: 24,
+                        child: CircularProgressIndicator(
+                          color: _T.accent2,
+                          strokeWidth: 1.5,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text('Loading…',
-                        style: TextStyle(color: _T.muted, fontSize: 12)),
-                  ],
+                      const SizedBox(height: 12),
+                      const Text('Loading…',
+                          style: TextStyle(color: _T.muted, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ),
+              error: (e, _) => SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Text('Error: $e',
+                      style: const TextStyle(color: _T.red, fontSize: 13)),
                 ),
               ),
             ),
-            error: (e, _) => SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(
-                child: Text('Error: $e',
-                    style: const TextStyle(color: _T.red, fontSize: 13)),
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
+        floatingActionButton: _NewBillFAB(onTap: () => _addBill(context)),
       ),
-      floatingActionButton: _NewBillFAB(onTap: () => _addBill(context)),
     );
   }
 }
@@ -265,7 +353,7 @@ class _HeroStrip extends StatelessWidget {
     final pending    = bills.length - settled;
 
     return Container(
-      color: _T.bg,
+      color: Colors.transparent,
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -396,7 +484,7 @@ class _SearchRow extends StatelessWidget {
               child: Container(
                 height: 40,
                 decoration: BoxDecoration(
-                  color: _T.surface,
+                  color: _T.surface.withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(color: _T.line2),
                 ),
@@ -584,7 +672,7 @@ class _PartyRowState extends ConsumerState<_PartyRow> {
                 Expanded(
                   child: Container(
                     padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                    color: _T.bg,
+                    color: Colors.transparent,
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
@@ -594,11 +682,11 @@ class _PartyRowState extends ConsumerState<_PartyRow> {
                           width: 38, height: 38,
                           decoration: BoxDecoration(
                             color: _partyColor(widget.partyName)
-                                .withValues(alpha: 0.15),
+                                .withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: _partyColor(widget.partyName)
-                                  .withValues(alpha: 0.3),
+                                  .withValues(alpha: 0.25),
                             ),
                           ),
                           child: Center(
@@ -658,7 +746,7 @@ class _PartyRowState extends ConsumerState<_PartyRow> {
                                             color: _T.muted, fontSize: 11)),
                                     Text('OB ₹${_shortFmt(_ob)}',
                                         style: const TextStyle(
-                                            color: Color(0xFF2196F3),
+                                            color: Color(0xFF7BA8C4),
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600)),
                                   ],
@@ -731,12 +819,12 @@ class _PartyRowState extends ConsumerState<_PartyRow> {
 
 Color _partyColor(String name) {
   const colors = [
-    Color(0xFF818CF8),
-    Color(0xFF34D399),
-    Color(0xFFF472B6),
-    Color(0xFFFBBF24),
-    Color(0xFF60A5FA),
-    Color(0xFFA78BFA),
+    Color(0xFF7C9CBF),
+    Color(0xFF7BA89A),
+    Color(0xFFB097C0),
+    Color(0xFFBFA97C),
+    Color(0xFF8EA8C0),
+    Color(0xFFA09EC0),
   ];
   return name.isNotEmpty
       ? colors[name.codeUnitAt(0) % colors.length]
@@ -832,11 +920,11 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
           colorScheme: const ColorScheme.dark(
             primary: _T.accent,
             onPrimary: Colors.white,
-            surface: Color(0xFF0F1020),
+            surface: Color(0xFF1E1F22),
             onSurface: _T.text,
           ),
           dialogTheme:
-              const DialogThemeData(backgroundColor: Color(0xFF0C0D1C)),
+              const DialogThemeData(backgroundColor: Color(0xFF1A1B1E)),
         ),
         child: child!,
       ),
@@ -920,10 +1008,10 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
                   Container(
                     width: 36, height: 36,
                     decoration: BoxDecoration(
-                      color: _T.accent.withValues(alpha: 0.15),
+                      color: _T.accent.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: _T.accent.withValues(alpha: 0.3)),
+                          color: _T.accent.withValues(alpha: 0.25)),
                     ),
                     child: const Icon(Icons.receipt_long_rounded,
                         color: _T.accent2, size: 17),
@@ -969,7 +1057,7 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
                             width: 12, height: 12,
                             child: CircularProgressIndicator(
                                 strokeWidth: 1.5,
-                                color: _T.accent),
+                                color: _T.accent2),
                           ),
                           const SizedBox(width: 8),
                           const Text('Checking opening balance…',
@@ -984,12 +1072,12 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
                             child: Row(children: [
                               const Icon(
                                   Icons.account_balance_wallet_outlined,
-                                  color: Color(0xFF2196F3), size: 13),
+                                  color: Color(0xFF7BA8C4), size: 13),
                               const SizedBox(width: 6),
                               Text(
                                 'Opening balance: ₹${_shortFmt(_fetchedOB!)}',
                                 style: const TextStyle(
-                                    color: Color(0xFF2196F3), fontSize: 11,
+                                    color: Color(0xFF7BA8C4), fontSize: 11,
                                     fontWeight: FontWeight.w600),
                               ),
                             ]),
@@ -1141,7 +1229,7 @@ class _Field extends StatelessWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: _T.accent, width: 1.5),
+            borderSide: const BorderSide(color: _T.accent2, width: 1.5),
           ),
           errorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
@@ -1176,7 +1264,7 @@ class _NewBillFAB extends StatelessWidget {
             borderRadius: BorderRadius.circular(10),
             boxShadow: [
               BoxShadow(
-                color: _T.accent.withValues(alpha: 0.4),
+                color: _T.accent.withValues(alpha: 0.35),
                 blurRadius: 20,
                 offset: const Offset(0, 6),
               ),
@@ -1291,10 +1379,10 @@ class _EmptyState extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 20, vertical: 11),
                     decoration: BoxDecoration(
-                      color: _T.accent.withValues(alpha: 0.12),
+                      color: _T.accent.withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: _T.accent.withValues(alpha: 0.3)),
+                          color: _T.accent.withValues(alpha: 0.25)),
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,

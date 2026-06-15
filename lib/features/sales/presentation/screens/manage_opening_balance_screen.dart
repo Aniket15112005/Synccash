@@ -9,29 +9,31 @@ import 'package:synccash/features/auth/presentation/providers/auth_provider.dart
 import '../providers/party_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Theme
+//  Design tokens — Golden Ledger aesthetic
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _T {
-  static const bg      = Color(0xFF07080E);
-  static const card    = Color(0xFF0C0E18);
-  static const card2   = Color(0xFF10121E);
-  static const card3   = Color(0xFF141728);
-  static const border  = Color(0xFF1A1D2E);
-  static const border2 = Color(0xFF23273A);
-  static const muted   = Color(0xFF505570);
-  static const muted2  = Color(0xFF6B728C);
-  static const accent  = Color(0xFF5B72F0);
-  static const accent2 = Color(0xFF8299F8);
-  static const text    = Color(0xFFECEFF8);
-  static const text2   = Color(0xFFB4BCDA);
-  static const green   = Color(0xFF2DD98A);
-  static const red     = Color(0xFFEC4B6A);
-  static const amber   = Color(0xFFF5A623);
+  static const bg      = Color(0xFF090A0C);
+  static const surface = Color(0xFF101318);
+  static const card    = Color(0xFF141820);
+  static const card2   = Color(0xFF181D26);
+  static const line    = Color(0xFF1C2230);
+  static const line2   = Color(0xFF242C3A);
+  static const muted   = Color(0xFF445060);
+  static const muted2  = Color(0xFF6A7888);
+  static const gold    = Color(0xFFC4903A);
+  static const gold2   = Color(0xFFE2B870);
+  static const accent  = Color(0xFF4A70D0);
+  static const accent2 = Color(0xFF7AA0F0);
+  static const text    = Color(0xFFDCE8F4);
+  static const text2   = Color(0xFF8AACCC);
+  static const green   = Color(0xFF28C898);
+  static const red     = Color(0xFFE04A62);
+  static const amber   = Color(0xFFEAA030);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Animated background — drifting gradient orbs + subtle grid
+//  Animated background — balance scale painter
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AnimatedBackground extends StatefulWidget {
@@ -51,7 +53,7 @@ class _AnimatedBackgroundState extends State<_AnimatedBackground>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 12),
+      duration: const Duration(seconds: 8),
     )..repeat(reverse: true);
   }
 
@@ -63,86 +65,185 @@ class _AnimatedBackgroundState extends State<_AnimatedBackground>
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _ctrl,
-      builder: (_, __) {
-        final t = _ctrl.value;
-        return Stack(
-          children: [
-            Container(color: _T.bg),
-            // Orb 1 — top-left, indigo
-            Positioned(
-              top: -160 + t * 80,
-              left: -100 + t * 50,
-              child: _GlowOrb(
-                size: 380,
-                color: const Color(0xFF4A5BE0).withValues(alpha: 0.09),
+    return Stack(
+      children: [
+        Container(color: _T.bg),
+        // Scale animation — lower portion of screen
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: _ctrl,
+            builder: (_, __) => RepaintBoundary(
+              child: CustomPaint(
+                painter: _BalanceScalePainter(t: _ctrl.value),
               ),
             ),
-            // Orb 2 — bottom-right, violet
-            Positioned(
-              bottom: -130 + t * 65,
-              right: -90 + t * 30,
-              child: _GlowOrb(
-                size: 320,
-                color: const Color(0xFF7755CC).withValues(alpha: 0.07),
-              ),
+          ),
+        ),
+        // Ledger line grid overlay — static
+        Positioned.fill(
+          child: RepaintBoundary(
+            child: CustomPaint(
+              painter: _LedgerGridPainter(),
             ),
-            // Orb 3 — mid-right, teal
-            Positioned(
-              top: 280 - t * 60,
-              right: 40 + t * 50,
-              child: _GlowOrb(
-                size: 220,
-                color: const Color(0xFF3A7ACC).withValues(alpha: 0.05),
-              ),
-            ),
-            // Subtle dot-grid overlay
-            Positioned.fill(
-              child: CustomPaint(painter: _DotGridPainter()),
-            ),
-            widget.child,
-          ],
-        );
-      },
+          ),
+        ),
+        widget.child,
+      ],
     );
   }
 }
 
-class _GlowOrb extends StatelessWidget {
-  final double size;
-  final Color  color;
-  const _GlowOrb({required this.size, required this.color});
+/// Draws a gently oscillating balance scale with floating coins.
+/// Thematically tied to "opening balance" — the art of balancing the books.
+class _BalanceScalePainter extends CustomPainter {
+  final double t; // 0..1 from animation
+  const _BalanceScalePainter({required this.t});
 
-  @override
-  Widget build(BuildContext context) => Container(
-        width: size, height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color, color.withValues(alpha: 0)],
-          ),
-        ),
-      );
-}
-
-class _DotGridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF1E2240).withValues(alpha: 0.5)
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 1.2;
-    const step = 52.0;
-    for (double x = step; x < size.width; x += step) {
-      for (double y = step; y < size.height; y += step) {
-        canvas.drawCircle(Offset(x, y), 0.6, paint);
+    // Rocking angle: ±5° sine wave
+    final angle = math.sin(t * math.pi) * 0.09;
+
+    final cx     = size.width * 0.72;
+    final poleTop = size.height * 0.28;
+    final poleBot = size.height * 0.82;
+    final beamY  = poleTop + 20;
+    final beamLen = math.min(size.width * 0.28, 110.0);
+
+    final basePaint = Paint()
+      ..color = _T.gold.withValues(alpha: 0.06)
+      ..strokeWidth = 1.4
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final chainPaint = Paint()
+      ..color = _T.gold.withValues(alpha: 0.04)
+      ..strokeWidth = 0.8
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final fillPaint = Paint()
+      ..color = _T.gold.withValues(alpha: 0.03)
+      ..style = PaintingStyle.fill;
+
+    // Vertical pole
+    canvas.drawLine(
+      Offset(cx, poleTop),
+      Offset(cx, poleBot),
+      basePaint,
+    );
+
+    // Base
+    canvas.drawLine(
+      Offset(cx - 24, poleBot),
+      Offset(cx + 24, poleBot),
+      basePaint..strokeWidth = 1.8,
+    );
+    canvas.drawLine(
+      Offset(cx - 16, poleBot + 6),
+      Offset(cx + 16, poleBot + 6),
+      basePaint..strokeWidth = 1.2,
+    );
+
+    // Pivot cap
+    canvas.drawCircle(Offset(cx, beamY), 4, basePaint..strokeWidth = 1.2);
+
+    // Beam ends (tilted by angle)
+    final dx = beamLen * math.cos(angle);
+    final dy = beamLen * math.sin(angle);
+    final lx = cx - dx;
+    final ly = beamY - dy;
+    final rx = cx + dx;
+    final ry = beamY + dy;
+
+    canvas.drawLine(Offset(lx, ly), Offset(rx, ry), basePaint..strokeWidth = 1.4);
+
+    // Chain + pan (left)
+    const chainLen = 44.0;
+    const panR     = 22.0;
+
+    final lChainBot = Offset(lx, ly + chainLen);
+    canvas.drawLine(Offset(lx, ly), lChainBot, chainPaint);
+    canvas.drawCircle(lChainBot, panR, fillPaint);
+    canvas.drawCircle(lChainBot, panR, chainPaint..strokeWidth = 0.8);
+
+    // Coins in left pan
+    _drawCoin(canvas, Offset(lx - 7, ly + chainLen - 4), 6, 0.05);
+    _drawCoin(canvas, Offset(lx + 5, ly + chainLen - 2), 5, 0.04);
+
+    // Chain + pan (right)
+    final rChainBot = Offset(rx, ry + chainLen);
+    canvas.drawLine(Offset(rx, ry), rChainBot, chainPaint);
+    canvas.drawCircle(rChainBot, panR, fillPaint);
+    canvas.drawCircle(rChainBot, panR, chainPaint);
+
+    // Coins in right pan
+    _drawCoin(canvas, Offset(rx - 5, ry + chainLen - 3), 7, 0.05);
+
+    // Floating coin particles rising
+    final coinPositions = [
+      Offset(cx - beamLen * 0.6, poleBot - 30 - t * 60),
+      Offset(cx + beamLen * 0.3, poleBot - 50 - t * 40),
+      Offset(cx - beamLen * 0.1, poleBot - 15 - t * 80),
+    ];
+    for (final pos in coinPositions) {
+      if (pos.dy > poleTop) {
+        final opacity = ((poleBot - pos.dy) / (poleBot - poleTop)).clamp(0.0, 1.0);
+        _drawCoin(canvas, pos, 5, 0.035 * opacity);
       }
     }
+
+    // ₹ glyph near scale center (very faint)
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '₹',
+        style: TextStyle(
+          color: _T.gold.withValues(alpha: 0.04),
+          fontSize: 60,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(cx - 18, beamY + 20));
+  }
+
+  void _drawCoin(Canvas canvas, Offset center, double r, double alpha) {
+    final fill = Paint()
+      ..color = _T.gold.withValues(alpha: alpha)
+      ..style = PaintingStyle.fill;
+    final stroke = Paint()
+      ..color = _T.gold.withValues(alpha: alpha * 1.5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.6;
+    canvas.drawCircle(center, r, fill);
+    canvas.drawCircle(center, r, stroke);
   }
 
   @override
-  bool shouldRepaint(_DotGridPainter _) => false;
+  bool shouldRepaint(covariant _BalanceScalePainter old) => old.t != t;
+}
+
+/// Static faint horizontal ledger lines — like accounting paper.
+class _LedgerGridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = _T.line.withValues(alpha: 0.25)
+      ..strokeWidth = 0.5;
+    const spacing = 40.0;
+    for (double y = spacing; y < size.height; y += spacing) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+    // Left margin line
+    final margin = Paint()
+      ..color = _T.gold.withValues(alpha: 0.04)
+      ..strokeWidth = 1.2;
+    canvas.drawLine(const Offset(28, 0), Offset(28, size.height), margin);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter _) => false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -280,7 +381,7 @@ class _ManageOpeningBalanceScreenState
                 final withOB  = parties
                     .where((p) => p.openingBalance > 0)
                     .length;
-                return _SummaryCard(
+                return _SummaryStrip(
                   clientCount: parties.length,
                   withOB:      withOB,
                   totalOB:     totalOB,
@@ -327,9 +428,10 @@ class _ManageOpeningBalanceScreenState
                         const EdgeInsets.fromLTRB(16, 8, 16, 100),
                     itemCount: filtered.length,
                     separatorBuilder: (_, __) =>
-                        const SizedBox(height: 8),
+                        Container(height: 1, color: _T.line),
                     itemBuilder: (_, i) => _PartyTile(
                       party:    filtered[i],
+                      index:    i,
                       onTap:    () => _openEdit(filtered[i]),
                       onEdit:   () => _openEdit(filtered[i]),
                       onDelete: filtered[i].entity != null
@@ -352,19 +454,20 @@ class _ManageOpeningBalanceScreenState
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: _T.card3,
+        backgroundColor: _T.card2,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(22)),
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: _T.line2)),
         title: const Text('Remove Client?',
             style: TextStyle(
                 color: _T.text,
                 fontWeight: FontWeight.w700,
-                fontSize: 17)),
+                fontSize: 16)),
         content: Text(
           'This will remove the opening balance record for '
           '"${party.name}". Bills and transactions are not affected.',
           style: const TextStyle(
-              color: _T.text2, fontSize: 13, height: 1.5),
+              color: _T.muted2, fontSize: 13, height: 1.5),
         ),
         actions: [
           TextButton(
@@ -416,7 +519,7 @@ class _MergedParty {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Header
+//  Header — Ledger title bar
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
@@ -427,87 +530,92 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final top = MediaQuery.of(context).padding.top;
     return Container(
-      padding: EdgeInsets.fromLTRB(20, top + 18, 20, 20),
+      padding: EdgeInsets.fromLTRB(20, top + 14, 20, 16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFF0B0D1E),
-            _T.bg.withValues(alpha: 0.97),
-          ],
-        ),
+        color: _T.bg.withValues(alpha: 0.95),
         border: Border(
           bottom: BorderSide(
-              color: _T.accent.withValues(alpha: 0.07), width: 1),
+              color: _T.gold.withValues(alpha: 0.12), width: 1),
         ),
       ),
       child: Row(
         children: [
-          // ── Back button ─────────────────────────────────────────────────
+          // Back button
           GestureDetector(
             onTap: () => Navigator.of(context).pop(),
             child: Container(
-              width: 38, height: 38,
+              width: 36, height: 36,
               decoration: BoxDecoration(
-                color: _T.border2.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(11),
-                border: Border.all(color: _T.border2),
+                color: _T.line,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _T.line2),
               ),
               child: const Icon(Icons.arrow_back_ios_rounded,
-                  color: _T.muted2, size: 15),
+                  color: _T.muted2, size: 14),
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 14),
 
-          // ── Title ────────────────────────────────────────────────────────
+          // Title
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ShaderMask(
-                  shaderCallback: (b) => const LinearGradient(
-                    colors: [Color(0xFFC4CCFF), Color(0xFF8299F8)],
-                  ).createShader(b),
-                  child: const Text(
-                    'Client Balances',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.6),
+                RichText(
+                  text: const TextSpan(
+                    children: [
+                      TextSpan(
+                        text: 'OPENING ',
+                        style: TextStyle(
+                          color: _T.gold2,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                      TextSpan(
+                        text: 'BALANCE',
+                        style: TextStyle(
+                          color: _T.text,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 1),
-                const Text('Manage opening balances',
+                const SizedBox(height: 2),
+                const Text('Ledger  ·  Client balances',
                     style: TextStyle(
-                        color: _T.muted, fontSize: 12)),
+                        color: _T.muted, fontSize: 10,
+                        letterSpacing: 0.2)),
               ],
             ),
           ),
 
-          // ── Add button ───────────────────────────────────────────────────
+          // Add button
           GestureDetector(
             onTap: onAdd,
             child: Container(
-              width: 38, height: 38,
+              width: 36, height: 36,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xFF7D90F5), Color(0xFF4A5ED4)],
+                  colors: [Color(0xFFD4A040), Color(0xFFA07020)],
                 ),
-                borderRadius: BorderRadius.circular(11),
+                borderRadius: BorderRadius.circular(8),
                 boxShadow: [
                   BoxShadow(
-                    color: _T.accent.withValues(alpha: 0.35),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
+                    color: _T.gold.withValues(alpha: 0.28),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
                   ),
                 ],
               ),
               child: const Icon(Icons.person_add_alt_1_rounded,
-                  color: Colors.white, size: 18),
+                  color: Colors.white, size: 16),
             ),
           ),
         ],
@@ -517,14 +625,14 @@ class _Header extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Summary card — revamped with 3 stat columns
+//  Summary strip — ledger totals row
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SummaryCard extends StatelessWidget {
+class _SummaryStrip extends StatelessWidget {
   final int    clientCount;
   final int    withOB;
   final double totalOB;
-  const _SummaryCard({
+  const _SummaryStrip({
     required this.clientCount,
     required this.withOB,
     required this.totalOB,
@@ -533,124 +641,97 @@ class _SummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      padding:
-          const EdgeInsets.symmetric(horizontal: 6, vertical: 14),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            _T.accent.withValues(alpha: 0.10),
-            _T.accent.withValues(alpha: 0.04),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-            color: _T.accent.withValues(alpha: 0.16)),
-        boxShadow: [
-          BoxShadow(
-            color: _T.accent.withValues(alpha: 0.06),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-        ],
+        color: _T.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _T.gold.withValues(alpha: 0.14)),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _SummaryCol(
-              icon:  Icons.people_alt_rounded,
-              label: 'Clients',
+      child: IntrinsicHeight(
+        child: Row(
+          children: [
+            _SummaryCell(
+              label: 'CLIENTS',
               value: '$clientCount',
-              color: _T.accent2,
+              color: _T.text2,
             ),
-          ),
-          _VertDivider(),
-          Expanded(
-            child: _SummaryCol(
-              icon:  Icons.account_balance_wallet_rounded,
-              label: 'With Balance',
+            VerticalDivider(
+                width: 1, color: _T.line2, indent: 10, endIndent: 10),
+            _SummaryCell(
+              label: 'WITH BALANCE',
               value: '$withOB',
               color: _T.green,
             ),
-          ),
-          _VertDivider(),
-          Expanded(
-            child: _SummaryCol(
-              icon:  Icons.currency_rupee_rounded,
-              label: 'Total OB',
-              value: _fmtNum(totalOB),
-              color: const Color(0xFF2196F3),
+            VerticalDivider(
+                width: 1, color: _T.line2, indent: 10, endIndent: 10),
+            _SummaryCell(
+              label: 'TOTAL OB',
+              value: '₹${_fmtNum(totalOB)}',
+              color: _T.gold2,
+              isLast: true,
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-class _SummaryCol extends StatelessWidget {
-  final IconData icon;
-  final String   label;
-  final String   value;
-  final Color    color;
-  const _SummaryCol({
-    required this.icon,
+class _SummaryCell extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color  color;
+  final bool   isLast;
+  const _SummaryCell({
     required this.label,
     required this.value,
     required this.color,
+    this.isLast = false,
   });
 
   @override
-  Widget build(BuildContext context) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 30, height: 30,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.10),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: color, size: 14),
+  Widget build(BuildContext context) => Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
+          child: Column(
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                    color: _T.muted,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                value,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3),
+              ),
+            ],
           ),
-          const SizedBox(height: 7),
-          Text(value,
-              style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 18,
-                  letterSpacing: -0.4)),
-          const SizedBox(height: 2),
-          Text(label,
-              style: const TextStyle(
-                  color: _T.muted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w500)),
-        ],
-      );
-}
-
-class _VertDivider extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Container(
-        width: 1, height: 44,
-        color: _T.accent.withValues(alpha: 0.10),
+        ),
       );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Party tile  — completely redesigned
+//  Party tile — ledger entry row style
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PartyTile extends StatelessWidget {
   final _MergedParty  party;
+  final int           index;
   final VoidCallback  onTap;
   final VoidCallback  onEdit;
   final VoidCallback? onDelete;
 
   const _PartyTile({
     required this.party,
+    required this.index,
     required this.onTap,
     required this.onEdit,
     this.onDelete,
@@ -666,169 +747,187 @@ class _PartyTile extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: hasSaved && hasOB
-                ? [
-                    _T.card2,
-                    _T.card,
-                  ]
-                : [_T.card, _T.card],
-          ),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: hasSaved && hasOB
-                ? _T.accent.withValues(alpha: 0.20)
-                : _T.border,
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: hasSaved && hasOB
-                  ? _T.accent.withValues(alpha: 0.05)
-                  : Colors.black.withValues(alpha: 0.15),
-              blurRadius: 16,
-              offset: const Offset(0, 5),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            // ── Avatar ─────────────────────────────────────────────────────
-            _CircleAvatar(name: party.name, size: 50),
-            const SizedBox(width: 14),
-
-            // ── Info ───────────────────────────────────────────────────────
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(party.name,
-                      style: const TextStyle(
-                          color: _T.text,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15,
-                          letterSpacing: -0.2)),
-
-                  if (place.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on_rounded,
-                            color: _T.muted, size: 11),
-                        const SizedBox(width: 3),
-                        Text(place,
-                            style: const TextStyle(
-                                color: _T.muted, fontSize: 11)),
-                      ],
-                    ),
-                  ] else if (desc.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Text(desc,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            color: _T.muted, fontSize: 11)),
-                  ],
-
-                  if (!hasSaved) ...[
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: _T.accent.withValues(alpha: 0.07),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                            color: _T.accent.withValues(alpha: 0.14)),
-                      ),
-                      child: const Text('Tap to set balance',
-                          style: TextStyle(
-                              color: _T.accent2,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                ],
+      child: Container(
+        color: index.isEven
+            ? _T.surface.withValues(alpha: 0.5)
+            : Colors.transparent,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Left balance indicator stripe
+              Container(
+                width: 3,
+                color: hasOB
+                    ? _T.gold.withValues(alpha: 0.55)
+                    : _T.line.withValues(alpha: 0.4),
               ),
-            ),
 
-            // ── OB amount + actions ────────────────────────────────────────
-            if (hasSaved) ...[
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (hasOB) ...[
-                    Text(
-                      '₹${_fmtNum(ob)}',
-                      style: const TextStyle(
-                          color: Color(0xFF2196F3),
-                          fontWeight: FontWeight.w800,
-                          fontSize: 17,
-                          letterSpacing: -0.4),
-                    ),
-                    const SizedBox(height: 2),
-                    const Text('Opening Bal.',
-                        style: TextStyle(
-                            color: _T.muted,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w500)),
-                  ] else ...[
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: _T.muted.withValues(alpha: 0.07),
-                        borderRadius: BorderRadius.circular(7),
-                        border: Border.all(
-                            color: _T.border2),
-                      ),
-                      child: const Text('₹0',
-                          style: TextStyle(
-                              color: _T.muted2,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+              // Index number (ledger row number)
+              Container(
+                width: 32,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                color: _T.line.withValues(alpha: 0.2),
+                child: Text(
+                  '${index + 1}',
+                  style: TextStyle(
+                      color: _T.muted.withValues(alpha: 0.5),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+
+              Container(
+                width: 1,
+                color: _T.line.withValues(alpha: 0.5),
+              ),
+
+              // Content
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+                  child: Row(
                     children: [
-                      _ActionBtn(
-                        icon:  Icons.edit_rounded,
-                        color: _T.accent,
-                        onTap: onEdit,
+                      // Avatar
+                      _CircleAvatar(name: party.name, size: 40),
+                      const SizedBox(width: 12),
+
+                      // Info
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(party.name,
+                                style: const TextStyle(
+                                    color: _T.text,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
+                                    letterSpacing: -0.1)),
+
+                            if (place.isNotEmpty) ...[
+                              const SizedBox(height: 3),
+                              Row(children: [
+                                const Icon(Icons.location_on_rounded,
+                                    color: _T.muted, size: 10),
+                                const SizedBox(width: 2),
+                                Text(place,
+                                    style: const TextStyle(
+                                        color: _T.muted, fontSize: 10)),
+                              ]),
+                            ] else if (desc.isNotEmpty) ...[
+                              const SizedBox(height: 3),
+                              Text(desc,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      color: _T.muted, fontSize: 10)),
+                            ],
+
+                            if (!hasSaved) ...[
+                              const SizedBox(height: 5),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: _T.gold.withValues(alpha: 0.06),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                      color: _T.gold.withValues(alpha: 0.14)),
+                                ),
+                                child: const Text('Tap to set balance',
+                                    style: TextStyle(
+                                        color: _T.gold,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w600)),
+                              ),
+                            ],
+                          ],
+                        ),
                       ),
-                      if (onDelete != null) ...[
-                        const SizedBox(width: 6),
-                        _ActionBtn(
-                          icon:  Icons.delete_outline_rounded,
-                          color: _T.muted2,
-                          onTap: onDelete!,
-                          small: true,
+
+                      // Amount column (CR / DR style)
+                      if (hasSaved) ...[
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            if (hasOB) ...[
+                              Text(
+                                '₹${_fmtNum(ob)}',
+                                style: const TextStyle(
+                                    color: _T.gold2,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 14,
+                                    letterSpacing: -0.3),
+                              ),
+                              const SizedBox(height: 1),
+                              const Text('DR',
+                                  style: TextStyle(
+                                      color: _T.gold,
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.6)),
+                            ] else ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: _T.muted.withValues(alpha: 0.07),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                      color: _T.line2),
+                                ),
+                                child: const Text('NIL',
+                                    style: TextStyle(
+                                        color: _T.muted2,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.5)),
+                              ),
+                            ],
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _ActionBtn(
+                                  icon:  Icons.edit_rounded,
+                                  color: _T.accent,
+                                  onTap: onEdit,
+                                ),
+                                if (onDelete != null) ...[
+                                  const SizedBox(width: 5),
+                                  _ActionBtn(
+                                    icon:  Icons.delete_outline_rounded,
+                                    color: _T.muted2,
+                                    onTap: onDelete!,
+                                    small: true,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ] else ...[
+                        Container(
+                          width: 26, height: 26,
+                          decoration: BoxDecoration(
+                            color: _T.gold.withValues(alpha: 0.06),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: _T.gold.withValues(alpha: 0.12)),
+                          ),
+                          child: const Icon(Icons.add_rounded,
+                              color: _T.gold, size: 13),
                         ),
                       ],
                     ],
                   ),
-                ],
-              ),
-            ] else ...[
-              Container(
-                width: 30, height: 30,
-                decoration: BoxDecoration(
-                  color: _T.accent.withValues(alpha: 0.07),
-                  shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.add_rounded,
-                    color: _T.accent2, size: 14),
               ),
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -855,17 +954,17 @@ class _ActionBtn extends StatelessWidget {
         },
         behavior: HitTestBehavior.opaque,
         child: Container(
-          width: small ? 26 : 30,
-          height: small ? 26 : 30,
+          width: small ? 24 : 28,
+          height: small ? 24 : 28,
           decoration: BoxDecoration(
-            color: color.withValues(alpha: small ? 0.05 : 0.10),
-            borderRadius: BorderRadius.circular(8),
+            color: color.withValues(alpha: small ? 0.05 : 0.08),
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
-                color: color.withValues(alpha: small ? 0.12 : 0.22)),
+                color: color.withValues(alpha: small ? 0.10 : 0.18)),
           ),
           child: Icon(icon,
-              color: color.withValues(alpha: small ? 0.55 : 1.0),
-              size: small ? 12 : 14),
+              color: color.withValues(alpha: small ? 0.5 : 0.9),
+              size: small ? 11 : 13),
         ),
       );
 }
@@ -882,16 +981,15 @@ class _LoadingSpinner extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            width: 36, height: 36,
+            width: 28, height: 28,
             child: CircularProgressIndicator(
-              color: _T.accent.withValues(alpha: 0.7),
+              color: _T.gold.withValues(alpha: 0.6),
               strokeWidth: 1.5,
             ),
           ),
-          const SizedBox(height: 14),
-          const Text('Loading clients…',
-              style:
-                  TextStyle(color: _T.muted, fontSize: 12)),
+          const SizedBox(height: 12),
+          const Text('Loading ledger…',
+              style: TextStyle(color: _T.muted, fontSize: 11)),
         ],
       );
 }
@@ -930,35 +1028,30 @@ class _EmptyState extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 76, height: 76,
+                width: 70, height: 70,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      _T.accent.withValues(alpha: 0.10),
-                      _T.accent.withValues(alpha: 0.03),
-                    ],
-                  ),
+                  color: _T.gold.withValues(alpha: 0.06),
                   shape: BoxShape.circle,
                   border: Border.all(
-                      color: _T.accent.withValues(alpha: 0.13)),
+                      color: _T.gold.withValues(alpha: 0.12)),
                 ),
                 child: Icon(
                   hasSearch
                       ? Icons.search_off_rounded
-                      : Icons.people_alt_outlined,
-                  color: _T.accent.withValues(alpha: 0.45),
-                  size: 32,
+                      : Icons.balance_rounded,
+                  color: _T.gold.withValues(alpha: 0.40),
+                  size: 30,
                 ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 16),
               Text(
                 hasSearch
                     ? 'No clients match "$query"'
-                    : 'No clients yet',
+                    : 'Ledger is empty',
                 style: const TextStyle(
                     color: _T.text,
                     fontWeight: FontWeight.w700,
-                    fontSize: 16),
+                    fontSize: 15),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 6),
@@ -967,84 +1060,32 @@ class _EmptyState extends StatelessWidget {
                     ? 'Try a different search term'
                     : 'Add a client to start tracking\nopening balances',
                 style: const TextStyle(
-                    color: _T.muted,
-                    fontSize: 12,
-                    height: 1.5),
+                    color: _T.muted2, fontSize: 12, height: 1.5),
                 textAlign: TextAlign.center,
               ),
               if (!hasSearch) ...[
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 GestureDetector(
                   onTap: onAdd,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 14),
+                        horizontal: 20, vertical: 10),
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          _T.accent.withValues(alpha: 0.15),
-                          _T.accent.withValues(alpha: 0.06),
-                        ],
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFD4A040), Color(0xFFA07020)],
                       ),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                          color: _T.accent.withValues(alpha: 0.22)),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.add_rounded,
-                            color: _T.accent2, size: 16),
-                        SizedBox(width: 6),
-                        Text('Add First Client',
-                            style: TextStyle(
-                                color: _T.accent2,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13)),
-                      ],
-                    ),
+                    child: const Text('Add Client',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13)),
                   ),
                 ),
               ],
             ],
           ),
-        ),
-      );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  FAB
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _FAB extends StatelessWidget {
-  final VoidCallback onTap;
-  const _FAB({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: () {
-          HapticFeedback.mediumImpact();
-          onTap();
-        },
-        child: Container(
-          width: 56, height: 56,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF7D90F5), Color(0xFF4A5ED4)],
-            ),
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                color: _T.accent.withValues(alpha: 0.40),
-                blurRadius: 18,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: const Icon(Icons.add_rounded,
-              color: Colors.white, size: 26),
         ),
       );
 }
@@ -1061,31 +1102,31 @@ class _SearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => TextField(
         controller: controller,
-        style: const TextStyle(color: _T.text, fontSize: 14),
+        style: const TextStyle(color: _T.text, fontSize: 13),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: const TextStyle(color: _T.muted, fontSize: 14),
+          hintStyle: const TextStyle(color: _T.muted, fontSize: 13),
           prefixIcon: const Icon(Icons.search_rounded,
-              color: _T.muted, size: 18),
+              color: _T.muted, size: 16),
           suffixIcon: controller.text.isNotEmpty
               ? IconButton(
                   icon: const Icon(Icons.close_rounded,
-                      color: _T.muted, size: 16),
+                      color: _T.muted, size: 15),
                   onPressed: controller.clear,
                 )
               : null,
           filled: true,
-          fillColor: _T.card,
+          fillColor: _T.surface,
           contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: _T.border),
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: _T.line2),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(8),
             borderSide:
-                const BorderSide(color: _T.accent, width: 1.5),
+                const BorderSide(color: _T.gold, width: 1.2),
           ),
         ),
       );
@@ -1183,8 +1224,8 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
     final e      = widget.party.entity;
     return Container(
       decoration: const BoxDecoration(
-        color: _T.card3,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        color: _T.card2,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.fromLTRB(20, 14, 20, 24 + bottom),
       child: Form(
@@ -1194,22 +1235,21 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Drag handle
               Center(
                 child: Container(
-                  width: 40, height: 4,
-                  margin: const EdgeInsets.only(bottom: 24),
+                  width: 36, height: 4,
+                  margin: const EdgeInsets.only(bottom: 22),
                   decoration: BoxDecoration(
-                    color: _T.border2,
+                    color: _T.line2,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
 
-              // ── Avatar + name ─────────────────────────────────────────────
+              // Avatar + name
               Row(
                 children: [
-                  _CircleAvatar(name: widget.party.name, size: 52),
+                  _CircleAvatar(name: widget.party.name, size: 50),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
@@ -1219,24 +1259,24 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                             style: const TextStyle(
                                 color: _T.text,
                                 fontWeight: FontWeight.w800,
-                                fontSize: 18,
+                                fontSize: 17,
                                 letterSpacing: -0.3)),
                         const SizedBox(height: 4),
                         Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: _T.accent.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(6),
+                            color: _T.gold.withValues(alpha: 0.07),
+                            borderRadius: BorderRadius.circular(5),
                             border: Border.all(
-                                color: _T.accent.withValues(alpha: 0.15)),
+                                color: _T.gold.withValues(alpha: 0.14)),
                           ),
                           child: Text(
                             e != null
                                 ? 'Edit Opening Balance'
                                 : 'Set Opening Balance',
                             style: const TextStyle(
-                                color: _T.accent2,
+                                color: _T.gold2,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600),
                           ),
@@ -1247,60 +1287,46 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                 ],
               ),
 
-              // ── Current OB preview ────────────────────────────────────────
+              // Current OB preview
               if (e != null && e.openingBalance > 0) ...[
-                const SizedBox(height: 18),
+                const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
+                      horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        _T.accent.withValues(alpha: 0.08),
-                        _T.accent.withValues(alpha: 0.03),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(14),
+                    color: _T.gold.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                        color: _T.accent.withValues(alpha: 0.15)),
+                        color: _T.gold.withValues(alpha: 0.12)),
                   ),
                   child: Row(
                     children: [
-                      Container(
-                        width: 32, height: 32,
-                        decoration: BoxDecoration(
-                          color: _T.accent.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                            Icons.account_balance_wallet_outlined,
-                            color: _T.accent2,
-                            size: 15),
-                      ),
-                      const SizedBox(width: 10),
+                      const Icon(
+                          Icons.account_balance_wallet_outlined,
+                          color: _T.gold, size: 13),
+                      const SizedBox(width: 8),
                       const Text('Current Balance',
                           style: TextStyle(
-                              color: _T.muted2, fontSize: 12)),
+                              color: _T.muted2, fontSize: 11)),
                       const Spacer(),
                       Text('₹${_fmtNum(e.openingBalance)}',
                           style: const TextStyle(
-                              color: Color(0xFF2196F3),
+                              color: _T.gold2,
                               fontWeight: FontWeight.w800,
-                              fontSize: 15)),
+                              fontSize: 14)),
                     ],
                   ),
                 ),
               ],
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 18),
 
-              // ── Form fields ────────────────────────────────────────────────
               TextFormField(
                 controller: _obCtrl,
                 autofocus: true,
                 style: const TextStyle(
                     color: _T.text,
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.w500),
                 keyboardType: const TextInputType.numberWithOptions(
                     decimal: true),
@@ -1316,33 +1342,32 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                   return null;
                 },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               TextFormField(
                 controller: _placeCtrl,
-                style: const TextStyle(color: _T.text, fontSize: 14),
+                style: const TextStyle(color: _T.text, fontSize: 13),
                 textCapitalization: TextCapitalization.words,
                 decoration: _fieldDec(
                     label: 'Place / City (optional)',
                     hint: 'e.g. Mumbai',
                     icon: Icons.location_on_outlined),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               TextFormField(
                 controller: _descCtrl,
-                style: const TextStyle(color: _T.text, fontSize: 14),
+                style: const TextStyle(color: _T.text, fontSize: 13),
                 maxLines: 2,
                 decoration: _fieldDec(
                     label: 'Description (optional)',
                     hint: 'e.g. Wholesale dealer',
                     icon: Icons.notes_rounded),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 22),
 
-              // ── Save button ────────────────────────────────────────────────
               _SaveButton(
-                label:       'Save Changes',
-                submitting:  _submitting,
-                onPressed:   _submitting ? null : _save,
+                label:      'Save Changes',
+                submitting: _submitting,
+                onPressed:  _submitting ? null : _save,
               ),
             ],
           ),
@@ -1429,8 +1454,8 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Container(
       decoration: const BoxDecoration(
-        color: _T.card3,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        color: _T.card2,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.fromLTRB(20, 14, 20, 24 + bottom),
       child: Form(
@@ -1442,30 +1467,29 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
             children: [
               Center(
                 child: Container(
-                  width: 40, height: 4,
-                  margin: const EdgeInsets.only(bottom: 24),
+                  width: 36, height: 4,
+                  margin: const EdgeInsets.only(bottom: 22),
                   decoration: BoxDecoration(
-                    color: _T.border2,
+                    color: _T.line2,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
 
-              // Header row
               Row(
                 children: [
                   Container(
-                    width: 46, height: 46,
+                    width: 44, height: 44,
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: [Color(0xFF7D90F5), Color(0xFF4A5ED4)],
+                        colors: [Color(0xFFD4A040), Color(0xFFA07020)],
                       ),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
-                          color: _T.accent.withValues(alpha: 0.28),
+                          color: _T.gold.withValues(alpha: 0.25),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),
@@ -1482,15 +1506,15 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                           style: TextStyle(
                               color: _T.text,
                               fontWeight: FontWeight.w800,
-                              fontSize: 18)),
+                              fontSize: 17)),
                       Text('Add with opening balance',
                           style: TextStyle(
-                              color: _T.muted, fontSize: 12)),
+                              color: _T.muted, fontSize: 11)),
                     ],
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 22),
 
               TextFormField(
                 controller: _nameCtrl,
@@ -1506,7 +1530,7 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                         ? 'Name is required'
                         : null,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               TextFormField(
                 controller: _obCtrl,
                 style: const TextStyle(color: _T.text),
@@ -1524,7 +1548,7 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                   return null;
                 },
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               TextFormField(
                 controller: _placeCtrl,
                 style: const TextStyle(color: _T.text),
@@ -1534,7 +1558,7 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                     hint: 'e.g. Mumbai',
                     icon: Icons.location_on_outlined),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               TextFormField(
                 controller: _descCtrl,
                 style: const TextStyle(color: _T.text),
@@ -1544,7 +1568,7 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                     hint: 'e.g. Wholesale dealer',
                     icon: Icons.notes_rounded),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 22),
 
               _SaveButton(
                 label:      'Add Client',
@@ -1575,7 +1599,7 @@ class _SaveButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-        height: 54,
+        height: 50,
         child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: submitting
@@ -1583,19 +1607,19 @@ class _SaveButton extends StatelessWidget {
                 : const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xFF8299F8), Color(0xFF4A5ED4)],
+                    colors: [Color(0xFFD4A040), Color(0xFF9A6A18)],
                   ),
             color: submitting
-                ? _T.accent.withValues(alpha: 0.25)
+                ? _T.gold.withValues(alpha: 0.20)
                 : null,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             boxShadow: submitting
                 ? null
                 : [
                     BoxShadow(
-                      color: _T.accent.withValues(alpha: 0.35),
-                      blurRadius: 16,
-                      offset: const Offset(0, 5),
+                      color: _T.gold.withValues(alpha: 0.28),
+                      blurRadius: 14,
+                      offset: const Offset(0, 4),
                     ),
                   ],
           ),
@@ -1606,21 +1630,55 @@ class _SaveButton extends StatelessWidget {
               shadowColor: Colors.transparent,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
+                  borderRadius: BorderRadius.circular(12)),
               elevation: 0,
             ),
             child: submitting
                 ? const SizedBox(
-                    width: 22, height: 22,
+                    width: 20, height: 20,
                     child: CircularProgressIndicator(
                         strokeWidth: 2.5,
                         color: Colors.white))
                 : Text(label,
                     style: const TextStyle(
                         fontWeight: FontWeight.w700,
-                        fontSize: 15,
+                        fontSize: 14,
                         letterSpacing: 0.2)),
           ),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  FAB
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _FAB extends StatelessWidget {
+  final VoidCallback onTap;
+  const _FAB({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 52, height: 52,
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFD4A040), Color(0xFF9A6A18)],
+            ),
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: _T.gold.withValues(alpha: 0.35),
+                blurRadius: 16,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: const Icon(Icons.add_rounded,
+              color: Colors.white, size: 24),
         ),
       );
 }
@@ -1648,7 +1706,7 @@ SnackBar _snackBar(String msg, {required bool success}) => SnackBar(
           : _T.red.withValues(alpha: 0.9),
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12)),
+          borderRadius: BorderRadius.circular(10)),
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
     );
 
@@ -1657,35 +1715,34 @@ InputDecoration _fieldDec(
     InputDecoration(
       labelText: label,
       hintText: hint,
-      labelStyle: const TextStyle(color: _T.muted, fontSize: 13),
-      hintStyle: const TextStyle(color: _T.muted, fontSize: 13),
+      labelStyle: const TextStyle(color: _T.muted, fontSize: 12),
+      hintStyle: const TextStyle(color: _T.muted, fontSize: 12),
       prefixIcon:
-          icon != null ? Icon(icon, color: _T.muted, size: 17) : null,
+          icon != null ? Icon(icon, color: _T.muted, size: 16) : null,
       filled: true,
       fillColor: _T.card,
       contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _T.border2),
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: _T.line2),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide:
-            const BorderSide(color: _T.accent2, width: 1.5),
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: _T.gold, width: 1.2),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: _T.red),
       ),
       focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: _T.red, width: 1.5),
       ),
     );
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Circle avatar  (shared across both sheets)
+//  Circle avatar — muted ledger palette
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CircleAvatar extends StatelessWidget {
@@ -1695,13 +1752,13 @@ class _CircleAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final palette = [
-      [const Color(0xFF4C6EF5), const Color(0xFF3451D1)],
-      [const Color(0xFF7950F2), const Color(0xFF5C3DD8)],
-      [const Color(0xFF1C7ED6), const Color(0xFF1465B0)],
-      [const Color(0xFF0CA678), const Color(0xFF08845F)],
-      [const Color(0xFFE67700), const Color(0xFFC46000)],
-      [const Color(0xFFE64980), const Color(0xFFC43468)],
+    const palette = [
+      [Color(0xFF3A5EA0), Color(0xFF2A4880)],
+      [Color(0xFF5A4090), Color(0xFF443070)],
+      [Color(0xFF206878), Color(0xFF185060)],
+      [Color(0xFF3A7850), Color(0xFF286038)],
+      [Color(0xFF8A5820), Color(0xFF704010)],
+      [Color(0xFF804050), Color(0xFF683040)],
     ];
     final idx    =
         name.isNotEmpty ? name.codeUnitAt(0) % palette.length : 0;
@@ -1715,21 +1772,16 @@ class _CircleAvatar extends StatelessWidget {
           colors: colors,
         ),
         shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: colors[0].withValues(alpha: 0.32),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        border: Border.all(
+            color: colors[0].withValues(alpha: 0.4), width: 1),
       ),
       child: Center(
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : '?',
           style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-              fontSize: size * 0.38),
+              color: Colors.white.withValues(alpha: 0.9),
+              fontWeight: FontWeight.w700,
+              fontSize: size * 0.36),
         ),
       ),
     );
