@@ -107,6 +107,14 @@ service cloud.firestore {
                       && isIosUser(database);
       }
 
+      // ── Parties (Opening Balances) ────────────────────────────────────────
+      match /parties/{partyId} {
+        allow read:   if isCashbookMember(database, cashbookId);
+        allow create: if isCashbookMember(database, cashbookId);
+        allow update: if isCashbookMember(database, cashbookId);
+        allow delete: if isCashbookMember(database, cashbookId);
+      }
+
     }
 
   }

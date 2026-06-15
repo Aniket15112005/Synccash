@@ -42,7 +42,7 @@ class _ManageOpeningBalanceScreenState
   final _searchCtrl = TextEditingController();
   String _query = '';
 
-  List<String>                   _billPartyNames = [];
+  List<String>                       _billPartyNames = [];
   StreamSubscription<QuerySnapshot>? _billsSub;
   ProviderSubscription<String?>?     _idSub;
   String?                            _cashbookId;
@@ -50,7 +50,9 @@ class _ManageOpeningBalanceScreenState
   @override
   void initState() {
     super.initState();
-    _searchCtrl.addListener(() => setState(() => _query = _searchCtrl.text));
+    _searchCtrl.addListener(() {
+      if (mounted) setState(() => _query = _searchCtrl.text);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _idSub = ref.listenManual<String?>(
@@ -195,6 +197,7 @@ class _ManageOpeningBalanceScreenState
           // ── List ──────────────────────────────────────────────────────────
           Expanded(
             child: partiesAsync.when(
+              skipLoadingOnReload: true,
               loading: () => const Center(
                 child: CircularProgressIndicator(
                     color: _T.accent, strokeWidth: 1.5),
@@ -224,6 +227,7 @@ class _ManageOpeningBalanceScreenState
                   itemBuilder: (_, i) => _PartyTile(
                     party: filtered[i],
                     onTap: () => _openEdit(filtered[i]),
+                    onEdit: () => _openEdit(filtered[i]),
                     onDelete: filtered[i].entity != null
                         ? () => _confirmDelete(filtered[i])
                         : null,
@@ -263,8 +267,8 @@ class _ManageOpeningBalanceScreenState
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child:
-                const Text('Cancel', style: TextStyle(color: _T.muted)),
+            child: const Text('Cancel',
+                style: TextStyle(color: _T.muted)),
           ),
           TextButton(
             onPressed: () async {
@@ -340,10 +344,7 @@ class _SummaryHeader extends StatelessWidget {
               color: _T.accent,
             ),
           ),
-          Container(
-            width: 1, height: 36,
-            color: _T.border,
-          ),
+          Container(width: 1, height: 36, color: _T.border),
           Expanded(
             child: _StatChip(
               label: 'Total OB',
@@ -400,10 +401,13 @@ class _StatChip extends StatelessWidget {
 class _PartyTile extends StatelessWidget {
   final _MergedParty  party;
   final VoidCallback  onTap;
+  final VoidCallback  onEdit;
   final VoidCallback? onDelete;
+
   const _PartyTile({
     required this.party,
     required this.onTap,
+    required this.onEdit,
     this.onDelete,
   });
 
@@ -500,17 +504,29 @@ class _PartyTile extends StatelessWidget {
                       style: TextStyle(color: _T.muted, fontSize: 9)),
                 ],
               ),
-              const SizedBox(width: 8),
-              if (onDelete != null)
+              const SizedBox(width: 6),
+              // Edit button for saved parties
+              GestureDetector(
+                onTap: onEdit,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.edit_rounded,
+                      color: _T.accent.withValues(alpha: 0.55), size: 15),
+                ),
+              ),
+              if (onDelete != null) ...[
+                const SizedBox(width: 2),
                 GestureDetector(
                   onTap: onDelete,
                   behavior: HitTestBehavior.opaque,
                   child: Padding(
                     padding: const EdgeInsets.all(4),
                     child: Icon(Icons.delete_outline_rounded,
-                        color: _T.muted.withValues(alpha: 0.4), size: 16),
+                        color: _T.muted.withValues(alpha: 0.4), size: 15),
                   ),
                 ),
+              ],
             ] else ...[
               Icon(Icons.edit_outlined,
                   color: _T.muted.withValues(alpha: 0.4), size: 14),
@@ -546,7 +562,8 @@ class _EmptyState extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: _T.accent.withValues(alpha: 0.06),
                   shape: BoxShape.circle,
-                  border: Border.all(color: _T.accent.withValues(alpha: 0.12)),
+                  border: Border.all(
+                      color: _T.accent.withValues(alpha: 0.12)),
                 ),
                 child: Icon(
                   hasSearch
@@ -610,8 +627,6 @@ class _EmptyState extends StatelessWidget {
 }
 
 // ── Edit Opening Balance sheet ────────────────────────────────────────────────
-// FIX: Now a ConsumerStatefulWidget so it reads currentCashbookIdProvider
-// directly — no longer depends on a nullable cashbookId passed from parent.
 
 class _EditOBSheet extends ConsumerStatefulWidget {
   final _MergedParty party;
@@ -622,18 +637,18 @@ class _EditOBSheet extends ConsumerStatefulWidget {
 }
 
 class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
-  final _formKey    = GlobalKey<FormState>();
+  final _formKey   = GlobalKey<FormState>();
   late final TextEditingController _obCtrl;
   late final TextEditingController _placeCtrl;
   late final TextEditingController _descCtrl;
-  bool _submitting  = false;
+  bool _submitting = false;
 
   @override
   void initState() {
     super.initState();
-    final e = widget.party.entity;
+    final e        = widget.party.entity;
     final existing = e?.openingBalance ?? 0.0;
-    _obCtrl = TextEditingController(
+    _obCtrl    = TextEditingController(
         text: existing == 0.0 ? '' : _obText(existing));
     _placeCtrl = TextEditingController(text: e?.place ?? '');
     _descCtrl  = TextEditingController(text: e?.description ?? '');
@@ -654,7 +669,6 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    // FIX: read directly from the provider — never null due to routing guard
     final cashbookId = ref.read(currentCashbookIdProvider);
     if (cashbookId == null || cashbookId.isEmpty) {
       _showSnack('Session expired. Please restart the app.', success: false);
@@ -677,8 +691,11 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
       }, SetOptions(merge: true));
 
       if (mounted) {
+        final messenger = ScaffoldMessenger.of(context);
         Navigator.of(context).pop();
-        _showSnack('Opening balance updated', success: true);
+        messenger.showSnackBar(
+          _snackBar('Opening balance updated', success: true),
+        );
       }
     } catch (e) {
       if (mounted) _showSnack('Failed to save: $e', success: false);
@@ -710,7 +727,6 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Drag handle
               Center(
                 child: Container(
                   width: 36, height: 4,
@@ -745,11 +761,15 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                             color: _T.accent.withValues(alpha: 0.08),
                             borderRadius: BorderRadius.circular(6),
                           ),
-                          child: const Text('Edit Opening Balance',
-                              style: TextStyle(
-                                  color: _T.accent,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600)),
+                          child: Text(
+                            e != null
+                                ? 'Edit Opening Balance'
+                                : 'Set Opening Balance',
+                            style: const TextStyle(
+                                color: _T.accent,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600),
+                          ),
                         ),
                       ],
                     ),
@@ -793,7 +813,9 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                 controller: _obCtrl,
                 autofocus: true,
                 style: const TextStyle(
-                    color: _T.text, fontSize: 16, fontWeight: FontWeight.w500),
+                    color: _T.text,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500),
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 decoration: _fieldDec(
@@ -866,8 +888,6 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
 }
 
 // ── New Party sheet ───────────────────────────────────────────────────────────
-// FIX: Now a ConsumerStatefulWidget so it reads currentCashbookIdProvider
-// directly — no longer depends on a nullable cashbookId passed from parent.
 
 class _NewPartySheet extends ConsumerStatefulWidget {
   const _NewPartySheet();
@@ -895,7 +915,6 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    // FIX: read directly from the provider — never null due to routing guard
     final cashbookId = ref.read(currentCashbookIdProvider);
     if (cashbookId == null || cashbookId.isEmpty) {
       _showSnack('Session expired. Please restart the app.', success: false);
@@ -919,8 +938,11 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
       }, SetOptions(merge: true));
 
       if (mounted) {
+        final messenger = ScaffoldMessenger.of(context);
         Navigator.of(context).pop();
-        _showSnack('Client added successfully', success: true);
+        messenger.showSnackBar(
+          _snackBar('Client added successfully', success: true),
+        );
       }
     } catch (e) {
       if (mounted) _showSnack('Failed to save: $e', success: false);
@@ -951,7 +973,6 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Drag handle
               Center(
                 child: Container(
                   width: 36, height: 4,
@@ -987,7 +1008,8 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                               fontWeight: FontWeight.w800,
                               fontSize: 18)),
                       Text('Add with opening balance',
-                          style: TextStyle(color: _T.muted, fontSize: 12)),
+                          style:
+                              TextStyle(color: _T.muted, fontSize: 12)),
                     ],
                   ),
                 ],
@@ -1005,7 +1027,9 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                     hint: 'e.g. ABC Traders',
                     icon: Icons.business_rounded),
                 validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                    (v == null || v.trim().isEmpty)
+                        ? 'Name is required'
+                        : null,
               ),
               const SizedBox(height: 12),
 
@@ -1170,7 +1194,8 @@ class _CircleAvatar extends StatelessWidget {
           ],
         ),
         shape: BoxShape.circle,
-        border: Border.all(color: color.withValues(alpha: 0.25), width: 1.5),
+        border:
+            Border.all(color: color.withValues(alpha: 0.25), width: 1.5),
       ),
       child: Center(
         child: Text(
@@ -1222,10 +1247,11 @@ class _SearchField extends StatelessWidget {
 }
 
 class _IconBtn extends StatelessWidget {
-  final IconData  icon;
+  final IconData     icon;
   final VoidCallback onTap;
-  final String?   tooltip;
-  const _IconBtn({required this.icon, required this.onTap, this.tooltip});
+  final String?      tooltip;
+  const _IconBtn(
+      {required this.icon, required this.onTap, this.tooltip});
 
   @override
   Widget build(BuildContext context) => Tooltip(
@@ -1240,7 +1266,8 @@ class _IconBtn extends StatelessWidget {
             decoration: BoxDecoration(
               color: _T.accent.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _T.accent.withValues(alpha: 0.18)),
+              border: Border.all(
+                  color: _T.accent.withValues(alpha: 0.18)),
             ),
             child: Icon(icon, color: _T.accent, size: 20),
           ),

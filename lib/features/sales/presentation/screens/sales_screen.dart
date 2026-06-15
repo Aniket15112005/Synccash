@@ -192,12 +192,13 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Party card with reactive streams
+//  Right side: shows Opening Balance (OB) instead of total bill amount
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PartyCard extends ConsumerStatefulWidget {
   final String               partyName;
   final List<SaleBillEntity> bills;
-  final VoidCallback          onTap;
+  final VoidCallback         onTap;
 
   const _PartyCard({
     super.key,
@@ -216,9 +217,9 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
   ProviderSubscription<String?>?        _idSub;
   String?                               _cashbookId;
 
-  double _received    = 0.0;
-  double _ob          = 0.0;
-  String _place       = '';
+  double _received = 0.0;
+  double _ob       = 0.0;
+  String _place    = '';
 
   @override
   void initState() {
@@ -276,6 +277,11 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
           _ob    = (d['openingBalance'] as num?)?.toDouble() ?? 0.0;
           _place = d['place'] as String? ?? '';
         });
+      } else {
+        setState(() {
+          _ob    = 0.0;
+          _place = '';
+        });
       }
     });
   }
@@ -290,8 +296,8 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
 
   @override
   Widget build(BuildContext context) {
-    final fmt         = NumberFormat('#,##,##0.00');
-    final totalBills  =
+    final fmt        = NumberFormat('#,##,##0.00');
+    final totalBills =
         widget.bills.fold<double>(0.0, (s, b) => s + b.billTotal);
     final outstanding =
         (totalBills - _received).clamp(0.0, double.infinity);
@@ -338,27 +344,9 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
                       ),
                     ),
                   const SizedBox(height: 5),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: _T.accent.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text('OB ₹${_obFmt(_ob)}',
-                            style: const TextStyle(
-                                color: _T.accent,
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600)),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                          '${widget.bills.length} bill${widget.bills.length == 1 ? '' : 's'}',
-                          style: const TextStyle(
-                              color: _T.muted, fontSize: 10)),
-                    ],
+                  Text(
+                    '${widget.bills.length} bill${widget.bills.length == 1 ? '' : 's'}',
+                    style: const TextStyle(color: _T.muted, fontSize: 10),
                   ),
                 ],
               ),
@@ -367,11 +355,34 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('₹${fmt.format(totalBills)}',
-                    style: const TextStyle(
-                        color: _T.text,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13)),
+                // Opening balance shown as OB: amount
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _T.accent.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: const Text('OB',
+                          style: TextStyle(
+                              color: _T.accent,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.3)),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '₹${_obFmt(_ob)}',
+                      style: const TextStyle(
+                          color: _T.text,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 5),
                 _Pill(
                   label: settled
@@ -812,8 +823,8 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _IconBtn extends StatelessWidget {
-  final IconData icon;
-  final String   tooltip;
+  final IconData     icon;
+  final String       tooltip;
   final VoidCallback onTap;
   const _IconBtn(
       {required this.icon,
@@ -833,8 +844,8 @@ class _IconBtn extends StatelessWidget {
             decoration: BoxDecoration(
               color: _T.accent.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
-              border:
-                  Border.all(color: _T.accent.withValues(alpha: 0.18)),
+              border: Border.all(
+                  color: _T.accent.withValues(alpha: 0.18)),
             ),
             child: Icon(icon, color: _T.accent, size: 18),
           ),
