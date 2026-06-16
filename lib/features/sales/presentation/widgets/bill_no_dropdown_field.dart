@@ -44,8 +44,10 @@ class _BillNoDropdownFieldState extends ConsumerState<BillNoDropdownField> {
   String  _activeQuery = '';
   double  _ob = 0.0;
   double _obReceived = 0.0;
- StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _txSub;
- Map<String, double> _receivedPerBill = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _txSub;
+  Map<String, double> _receivedPerBill = {};
+
+  bool _isExpanded = true;
 
   @override
   void initState() {
@@ -58,6 +60,13 @@ class _BillNoDropdownFieldState extends ConsumerState<BillNoDropdownField> {
     super.didUpdateWidget(old);
     if (old.partyName != widget.partyName) {
       _scheduleDebounce(widget.partyName);
+      if (mounted) setState(() => _isExpanded = true);
+    }
+    // If selection was cleared from outside, re-expand
+    final wasSelected = old.selectedBill != null || old.isObSelected;
+    final nowSelected = widget.selectedBill != null || widget.isObSelected;
+    if (wasSelected && !nowSelected) {
+      if (mounted) setState(() => _isExpanded = true);
     }
   }
 
@@ -92,7 +101,6 @@ class _BillNoDropdownFieldState extends ConsumerState<BillNoDropdownField> {
       if (mounted) setState(() => _bills = bills);
     });
 
-    // Watch party document for opening balance
     _partySub = FirebaseFirestore.instance
         .collection('cashbooks')
         .doc(cashbookId)
@@ -104,50 +112,51 @@ class _BillNoDropdownFieldState extends ConsumerState<BillNoDropdownField> {
       final ob = (doc.data()?['openingBalance'] as num?)?.toDouble() ?? 0.0;
       if (ob != _ob) setState(() => _ob = ob);
     });
+
     _txSub = FirebaseFirestore.instance
-    .collection('cashbooks')
-    .doc(cashbookId)
-    .collection('transactions')
-    .where('type', isEqualTo: 'income')
-    .snapshots()
-    .listen((snap) {
-  if (!mounted) return;
-  double obPaid = 0.0;
-  final perBill = <String, double>{};
-  final q = query.trim().toLowerCase();
-  for (final d in snap.docs) {
-    final raw      = d.data();
-    final linkedId = raw['linkedSaleBillId'] as String?;
-    final amount   = (raw['amount'] as num?)?.toDouble() ?? 0.0;
-    final desc     = (raw['description'] as String? ?? '').toLowerCase();
-    if (linkedId != null && linkedId.isNotEmpty) {
-      perBill[linkedId] = (perBill[linkedId] ?? 0.0) + amount;
-    } else if (desc.contains(q)) {
-      obPaid += amount;
-    }
-  }
-  if (mounted) setState(() {
-    _obReceived      = obPaid;
-    _receivedPerBill = perBill;
-  });
-});
+        .collection('cashbooks')
+        .doc(cashbookId)
+        .collection('transactions')
+        .where('type', isEqualTo: 'income')
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      double obPaid = 0.0;
+      final perBill = <String, double>{};
+      final q = query.trim().toLowerCase();
+      for (final d in snap.docs) {
+        final raw      = d.data();
+        final linkedId = raw['linkedSaleBillId'] as String?;
+        final amount   = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+        final desc     = (raw['description'] as String? ?? '').toLowerCase();
+        if (linkedId != null && linkedId.isNotEmpty) {
+          perBill[linkedId] = (perBill[linkedId] ?? 0.0) + amount;
+        } else if (desc.contains(q)) {
+          obPaid += amount;
+        }
+      }
+      if (mounted) setState(() {
+        _obReceived      = obPaid;
+        _receivedPerBill = perBill;
+      });
+    });
   }
 
   void _cancelStream() {
     _sub?.cancel();
     _sub = null;
     _partySub?.cancel();
-_partySub = null;
-_txSub?.cancel();
-_txSub = null;
-_activeQuery = '';
-final needsRebuild = _bills.isNotEmpty || _ob != 0.0;
-if (needsRebuild) setState(() {
-  _bills           = [];
-  _ob              = 0.0;
-  _obReceived      = 0.0;
-  _receivedPerBill = {};
-});
+    _partySub = null;
+    _txSub?.cancel();
+    _txSub = null;
+    _activeQuery = '';
+    final needsRebuild = _bills.isNotEmpty || _ob != 0.0;
+    if (needsRebuild) setState(() {
+      _bills           = [];
+      _ob              = 0.0;
+      _obReceived      = 0.0;
+      _receivedPerBill = {};
+    });
   }
 
   @override
@@ -155,26 +164,129 @@ if (needsRebuild) setState(() {
     _debounce?.cancel();
     _sub?.cancel();
     _partySub?.cancel();
+    _txSub?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final obRemaining = (_ob - _obReceived).clamp(0.0, double.infinity);
-final hasOb       = obRemaining > 0;
-final pendingBills = _bills.where((b) {
-  final received = _receivedPerBill[b.saleBillId] ?? 0.0;
-  return b.billTotal - received > 0;
-}).toList();
-final hasBills = pendingBills.isNotEmpty;
-    // Show nothing if neither bills nor OB
+    final hasOb = obRemaining > 0;
+    final pendingBills = _bills.where((b) {
+      final received = _receivedPerBill[b.saleBillId] ?? 0.0;
+      return b.billTotal - received > 0;
+    }).toList();
+    final hasBills = pendingBills.isNotEmpty;
+
     if (!hasBills && !hasOb) return const SizedBox.shrink();
 
     final billFmt = NumberFormat('#,##,##0', 'en_IN');
     final obFmt   = NumberFormat('#,##,##0', 'en_IN');
 
-    final anythingSelected =
-        widget.selectedBill != null || widget.isObSelected;
+    final somethingSelected = widget.selectedBill != null || widget.isObSelected;
+
+    // ── Collapsed: show selected summary, tap to re-open ──────────────────
+    if (!_isExpanded && somethingSelected) {
+      return GestureDetector(
+        onTap: () => setState(() => _isExpanded = true),
+        child: Container(
+          margin: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: _bg,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _accent.withValues(alpha: 0.45)),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                widget.isObSelected
+                    ? Icons.account_balance_wallet_rounded
+                    : Icons.receipt_long_rounded,
+                color: widget.isObSelected ? _orange : _accent,
+                size: 16,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: widget.isObSelected
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Opening Balance',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            '₹${obFmt.format(obRemaining)} remaining',
+                            style: const TextStyle(
+                              color: Color(0xFFE05C5C),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.selectedBill!.billNumber,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            widget.selectedBill!.partyName,
+                            style: const TextStyle(
+                                color: _secondary, fontSize: 11),
+                          ),
+                        ],
+                      ),
+              ),
+              if (widget.selectedBill != null) ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '₹${billFmt.format(widget.selectedBill!.billTotal)}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '₹${billFmt.format(widget.selectedBill!.billTotal - (_receivedPerBill[widget.selectedBill!.saleBillId] ?? 0.0))} pending',
+                      style: const TextStyle(
+                        color: Color(0xFFFBBF24),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 6),
+                const Icon(Icons.check_circle_rounded,
+                    color: _accent, size: 16),
+              ],
+              const SizedBox(width: 8),
+              const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: _secondary, size: 18),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ── Expanded: full dropdown ────────────────────────────────────────────
+    final anythingSelected = somethingSelected;
 
     return Container(
       margin: const EdgeInsets.only(top: 12),
@@ -186,7 +298,7 @@ final hasBills = pendingBills.isNotEmpty;
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Header ─────────────────────────────────────────────────────
+          // ── Header ───────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
             child: Row(
@@ -206,7 +318,10 @@ final hasBills = pendingBills.isNotEmpty;
                 const Spacer(),
                 if (anythingSelected)
                   GestureDetector(
-                    onTap: () => widget.onBillSelected(null),
+                    onTap: () {
+                      widget.onBillSelected(null);
+                      setState(() => _isExpanded = true);
+                    },
                     child: const Text(
                       'Clear',
                       style: TextStyle(color: _secondary, fontSize: 11),
@@ -217,10 +332,13 @@ final hasBills = pendingBills.isNotEmpty;
           ),
           const Divider(color: _border, height: 1),
 
-          // ── Opening Balance button (only when OB > 0) ──────────────────
+          // ── Opening Balance button ────────────────────────────────────
           if (hasOb) ...[
             GestureDetector(
-              onTap: () => widget.onObSelected?.call(),
+              onTap: () {
+                widget.onObSelected?.call();
+                setState(() => _isExpanded = false);
+              },
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 margin: const EdgeInsets.fromLTRB(8, 8, 8, 4),
@@ -248,21 +366,22 @@ final hasBills = pendingBills.isNotEmpty;
                       child: Text(
                         'Opening Balance',
                         style: TextStyle(
-                          color:
-                              widget.isObSelected ? _orange : Colors.white,
+                          color: widget.isObSelected
+                              ? _orange
+                              : Colors.white,
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
                         ),
                       ),
                     ),
                     Text(
-  '₹${obFmt.format(obRemaining)} remaining',
-  style: const TextStyle(
-    color: Color(0xFFE05C5C),
-    fontWeight: FontWeight.w700,
-    fontSize: 13,
-  ),
-),
+                      '₹${obFmt.format(obRemaining)} remaining',
+                      style: const TextStyle(
+                        color: Color(0xFFE05C5C),
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
                     if (widget.isObSelected) ...[
                       const SizedBox(width: 6),
                       const Icon(Icons.check_circle_rounded,
@@ -277,22 +396,26 @@ final hasBills = pendingBills.isNotEmpty;
                   color: _border, height: 1, indent: 8, endIndent: 8),
           ],
 
-          // ── Bill list ──────────────────────────────────────────────────
+          // ── Bill list ─────────────────────────────────────────────────
           if (hasBills)
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 200),
               child: ListView.builder(
                 shrinkWrap: true,
                 padding: const EdgeInsets.symmetric(vertical: 4),
-                itemCount:pendingBills.length,
+                itemCount: pendingBills.length,
                 itemBuilder: (context, i) {
                   final bill       = pendingBills[i];
                   final isSelected =
                       widget.selectedBill?.saleBillId == bill.saleBillId;
+                  final pendingAmt =
+                      bill.billTotal - (_receivedPerBill[bill.saleBillId] ?? 0.0);
 
                   return GestureDetector(
-                    onTap: () =>
-                        widget.onBillSelected(isSelected ? null : bill),
+                    onTap: () {
+                      widget.onBillSelected(isSelected ? null : bill);
+                      if (!isSelected) setState(() => _isExpanded = false);
+                    },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
                       margin: const EdgeInsets.symmetric(
@@ -305,8 +428,7 @@ final hasBills = pendingBills.isNotEmpty;
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color:
-                              isSelected ? _accent : Colors.transparent,
+                          color: isSelected ? _accent : Colors.transparent,
                           width: 1,
                         ),
                       ),
@@ -334,13 +456,27 @@ final hasBills = pendingBills.isNotEmpty;
                               ],
                             ),
                           ),
-                          Text(
-                            '₹${billFmt.format(bill.billTotal)}',
-                            style: TextStyle(
-                              color: isSelected ? _accent : _green,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
-                            ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '₹${billFmt.format(bill.billTotal)}',
+                                style: TextStyle(
+                                  color: isSelected ? _accent : Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '₹${billFmt.format(pendingAmt)} pending',
+                                style: const TextStyle(
+                                  color: Color(0xFFFBBF24),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
                           ),
                           if (isSelected) ...[
                             const SizedBox(width: 6),

@@ -931,11 +931,59 @@ class _EditBillSheetState extends ConsumerState<_EditBillSheet> {
   late DateTime _date    = widget.bill.billDate;
   bool _saving           = false;
 
+  // Bill number uniqueness
+  String? _billNoError;
+  Timer?  _billNoDebounce;
+
   static String _fmtAmt(double v) =>
       v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
 
   @override
+  void initState() {
+    super.initState();
+    _billNoCtrl.addListener(_onBillNoChanged);
+  }
+
+  void _onBillNoChanged() {
+    _billNoDebounce?.cancel();
+    final value = _billNoCtrl.text.trim();
+    if (value.isEmpty || value == widget.bill.billNumber) {
+      if (mounted && _billNoError != null) setState(() => _billNoError = null);
+      return;
+    }
+    _billNoDebounce = Timer(
+      const Duration(milliseconds: 600),
+      () => _checkBillNoUnique(value),
+    );
+  }
+
+  Future<void> _checkBillNoUnique(String billNo) async {
+    if (billNo == widget.bill.billNumber) {
+      if (mounted && _billNoError != null) setState(() => _billNoError = null);
+      return;
+    }
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(widget.cashbookId)
+          .collection('sale_bills')
+          .where('billNumber', isEqualTo: billNo)
+          .limit(1)
+          .get();
+      if (!mounted) return;
+      setState(() {
+        _billNoError =
+            snap.docs.isNotEmpty ? 'Bill number already exists' : null;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _billNoError = null);
+    }
+  }
+
+  @override
   void dispose() {
+    _billNoDebounce?.cancel();
+    _billNoCtrl.removeListener(_onBillNoChanged);
     _billNoCtrl.dispose();
     _totalCtrl.dispose();
     _noteCtrl.dispose();
@@ -968,6 +1016,7 @@ class _EditBillSheetState extends ConsumerState<_EditBillSheet> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_billNoError != null) return;
     setState(() => _saving = true);
     try {
       await ref.read(saleBillActionsProvider.notifier).editBill(
@@ -1063,6 +1112,7 @@ class _EditBillSheetState extends ConsumerState<_EditBillSheet> {
                 controller: _billNoCtrl,
                 label: 'Bill Number',
                 icon: Icons.tag_rounded,
+                errorText: _billNoError,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
@@ -1157,6 +1207,7 @@ class _SheetField extends StatelessWidget {
   final TextInputType?           keyboard;
   final FormFieldValidator<String>? validator;
   final int                      maxLines;
+  final String?                  errorText;
 
   const _SheetField({
     required this.controller,
@@ -1165,6 +1216,7 @@ class _SheetField extends StatelessWidget {
     this.keyboard,
     this.validator,
     this.maxLines = 1,
+    this.errorText,
   });
 
   @override
@@ -1180,6 +1232,7 @@ class _SheetField extends StatelessWidget {
           prefixIcon: icon != null
               ? Icon(icon, color: _T.muted, size: 15)
               : null,
+          errorText: errorText,
           filled: true,
           fillColor: _T.surface,
           contentPadding:

@@ -308,9 +308,9 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
     final obRemaining = (ob - obReceived).clamp(0.0, double.infinity);
 
     return _OverflowData(
-      allBills:       allBills,
+      allBills:        allBills,
       receivedPerBill: receivedPerBill,
-      obRemaining:    obRemaining,
+      obRemaining:     obRemaining,
     );
   }
 
@@ -347,7 +347,13 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
       double left  = totalAmount;
       final batch  = db.batch();
 
-      void alloc({required String? linkedBillId, required double amount, required String desc}) {
+      // isOb: when true, stamps isObPayment + obPartyName on the document
+      void alloc({
+        required String? linkedBillId,
+        required double  amount,
+        required String  desc,
+        bool             isOb = false,
+      }) {
         if (amount <= 0) return;
         final ref = txColl.doc();
         batch.set(ref, {
@@ -361,6 +367,8 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
           'createdBy':        createdBy,
           'creatorName':      createdByName,
           'createdAt':        Timestamp.fromDate(createdAt),
+          if (isOb) 'isObPayment': true,
+          if (isOb) 'obPartyName': partyName.trim(),
         });
       }
 
@@ -390,6 +398,7 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
           linkedBillId: null,
           amount:       toOb,
           desc:         'Opening balance payment – $partyName',
+          isOb:         true,
         );
       }
 
@@ -454,7 +463,13 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
       double left  = totalAmount;
       final batch  = db.batch();
 
-      void alloc({required String? linkedBillId, required double amount, required String desc}) {
+      // isOb: when true, stamps isObPayment + obPartyName on the document
+      void alloc({
+        required String? linkedBillId,
+        required double  amount,
+        required String  desc,
+        bool             isOb = false,
+      }) {
         if (amount <= 0) return;
         final ref = txColl.doc();
         batch.set(ref, {
@@ -468,6 +483,8 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
           'createdBy':        createdBy,
           'creatorName':      createdByName,
           'createdAt':        Timestamp.fromDate(createdAt),
+          if (isOb) 'isObPayment': true,
+          if (isOb) 'obPartyName': partyName.trim(),
         });
       }
 
@@ -484,6 +501,7 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
         linkedBillId: null,
         amount:       toOb,
         desc:         obDesc,
+        isOb:         true,
       );
 
       // 2. Overflow to pending bills (oldest first / FIFO, skip fully received ones)
@@ -533,6 +551,28 @@ final saleBillActionsProvider =
     AsyncNotifierProvider<SaleBillActionsNotifier, void>(
   SaleBillActionsNotifier.new,
 );
+
+/// Maps billId → billNumber for all bills in the current cashbook.
+/// Used by the transaction list and details sheet for quick, widget-local lookup.
+final saleBillNumberMapProvider = StreamProvider<Map<String, String>>((ref) {
+  final cashbookId = ref.watch(currentCashbookIdProvider);
+  if (cashbookId == null) return Stream.value({});
+
+  return FirebaseFirestore.instance
+      .collection('cashbooks')
+      .doc(cashbookId)
+      .collection('sale_bills')
+      .snapshots()
+      .map((snap) {
+    final map = <String, String>{};
+    for (final doc in snap.docs) {
+      final id  = doc.data()['saleBillId'] as String? ?? doc.id;
+      final num = doc.data()['billNumber'] as String? ?? '';
+      if (id.isNotEmpty) map[id] = num;
+    }
+    return map;
+  });
+});
 
 // ── Internal helpers used by overflow methods ─────────────────────────────────
 

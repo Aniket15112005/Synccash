@@ -1,17 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:synccash/core/utils/currency_formatter.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
+import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
 
-class TransactionDetailsSheet extends StatelessWidget {
+class TransactionDetailsSheet extends ConsumerWidget {
   final TransactionEntity transaction;
   const TransactionDetailsSheet({super.key, required this.transaction});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isIncome = transaction.type.toLowerCase() == 'income';
     final amountStr =
         '${isIncome ? '+' : '−'}₹${CurrencyFormatter.format(transaction.amount)}';
+
+    // Bill number lookup from live map (no extra Firestore read needed)
+    final _billMap    = ref.watch(saleBillNumberMapProvider).asData?.value ?? {};
+    final _linkedId   = transaction.linkedSaleBillId;
+    final _billNumber = (_linkedId != null && _linkedId.isNotEmpty)
+        ? _billMap[_linkedId]
+        : null;
+    final _hasBillNo  = _billNumber != null && _billNumber.isNotEmpty;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
@@ -100,8 +110,14 @@ class TransactionDetailsSheet extends StatelessWidget {
         _DetailRow(
           label: 'Time',
           value: DateFormat('hh:mm a').format(transaction.createdAt),
-          isLast: true,
+          isLast: !_hasBillNo,
         ),
+        if (_hasBillNo)
+          _DetailRow(
+            label: 'Bill No.',
+            value: _billNumber!,
+            isLast: true,
+          ),
       ]),
     );
   }

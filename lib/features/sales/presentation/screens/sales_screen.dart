@@ -711,10 +711,49 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
   double? _fetchedOB;
   bool    _obFetching = false;
 
+  // Bill number uniqueness
+  String? _billNoError;
+  Timer?  _billNoDebounce;
+
   @override
   void initState() {
     super.initState();
     _partyCtrl.addListener(_onPartyChanged);
+    _billNoCtrl.addListener(_onBillNoChanged);
+  }
+
+  void _onBillNoChanged() {
+    _billNoDebounce?.cancel();
+    final value = _billNoCtrl.text.trim();
+    if (value.isEmpty) {
+      if (mounted && _billNoError != null) setState(() => _billNoError = null);
+      return;
+    }
+    _billNoDebounce = Timer(
+      const Duration(milliseconds: 600),
+      () => _checkBillNoUnique(value),
+    );
+  }
+
+  Future<void> _checkBillNoUnique(String billNo) async {
+    final cashbookId = ref.read(currentCashbookIdProvider);
+    if (cashbookId == null || !mounted) return;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('sale_bills')
+          .where('billNumber', isEqualTo: billNo)
+          .limit(1)
+          .get();
+      if (!mounted) return;
+      setState(() {
+        _billNoError =
+            snap.docs.isNotEmpty ? 'Bill number already exists' : null;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _billNoError = null);
+    }
   }
 
   void _onPartyChanged() {
@@ -759,7 +798,9 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
   @override
   void dispose() {
     _obTimer?.cancel();
+    _billNoDebounce?.cancel();
     _partyCtrl.removeListener(_onPartyChanged);
+    _billNoCtrl.removeListener(_onBillNoChanged);
     _partyCtrl.dispose();
     _billNoCtrl.dispose();
     _totalCtrl.dispose();
@@ -793,6 +834,7 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_billNoError != null) return;
     final cashbookId = ref.read(currentCashbookIdProvider);
     if (cashbookId == null) return;
     final user = FirebaseAuth.instance.currentUser;
@@ -990,7 +1032,9 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
                 controller: _billNoCtrl,
                 style: const TextStyle(color: _T.text),
                 decoration: _fieldDec('Bill Number',
-                    hint: 'e.g. INV-001', icon: Icons.tag_rounded),
+                    hint: 'e.g. INV-001', icon: Icons.tag_rounded).copyWith(
+                  errorText: _billNoError,
+                ),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),

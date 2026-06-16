@@ -12,6 +12,7 @@ import 'package:synccash/features/transactions/domain/entities/transaction_entit
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
 import 'package:synccash/features/transactions/presentation/widgets/transaction_details_sheet.dart';
 import 'package:synccash/features/transactions/data/services/recycle_bin_service.dart';
+import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
 
 final _timeFmt = DateFormat('hh:mm a');
 final _dateFmt = DateFormat('dd MMM yyyy');
@@ -151,6 +152,12 @@ class TransactionListItem extends ConsumerWidget {
     final timeStr = _timeFmt.format(transaction.createdAt);
     final amountStr =
         '${isIncome ? '+' : '−'}₹${CurrencyFormatter.format(transaction.amount)}';
+    // Bill number lookup
+    final _billMap = ref.watch(saleBillNumberMapProvider).asData?.value ?? {};
+    final _linkedId = transaction.linkedSaleBillId;
+    final _billNo = (_linkedId != null && _linkedId.isNotEmpty)
+        ? _billMap[_linkedId]
+        : null;
 
     return RepaintBoundary(
       child: GestureDetector(
@@ -226,6 +233,17 @@ class TransactionListItem extends ConsumerWidget {
                                   : const Color(0xD0A5B0C0),
                             ),
                           ),
+                          if (_billNo != null && _billNo.isNotEmpty) ...[ 
+                            const SizedBox(height: 2),
+                            Text(
+                              'B.no: $_billNo',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF6B7280),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 4),
                           Text(
                             '${_dateFmt.format(transaction.createdAt)}  ·  $timeStr',
