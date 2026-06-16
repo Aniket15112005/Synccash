@@ -447,11 +447,11 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
               color: _T.bg,
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
               child: _ThreeStats(
-                billed:         _totalBilled,
-                received:       _totalReceived,
-                closingBalance: closingBalance,
-                fmt:            fmt,
-              ),
+  billed:         ob + _totalBilled,
+  received:       _totalAllReceived,
+  closingBalance: closingBalance,
+  fmt:            fmt,
+),
             ),
           ),
 
@@ -1237,7 +1237,7 @@ class _ThreeStats extends StatelessWidget {
             children: [
               Expanded(
                 child: _StatBlock(
-                    label: 'BILLED',
+                    label: 'TOTAL AMOUNT',
                     value: '₹${fmt.format(billed)}',
                     color: _T.text2)),
               Container(width: 1, color: _T.line2),
