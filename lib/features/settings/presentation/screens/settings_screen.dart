@@ -20,6 +20,7 @@ import 'package:intl/intl.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:flutter/foundation.dart';
 import 'package:synccash/features/settings/presentation/screens/widgets/recycle_bin_sheet.dart';
+import 'package:synccash/features/sales/presentation/sales_routes.dart';
 import 'package:synccash/features/sales/presentation/screens/sales_screen.dart';
 
 class SettingsSheet extends ConsumerStatefulWidget {
@@ -151,9 +152,7 @@ class _MainSheet extends StatelessWidget {
               Navigator.pop(context);
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const SalesScreen(),
-                ),
+                salesRoute(const SalesScreen()),
               );
             },
             trailing: const _ChevronIcon(),

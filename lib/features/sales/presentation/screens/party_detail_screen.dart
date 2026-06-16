@@ -231,17 +231,22 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _idSub = ref.listenManual<String?>(
-        currentCashbookIdProvider,
-        (_, next) {
-          if (next != null && next.isNotEmpty && next != _cashbookId) {
-            _cashbookId = next;
-            _cancelStreams();
-            _start(next);
-          }
-        },
-        fireImmediately: true,
-      );
+      // Delay past the route-transition duration (260 ms forward / 220 ms reverse)
+      // so Firestore local-cache emissions don't call setState mid-animation.
+      Future.delayed(const Duration(milliseconds: 310), () {
+        if (!mounted) return;
+        _idSub = ref.listenManual<String?>(
+          currentCashbookIdProvider,
+          (_, next) {
+            if (next != null && next.isNotEmpty && next != _cashbookId) {
+              _cashbookId = next;
+              _cancelStreams();
+              _start(next);
+            }
+          },
+          fireImmediately: true,
+        );
+      });
     });
   }
 
@@ -577,38 +582,9 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
 
     return Stack(
       children: [
-        // Background
-        Container(
-          color: _T.bg,
-          child: RepaintBoundary(
-            child: CustomPaint(
-              painter: _DotPainter(
-                opacity: (((1 - progress) * 0.35) * 100).round() / 100,
-              ),
-              child: const SizedBox.expand(),
-            ),
-          ),
-        ),
+        // Clean solid background — no dot painter, no glow
+        Container(color: _T.bg),
 
-        // Subtle glow blob
-        if (progress < 0.8)
-          Positioned(
-            right: -30,
-            top: -30,
-            child: Opacity(
-              opacity: (1 - progress).clamp(0.0, 1.0),
-              child: Container(
-                width: 200, height: 200,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(colors: [
-                    _partyColor(partyName).withValues(alpha: 0.10),
-                    Colors.transparent,
-                  ]),
-                ),
-              ),
-            ),
-          ),
 
         // Collapsed: flat bar with name
         if (collapsed)
@@ -664,7 +640,7 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
                             decoration: BoxDecoration(
                               color: _partyColor(partyName)
                                   .withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(28),
                               border: Border.all(
                                 color: _partyColor(partyName)
                                     .withValues(alpha: 0.28),
@@ -754,131 +730,112 @@ class _BillRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final settled  = remaining <= 0;
     final partial  = received > 0 && remaining > 0;
-    final Color stripe =
+    final Color statusColor =
         settled ? _T.green : (partial ? _T.amber : _T.red);
 
-    return Column(
-      children: [
-        GestureDetector(
-          onTap: onTap,
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Left stripe
-                Container(
-                  width: 4,
-                  color: stripe.withValues(alpha: 0.7),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: _T.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _T.line2),
+          ),
+          padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+          child: Row(
+            children: [
+              // Status icon
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: statusColor.withValues(alpha: 0.18)),
                 ),
+                child: Icon(Icons.receipt_rounded,
+                    color: statusColor, size: 16),
+              ),
+              const SizedBox(width: 12),
 
-                // Content
-                Expanded(
-                  child: Container(
-                    color: _T.bg,
-                    padding: const EdgeInsets.fromLTRB(16, 14, 6, 14),
-                    child: Row(
-                      children: [
-                        // Status icon
-                        Container(
-                          width: 32, height: 32,
-                          decoration: BoxDecoration(
-                            color: stripe.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(7),
-                            border: Border.all(
-                                color: stripe.withValues(alpha: 0.18)),
-                          ),
-                          child: Icon(Icons.receipt_rounded,
-                              color: stripe, size: 14),
-                        ),
-                        const SizedBox(width: 12),
+              // Bill no + date
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      bill.billNumber,
+                      style: const TextStyle(
+                        color: _T.text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      dateFmt.format(bill.billDate),
+                      style: const TextStyle(
+                          color: _T.muted2, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
 
-                        // Bill no + date
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                bill.billNumber,
-                                style: const TextStyle(
-                                  color: _T.text,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -0.2,
-                                ),
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                dateFmt.format(bill.billDate),
-                                style: const TextStyle(
-                                    color: _T.muted2, fontSize: 11),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // Amount + status
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              '₹${fmt.format(bill.billTotal)}',
-                              style: const TextStyle(
-                                color: _T.text,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.4,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            if (settled)
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.check_rounded,
-                                      color: _T.green, size: 11),
-                                  const SizedBox(width: 2),
-                                  const Text('Settled',
-                                      style: TextStyle(
-                                          color: _T.green,
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700)),
-                                ],
-                              )
-                            else
-                              Text(
-                                '₹${fmt.format(remaining)} due',
-                                style: TextStyle(
-                                    color: _T.amber.withValues(alpha: 0.8),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600),
-                              ),
-                          ],
-                        ),
-
-                        // 3-dot menu
-                        if (onEdit != null || onDelete != null)
-                          _BillMenu(
-                              onEdit:   onEdit,
-                              onDelete: onDelete)
-                        else
-                          Padding(
-                            padding: const EdgeInsets.only(left: 6),
-                            child: Icon(Icons.chevron_right_rounded,
-                                color: _T.muted.withValues(alpha: 0.3),
-                                size: 14),
-                          ),
-                      ],
+              // Amount + status pill
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '₹${fmt.format(bill.billTotal)}',
+                    style: const TextStyle(
+                      color: _T.text,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
                     ),
                   ),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: statusColor.withValues(alpha: 0.22)),
+                    ),
+                    child: Text(
+                      settled
+                          ? 'Settled'
+                          : '₹${fmt.format(remaining)} due',
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              // Menu / chevron
+              if (onEdit != null || onDelete != null)
+                _BillMenu(onEdit: onEdit, onDelete: onDelete)
+              else
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Icon(Icons.chevron_right_rounded,
+                      color: _T.muted.withValues(alpha: 0.3), size: 16),
                 ),
-              ],
-            ),
+            ],
           ),
         ),
-        Container(height: 1, color: _T.line),
-      ],
+      ),
     );
   }
 }
@@ -1250,21 +1207,36 @@ class _ThreeStats extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Row(
-        children: [
-          _StatBlock(
-              label: 'BILLED',
-              value: '₹${fmt.format(billed)}',
-              color: _T.text2),
-          _StatBlock(
-              label: 'RECEIVED',
-              value: '₹${fmt.format(received)}',
-              color: received > 0 ? _T.green : _T.muted2),
-          _StatBlock(
-              label: 'DUE',
-              value: due > 0 ? '₹${fmt.format(due)}' : '—',
-              color: due > 0 ? _T.amber : _T.muted),
-        ],
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          color: _T.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _T.line2),
+        ),
+        child: IntrinsicHeight(
+          child: Row(
+            children: [
+              Expanded(
+                child: _StatBlock(
+                    label: 'BILLED',
+                    value: '₹${fmt.format(billed)}',
+                    color: _T.text2)),
+              Container(width: 1, color: _T.line2),
+              Expanded(
+                child: _StatBlock(
+                    label: 'RECEIVED',
+                    value: '₹${fmt.format(received)}',
+                    color: received > 0 ? _T.green : _T.muted2)),
+              Container(width: 1, color: _T.line2),
+              Expanded(
+                child: _StatBlock(
+                    label: 'DUE',
+                    value: due > 0 ? '₹${fmt.format(due)}' : '—',
+                    color: due > 0 ? _T.amber : _T.muted)),
+            ],
+          ),
+        ),
       );
 }
 
@@ -1276,7 +1248,9 @@ class _StatBlock extends StatelessWidget {
       {required this.label, required this.value, required this.color});
 
   @override
-  Widget build(BuildContext context) => Expanded(
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
