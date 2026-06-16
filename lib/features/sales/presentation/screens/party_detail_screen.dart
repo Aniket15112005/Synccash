@@ -344,6 +344,10 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
 
   double get _totalBilled   => _bills.fold(0.0, (s, b) => s + b.billTotal);
   double get _totalReceived => _bills.fold(0.0, (s, b) => s + _recForBill(b));
+  // Always includes unlinked (OB / description-matched) payments — used for closing balance
+  double get _totalAllReceived =>
+      _bills.fold(0.0, (s, b) => s + (_received[b.saleBillId] ?? 0.0))
+      + (_received['_unlinked'] ?? 0.0);
   double get _totalDue =>
       (_totalBilled - _totalReceived).clamp(0.0, double.infinity);
   double get _pct =>
@@ -420,7 +424,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     final fmt     = NumberFormat('#,##,##0.##');
     final dateFmt = DateFormat('dd MMM yy');
     final ob      = _party?.openingBalance ?? 0.0;
-    final closingBalance = ob + _totalBilled - _totalReceived;
+    final closingBalance = ob + _totalBilled - _totalAllReceived;
     final recent  = _bills.take(_kPage).toList();
     final hasMore = _bills.length > _kPage;
 
@@ -464,6 +468,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
             SliverToBoxAdapter(
               child: _OBRow(
                 ob:       ob,
+                obPaid:   _received['_unlinked'] ?? 0.0,
                 fmt:      fmt,
                 onDelete: _deleteOB,
               ),
@@ -1354,10 +1359,11 @@ class _FullWidthProgress extends StatelessWidget {
 
 class _OBRow extends StatelessWidget {
   final double       ob;
+  final double       obPaid;
   final NumberFormat fmt;
   final VoidCallback onDelete;
   const _OBRow(
-      {required this.ob, required this.fmt, required this.onDelete});
+      {required this.ob, required this.obPaid, required this.fmt, required this.onDelete});
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1438,6 +1444,47 @@ class _OBRow extends StatelessWidget {
               ],
             ),
           ),
+          if (obPaid > 0)
+            Container(
+              color: _T.bg,
+              padding: const EdgeInsets.fromLTRB(62, 6, 16, 12),
+              child: obPaid >= ob
+                  ? const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle_rounded,
+                            color: Color(0xFF4ADE80), size: 13),
+                        SizedBox(width: 6),
+                        Text(
+                          'Opening Balance Cleared',
+                          style: TextStyle(
+                              color: Color(0xFF4ADE80),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.2),
+                        ),
+                      ],
+                    )
+                                    : Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '₹${fmt.format(obPaid)} paid',
+                          style: const TextStyle(
+                              color: Color(0xFF7BA8C4),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900),
+                        ),
+                        Text(
+                          '₹${fmt.format((ob - obPaid).clamp(0.0, double.infinity))} remaining',
+                          style: const TextStyle(
+                              color: Color(0xFF4A5568),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+            ),
           Container(height: 1, color: _T.line),
         ],
       );

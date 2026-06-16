@@ -47,6 +47,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
 
   // ADDED: tracks the bill selected from the dropdown
   SaleBillEntity? _selectedBill;
+  bool _isObPayment = false; // ADDED: tracks if OB payment is selected
 
   late final AnimationController _btnCtrl;
   late final Animation<double>   _btnScale;
@@ -104,7 +105,7 @@ void initState() {
     // ADDED: clear selected bill when switching away from Wholesale
     setState(() {
       _category = cat;
-      if (cat != 'Wholesale') _selectedBill = null;
+      if (cat != 'Wholesale') { _selectedBill = null; _isObPayment = false; }
     });
   }
 
@@ -259,7 +260,10 @@ void initState() {
     partyName: _descCtrl.text,
     selectedBill: _selectedBill,
     onBillSelected: (bill) =>
-        setState(() => _selectedBill = bill),
+        setState(() { _selectedBill = bill; _isObPayment = false; }),
+    isObSelected: _isObPayment,
+    onObSelected: () =>
+        setState(() { _isObPayment = true; _selectedBill = null; }),
   ),
                           const SizedBox(height: 24),
                           const _FieldLabel('Date'),

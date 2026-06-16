@@ -103,18 +103,56 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
               onPressed: () => Navigator.of(context).pop(),
             ),
             actions: [
-              _IconBtn(
-                icon: Icons.account_balance_wallet_outlined,
-                tooltip: 'Client Balances',
-                onTap: () => Navigator.of(context).push(
-                  _slideRoute(const ManageOpeningBalanceScreen()),
+              GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  Navigator.of(context).push(
+                      _slideRoute(const ManageOpeningBalanceScreen()));
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: _T.accent.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: _T.accent.withValues(alpha: 0.22)),
+                  ),
+                  child: const Text('Opening Bal.',
+                      style: TextStyle(
+                          color: _T.accent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700)),
                 ),
               ),
               const SizedBox(width: 8),
-              _IconBtn(
-                icon: Icons.add_rounded,
-                tooltip: 'New Bill',
-                onTap: () => _addBill(context),
+              GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  _addBill(context);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 7),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF6C7FE4), Color(0xFF8B5CF6)],
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _T.accent.withValues(alpha: 0.30),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Text('+ Add Bill',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700)),
+                ),
               ),
               const SizedBox(width: 16),
             ],
@@ -222,16 +260,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _addBill(context),
-        backgroundColor: _T.accent,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        icon: const Icon(Icons.add_rounded, size: 20),
-        label: const Text('New Bill',
-            style: TextStyle(
-                fontWeight: FontWeight.w700, fontSize: 14)),
-      ),
+
     );
   }
 }
@@ -262,8 +291,9 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
   ProviderSubscription<String?>?        _idSub;
   String?                               _cashbookId;
 
-  double _received = 0.0;
-  double _ob       = 0.0;
+  double _billReceived = 0.0;
+  double _obReceived   = 0.0;
+  double _ob           = 0.0;
   String _place    = '';
 
   @override
@@ -302,19 +332,20 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      double total = 0.0;
+      double billTotal = 0.0;
+      double obTotal   = 0.0;
       for (final d in snap.docs) {
         final raw      = d.data();
         final linkedId = raw['linkedSaleBillId'] as String?;
         final amount   = (raw['amount'] as num?)?.toDouble() ?? 0.0;
         final desc     = (raw['description'] as String? ?? '').toLowerCase();
         if (linkedId != null && linkedId.isNotEmpty) {
-          if (billIds.contains(linkedId)) total += amount;
+          if (billIds.contains(linkedId)) billTotal += amount;
         } else if (desc.contains(q)) {
-          total += amount;
+          obTotal += amount;
         }
       }
-      setState(() => _received = total);
+      setState(() { _billReceived = billTotal; _obReceived = obTotal; });
     });
 
     _partySub = FirebaseFirestore.instance
@@ -352,10 +383,10 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
     final totalBill = widget.bills
         .fold<double>(0.0, (s, b) => s + b.billTotal);
     final outstanding =
-        (totalBill - _received).clamp(0.0, double.infinity);
-    final closingBalance = _ob + totalBill - _received;
-    final settled = outstanding <= 0;
-    final partial = _received > 0 && outstanding > 0;
+        (totalBill - _billReceived).clamp(0.0, double.infinity);
+    final closingBalance = (_ob + totalBill - _billReceived - _obReceived).clamp(0.0, double.infinity);
+    final settled = closingBalance <= 0;
+    final partial = (_billReceived + _obReceived) > 0 && !settled;
     final statusColor =
         settled ? _T.green : (partial ? _T.amber : _T.red);
     final lastBill = widget.bills.isNotEmpty
@@ -371,22 +402,40 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
       },
       child: Container(
         decoration: BoxDecoration(
-          color: _T.card,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _T.border),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF0F1318), Color(0xFF111520)],
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _T.border.withValues(alpha: 0.9)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 20,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Status stripe
+              // Left status stripe
               Container(
                 width: 3,
                 decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.8),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      statusColor,
+                      statusColor.withValues(alpha: 0.35),
+                    ],
+                  ),
                   borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(12),
-                    bottomLeft: Radius.circular(12),
+                    topLeft: Radius.circular(20),
+                    bottomLeft: Radius.circular(20),
                   ),
                 ),
               ),
@@ -394,105 +443,183 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
               // Main content
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 13, 10, 13),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                  padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _CircleAvatar(name: widget.partyName, size: 42),
-                      const SizedBox(width: 12),
-
-                      // Left: party name + tags
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              widget.partyName,
-                              style: const TextStyle(
-                                  color: _T.text,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14,
-                                  letterSpacing: -0.2),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 5),
-                            Wrap(
-                              spacing: 5,
-                              runSpacing: 4,
+                      // Top row: avatar + name/tags + closing balance
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _GradientAvatar(
+                              name: widget.partyName, size: 42),
+                          const SizedBox(width: 12),
+                          // Name + OB badge + sub-tags
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _Tag(
-                                  label: '${widget.bills.length} bill'
-                                      '${widget.bills.length == 1 ? '' : 's'}',
-                                  color: _T.muted,
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        widget.partyName,
+                                        style: const TextStyle(
+                                          color: _T.text,
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 15,
+                                          letterSpacing: -0.3,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (_ob > 0) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets
+                                            .symmetric(
+                                                horizontal: 6,
+                                                vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: _T.accent
+                                              .withValues(alpha: 0.12),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                          border: Border.all(
+                                              color: _T.accent.withValues(
+                                                  alpha: 0.25)),
+                                        ),
+                                        child: Text(
+                                          'OB ₹${fmt.format(_ob)}',
+                                          style: const TextStyle(
+                                            color: _T.accent,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                                if (_place.isNotEmpty)
-                                  _Tag(
-                                    label: _place,
-                                    icon: Icons.location_on_rounded,
-                                    color: _T.muted,
-                                  ),
-                                if (_ob > 0)
-                                  _Tag(
-                                    label: 'OB ₹${fmt.format(_ob)}',
-                                    color: _T.accent,
-                                    filled: true,
-                                  ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Text(
+                                      '${widget.bills.length} bill'
+                                      '${widget.bills.length == 1 ? '' : 's'}',
+                                      style: const TextStyle(
+                                        color: _T.muted,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    if (_place.isNotEmpty) ...[
+                                      const SizedBox(width: 6),
+                                      const Text('·',
+                                          style: TextStyle(
+                                              color: _T.muted,
+                                              fontSize: 10)),
+                                      const SizedBox(width: 6),
+                                      Text(_place,
+                                          style: const TextStyle(
+                                              color: _T.muted,
+                                              fontSize: 11)),
+                                    ],
+                                  ],
+                                ),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-
-                      // Right: bill total + status pill + last bill date
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            '₹${fmt.format(closingBalance)}',
-                            style: const TextStyle(
-                              color: _T.darkOrange,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 16,
-                              letterSpacing: -0.4,
-                            ),
                           ),
-                          const SizedBox(height: 5),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: statusColor.withValues(alpha: 0.10),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                  color: statusColor.withValues(alpha: 0.25)),
-                            ),
-                            child: Text(
-                              settled
-                                  ? '✓ Settled'
-                                  : '₹${fmt.format(outstanding)} due',
-                              style: TextStyle(
-                                  color: statusColor,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700),
-                            ),
+                          const SizedBox(width: 8),
+                          // Right: closing balance + bills/due
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              const Text(
+                                'Closing Bal.',
+                                style: TextStyle(
+                                  color: _T.muted,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '₹${fmt.format(closingBalance)}',
+                                style: const TextStyle(
+                                  color: _T.darkOrange,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
+                              if (!settled && outstanding > 0) ...[
+  const SizedBox(height: 4),
+  Text(
+    '₹${fmt.format(outstanding)} due',
+    style: const TextStyle(
+      color: Color(0xFFB8860B),
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+    ),
+    textAlign: TextAlign.right,
+  ),
+],
+                            ],
                           ),
-                          if (lastBill != null) ...[
-                            const SizedBox(height: 5),
-                            Text(
-                              dateFmt.format(lastBill.billDate),
-                              style: const TextStyle(
-                                  color: _T.muted, fontSize: 10),
-                            ),
-                          ],
                         ],
                       ),
-                      const SizedBox(width: 4),
-                      Icon(Icons.chevron_right_rounded,
-                          color: _T.muted.withValues(alpha: 0.3), size: 16),
+                      // Divider
+                      Container(
+                        height: 1,
+                        margin: const EdgeInsets.symmetric(vertical: 11),
+                        color: _T.border.withValues(alpha: 0.8),
+                      ),
+                      // Bottom row: status pill + date
+                      Row(
+                        mainAxisAlignment:
+                            MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 9, vertical: 4),
+                            decoration: BoxDecoration(
+                              color:
+                                  statusColor.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: statusColor
+                                      .withValues(alpha: 0.25)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 5, height: 5,
+                                  decoration: BoxDecoration(
+                                    color: statusColor,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  settled
+                                      ? 'Settled'
+                                      : (partial ? 'Partial' : 'Due'),
+                                  style: TextStyle(
+                                    color: statusColor,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                         
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -992,6 +1119,58 @@ InputDecoration _fieldDec(String label,
 // ─────────────────────────────────────────────────────────────────────────────
 //  Shared widgets
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Gradient rounded-rectangle avatar
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _GradientAvatar extends StatelessWidget {
+  final String name;
+  final double size;
+  const _GradientAvatar({required this.name, required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    const gradients = [
+      [Color(0xFF6D28D9), Color(0xFF4F46E5)],
+      [Color(0xFF0284C7), Color(0xFF06B6D4)],
+      [Color(0xFF059669), Color(0xFF0D9488)],
+      [Color(0xFFE11D48), Color(0xFFEC4899)],
+      [Color(0xFFD97706), Color(0xFFEA580C)],
+    ];
+    final idx =
+        name.isNotEmpty ? name.codeUnitAt(0) % gradients.length : 0;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: gradients[idx],
+        ),
+        borderRadius: BorderRadius.circular(size * 0.30),
+        boxShadow: [
+          BoxShadow(
+            color: gradients[idx][0].withValues(alpha: 0.28),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Center(
+        child: Text(
+          name.isNotEmpty ? name[0].toUpperCase() : '?',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: size * 0.40,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _CircleAvatar extends StatelessWidget {
   final String name;
