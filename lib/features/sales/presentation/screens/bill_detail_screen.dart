@@ -175,22 +175,30 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
     final overlayKey = GlobalKey();
     OverlayEntry? entry;
     try {
+      // Fetch cashbook name to show as business header on the receipt
+      String cashbookName = '';
+      if (_cashbookId != null) {
+        final snap = await FirebaseFirestore.instance
+            .collection('cashbooks').doc(_cashbookId).get();
+        cashbookName = (snap.data()?['name'] as String? ?? '').trim();
+      }
+
       entry = OverlayEntry(
         builder: (_) => Positioned(
           left: -5000,
           top: 0,
-          width: 420,
+          width: 520,
           child: Material(
             type: MaterialType.transparency,
             child: RepaintBoundary(
               key: overlayKey,
               child: _BillShareCard(
-                bill:         widget.bill,
-                received:     _received,
-                remaining:    _remaining,
-                settled:      _settled,
-                transactions: List<_TxItem>.from(_transactions),
-                generatedAt:  DateTime.now(),
+                bill:          widget.bill,
+                cashbookName:  cashbookName,
+                received:      _received,
+                remaining:     _remaining,
+                settled:       _settled,
+                transactions:  List<_TxItem>.from(_transactions),
               ),
             ),
           ),
@@ -204,7 +212,7 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
           as RenderRepaintBoundary?;
       if (boundary == null) throw Exception('Render boundary not found');
 
-      final image    = await boundary.toImage(pixelRatio: 3.0);
+      final image    = await boundary.toImage(pixelRatio: 4.0);
       final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       if (byteData == null) throw Exception('Failed to encode image');
 
@@ -1690,40 +1698,36 @@ class _BillMoreMenu extends StatelessWidget {
         ],
       );
 }
-// ─────────────────────────────────────────────────────────────────────────────
-//  Shareable bill card — receipt format (rendered off-screen → HD PNG)
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _BillShareCard extends StatelessWidget {
   final SaleBillEntity bill;
+  final String         cashbookName;
   final double         received;
   final double         remaining;
   final bool           settled;
   final List<_TxItem>  transactions;
-  final DateTime       generatedAt;
 
   const _BillShareCard({
     required this.bill,
+    required this.cashbookName,
     required this.received,
     required this.remaining,
     required this.settled,
     required this.transactions,
-    required this.generatedAt,
   });
 
   @override
   Widget build(BuildContext context) {
     final fmt     = NumberFormat('#,##,##0.00');
     final dateFmt = DateFormat('dd MMM yyyy, h:mm a');
-    final genFmt  = DateFormat('dd MMM yyyy  ·  hh:mm a');
     final partial = received > 0 && remaining > 0;
     final Color balColor = settled ? const Color(0xFF38D68A)
                          : partial ? const Color(0xFFF5A623)
                          :           const Color(0xFFE85C5C);
 
     // Card colours — matches screenshot aesthetic
-    const cOuter  = Color(0xFF1A1C24);
-    const cCard   = Color(0xFF252836);
+    const cOuter  = Color(0xFF0D0F14);
+    const cCard   = Color(0xFF181B24);
     const cLine   = Color(0xFF363844);
     const cLabel  = Color(0xFF8A8FA0);
     const cValue  = Color(0xFFF0F2F8);
@@ -1735,7 +1739,7 @@ class _BillShareCard extends StatelessWidget {
     );
 
     return SizedBox(
-      width: 420,
+      width: 520,
       child: Container(
         color: cOuter,
         padding: const EdgeInsets.all(20),
@@ -1756,7 +1760,7 @@ class _BillShareCard extends StatelessWidget {
                 child: Column(
                   children: [
                     Text(
-                      bill.partyName.toUpperCase(),
+                     'NEELKANTH GARMENTS',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                           color: cHeader,
@@ -1839,15 +1843,7 @@ class _BillShareCard extends StatelessWidget {
                   value: 'Party Ledger',
                   cLabel: cLabel, cValue: cValue),
 
-              // ── Footer ───────────────────────────────────────────────
-              const SizedBox(height: 20),
-              Center(
-                child: Text(
-                  'Generated ${genFmt.format(generatedAt)}',
-                  style: const TextStyle(
-                      color: Color(0xFF4A4F5C), fontSize: 9.5),
-                ),
-              ),
+              const SizedBox(height: 8),
             ],
           ),
         ),
@@ -1856,9 +1852,7 @@ class _BillShareCard extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Receipt row  (label left, value right)
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 class _ReceiptRow extends StatelessWidget {
   final String label;

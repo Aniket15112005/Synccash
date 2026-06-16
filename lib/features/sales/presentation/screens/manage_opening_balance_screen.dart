@@ -298,12 +298,13 @@ class _ManageOpeningBalanceScreenState
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      final names = snap.docs
-          .map((d) => (d['partyName'] as String? ?? '').trim())
-          .where((n) => n.isNotEmpty)
-          .toSet()
-          .toList()
-        ..sort();
+      final nameMap = <String, String>{};
+      for (final d in snap.docs) {
+        final n = (d['partyName'] as String? ?? '').trim();
+        if (n.isEmpty) continue;
+        nameMap.putIfAbsent(n.toLowerCase(), () => n);
+      }
+      final names = nameMap.values.toList()..sort();
       setState(() => _billPartyNames = names);
     }, onError: (_) {});
   }

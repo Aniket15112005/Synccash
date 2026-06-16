@@ -264,13 +264,18 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
     final partyLow = partyName.trim().toLowerCase();
     final cashRef  = db.collection('cashbooks').doc(cashbookId);
 
-    // Bills for this party, sorted oldest first
+    // Bills for this party, sorted oldest first (case-insensitive)
     final billsSnap = await cashRef
         .collection('sale_bills')
-        .where('partyName', isEqualTo: partyName.trim())
         .get();
 
-    final allBills = billsSnap.docs.map((doc) {
+    final allBills = billsSnap.docs
+        .where((doc) =>
+            (doc.data()['partyName'] as String? ?? '')
+                .trim()
+                .toLowerCase() ==
+            partyLow)
+        .map((doc) {
       final d = doc.data();
       return _BillSnapshot(
         id:        d['saleBillId'] as String? ?? doc.id,

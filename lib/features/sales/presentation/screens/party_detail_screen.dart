@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,9 @@ import '../../domain/entities/sale_bill_entity.dart';
 import '../providers/party_provider.dart';
 import '../providers/sale_bill_provider.dart';
 import 'bill_detail_screen.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:share_plus/share_plus.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Design tokens — minimalist grey aesthetic (matches sales_screen)
@@ -282,11 +286,16 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         .collection('cashbooks')
         .doc(cashbookId)
         .collection('sale_bills')
-        .where('partyName', isEqualTo: partyName)
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      final list = snap.docs.map((doc) {
+      final list = snap.docs
+          .where((doc) =>
+              (doc.data()['partyName'] as String? ?? '')
+                  .trim()
+                  .toLowerCase() ==
+              partyLow)
+          .map((doc) {
         final d = doc.data();
         return SaleBillEntity(
           saleBillId:        d['saleBillId'] as String? ?? doc.id,
@@ -470,6 +479,850 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     );
   }
 
+  // ── Generate & Share PDF ────────────────────────────────────────────────────
+  Future<void> _generateAndSharePdf() async {
+    if (_bills.isEmpty) {
+      _snack(context, 'No bills to share', ok: false);
+      return;
+    }
+    HapticFeedback.mediumImpact();
+
+    // ── TO UPDATE YOUR COMPANY NAME: change the string below ─────────────────
+    const companyName = 'Neelkant Garments';
+    // ─────────────────────────────────────────────────────────────────────────
+
+    final fmt     = NumberFormat('#,##,##0.##');
+    final dateFmt = DateFormat('dd MMM yyyy');
+    final now     = dateFmt.format(DateTime.now());
+
+    final ob          = _party?.openingBalance ?? 0.0;
+    final totalBilled = ob + _totalBilled;
+    final totalRcvd   = _totalAllReceived;
+    final closingBal  = ob + _totalBilled - _totalAllReceived;
+
+    // Group payments by bill ID, sorted oldest-first
+    final payMap = <String, List<_PaymentRecord>>{};
+    for (final p in _payments) {
+      if (p.linkedBillId != null) {
+        payMap.putIfAbsent(p.linkedBillId!, () => []).add(p);
+      }
+    }
+    for (final list in payMap.values) {
+      list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    }
+
+    final sorted = List<SaleBillEntity>.from(_bills)
+      ..sort((a, b) => a.billDate.compareTo(b.billDate));
+
+    final clearedCount = sorted.where((b) {
+      final paid = payMap[b.saleBillId]
+              ?.fold(0.0, (s, p) => s + p.amount) ?? 0.0;
+      return paid >= b.billTotal;
+    }).length;
+    final pendingCount = sorted.length - clearedCount;
+
+    // PDF colors
+    final cBlue      = PdfColor.fromHex('1e3a5f');
+    final cWhite     = PdfColors.white;
+    final cGreen     = PdfColor.fromHex('15803d');
+    final cRed       = PdfColor.fromHex('b91c1c');
+    final cGrey      = PdfColor.fromHex('6b7280');
+    final cDarkText  = PdfColor.fromHex('111827');
+    final cLightGrey = PdfColor.fromHex('f9fafb');
+    final cAmber     = PdfColor.fromHex('f59e0b');
+    final cLightBlue = PdfColor.fromHex('eff6ff');
+    final cLightGrn  = PdfColor.fromHex('f0fdf4');
+    final cLightRed  = PdfColor.fromHex('fff1f2');
+    final cSubGrey   = PdfColor.fromHex('9ca3af');
+    final cMidDark   = PdfColor.fromHex('374151');
+    final cGrnLight  = PdfColor.fromHex('86efac');
+    final cRedLight  = PdfColor.fromHex('fca5a5');
+
+    // Local helper — one stats box
+    pw.Widget stat(String label, String value,
+            PdfColor valueColor, PdfColor bg) =>
+        pw.Expanded(
+          child: pw.Container(
+            padding: const pw.EdgeInsets.symmetric(
+                horizontal: 10, vertical: 9),
+            decoration: pw.BoxDecoration(
+              color: bg,
+              border:
+                  pw.Border.all(color: PdfColor.fromHex('e5e7eb')),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(label,
+                    style: pw.TextStyle(
+                        color: cGrey, fontSize: 7)),
+                pw.SizedBox(height: 3),
+                pw.Text(value,
+                    style: pw.TextStyle(
+                        color: valueColor,
+                        fontSize: 13,
+                        fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+          ),
+        );
+
+    final doc = pw.Document();
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.symmetric(
+            horizontal: 36, vertical: 36),
+        build: (ctx) => [
+
+          // ── Header bar ──────────────────────────────────────────────
+          pw.Container(
+            decoration: pw.BoxDecoration(color: cBlue),
+            padding: const pw.EdgeInsets.fromLTRB(
+                20, 16, 20, 16),
+            child: pw.Row(
+              mainAxisAlignment:
+                  pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(companyName,
+                    style: pw.TextStyle(
+                        color: cWhite,
+                        fontSize: 20,
+                        fontWeight: pw.FontWeight.bold)),
+                pw.Column(
+                  crossAxisAlignment:
+                      pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text('PARTY STATEMENT',
+                        style: pw.TextStyle(
+                            color:
+                                PdfColor.fromHex('7ab3d8'),
+                            fontSize: 8)),
+                    pw.SizedBox(height: 3),
+                    pw.Text('As of $now',
+                        style: pw.TextStyle(
+                            color: cWhite,
+                            fontSize: 10,
+                            fontWeight:
+                                pw.FontWeight.bold)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // ── Accent bar ──────────────────────────────────────────────
+          pw.Container(
+            height: 3,
+            decoration: pw.BoxDecoration(
+              gradient: pw.LinearGradient(
+                  colors: [cAmber, cBlue]),
+            ),
+          ),
+
+          pw.SizedBox(height: 10),
+
+          // ── Party + summary row ─────────────────────────────────────
+          pw.Row(
+            mainAxisAlignment:
+                pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment:
+                pw.CrossAxisAlignment.center,
+            children: [
+              pw.Column(
+                crossAxisAlignment:
+                    pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('PARTY',
+                      style: pw.TextStyle(
+                          color: cGrey, fontSize: 8)),
+                  pw.SizedBox(height: 2),
+                  pw.Text(widget.partyName,
+                      style: pw.TextStyle(
+                          color: cDarkText,
+                          fontSize: 14,
+                          fontWeight:
+                              pw.FontWeight.bold)),
+                ],
+              ),
+              pw.Text(
+                'Bills: ${sorted.length}   '
+                'Cleared: $clearedCount   '
+                'Pending: $pendingCount',
+                style: pw.TextStyle(
+                    color: cGrey, fontSize: 9),
+              ),
+            ],
+          ),
+
+          pw.SizedBox(height: 10),
+
+          // ── Stats boxes ─────────────────────────────────────────────
+          pw.Row(
+            children: [
+              stat('TOTAL BILLED',
+                  'Rs. ${fmt.format(totalBilled)}',
+                  cBlue, cLightBlue),
+              pw.SizedBox(width: 6),
+              stat('TOTAL RECEIVED',
+                  'Rs. ${fmt.format(totalRcvd)}',
+                  cGreen, cLightGrn),
+              pw.SizedBox(width: 6),
+              stat(
+                'BALANCE DUE',
+                'Rs. ${fmt.format(closingBal.clamp(0.0, double.infinity))}',
+                closingBal > 0 ? cRed : cGreen,
+                closingBal > 0 ? cLightRed : cLightGrn,
+              ),
+            ],
+          ),
+
+          pw.SizedBox(height: 12),
+
+          pw.Text('BILL DETAILS',
+              style: pw.TextStyle(
+                  color: cGrey,
+                  fontSize: 8,
+                  fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 6),
+
+          // ── Bills table ─────────────────────────────────────────────
+          pw.Table(
+            border: pw.TableBorder(
+              bottom: pw.BorderSide(
+                  color: PdfColor.fromHex('e5e7eb')),
+              horizontalInside: pw.BorderSide(
+                  color: PdfColor.fromHex('f0f0f0')),
+            ),
+            columnWidths: const {
+              0: pw.FixedColumnWidth(20),
+              1: pw.FlexColumnWidth(2.2),
+              2: pw.FlexColumnWidth(2.0),
+              3: pw.FlexColumnWidth(2.0),
+              4: pw.FlexColumnWidth(2.0),
+              5: pw.FlexColumnWidth(1.8),
+              6: pw.FlexColumnWidth(2.2),
+            },
+            children: [
+
+              // Header row
+              pw.TableRow(
+                decoration:
+                    pw.BoxDecoration(color: cBlue),
+                children: [
+                  '#', 'Bill No.', 'Bill Date',
+                  'Bill Amt', 'Pay Date', 'Paid',
+                  'Balance / Status',
+                ].asMap().entries.map((e) => pw.Padding(
+                  padding: const pw.EdgeInsets.symmetric(
+                      horizontal: 5, vertical: 7),
+                  child: pw.Text(e.value,
+                      textAlign: e.key == 0
+                          ? pw.TextAlign.center
+                          : e.key >= 3
+                              ? pw.TextAlign.right
+                              : pw.TextAlign.left,
+                      style: pw.TextStyle(
+                          color: cWhite,
+                          fontSize: 8,
+                          fontWeight:
+                              pw.FontWeight.bold)),
+                )).toList(),
+              ),
+
+              // Opening Balance row (first entry if ob > 0)
+              if (ob > 0) ...[
+                () {
+                  final obPays = _payments
+                      .where((p) => p.linkedBillId == null)
+                      .toList()
+                    ..sort((a, b) =>
+                        a.createdAt.compareTo(b.createdAt));
+                  final obPaid = obPays.fold(
+                      0.0, (s, p) => s + p.amount);
+                  final obCleared = obPaid >= ob;
+                  final obRem =
+                      (ob - obPaid).clamp(0.0, double.infinity);
+                  final obPayDate = obPays.isNotEmpty
+                      ? dateFmt.format(obPays.first.createdAt)
+                      : '';
+
+                  pw.Widget obCell(
+                    String text, {
+                    pw.TextAlign align = pw.TextAlign.left,
+                    PdfColor? color,
+                    double size = 8,
+                    bool bold = false,
+                  }) =>
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 7),
+                        child: pw.Text(text,
+                            textAlign: align,
+                            style: pw.TextStyle(
+                                color: color ?? cDarkText,
+                                fontSize: size,
+                                fontWeight: bold
+                                    ? pw.FontWeight.bold
+                                    : pw.FontWeight.normal)),
+                      );
+
+                  return pw.TableRow(
+                    decoration: pw.BoxDecoration(color: cLightBlue),
+                    children: [
+                      obCell('1',
+                          align: pw.TextAlign.center,
+                          color: cSubGrey),
+                      obCell('Opening Balance',
+                          color: cMidDark,
+                          size: 9,
+                          bold: true),
+                      obCell(''),            // date — leave empty
+                      obCell('Rs. ${fmt.format(ob)}',
+                          align: pw.TextAlign.right,
+                          size: 9,
+                          bold: true),
+                      obCell(obPayDate,
+                          align: pw.TextAlign.right,
+                          color: obPayDate.isNotEmpty
+                              ? cMidDark : cSubGrey),
+                      obCell(
+                          obPaid > 0
+                              ? 'Rs. ${fmt.format(obPaid)}'
+                              : '-',
+                          align: pw.TextAlign.right,
+                          color: obPaid > 0 ? cGreen : cSubGrey,
+                          bold: obPaid > 0),
+                      obCleared
+                          ? pw.Padding(
+                              padding: const pw.EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 7),
+                              child: pw.Text('Cleared',
+                                  textAlign: pw.TextAlign.right,
+                                  style: pw.TextStyle(
+                                      color: cGreen,
+                                      fontSize: 8,
+                                      fontWeight: pw.FontWeight.bold)),
+                            )
+                          : obCell('Rs. ${fmt.format(obRem)}',
+                              align: pw.TextAlign.right,
+                              color: cRed,
+                              size: 9,
+                              bold: true),
+                    ],
+                  );
+                }(),
+              ],
+
+              // Data rows
+              ...sorted.asMap().entries.map((entry) {
+                final idx  = entry.key;
+                final bill = entry.value;
+                final pays =
+                    payMap[bill.saleBillId] ?? [];
+                final paid = pays.fold(
+                    0.0, (s, p) => s + p.amount);
+                final rem =
+                    (bill.billTotal - paid)
+                        .clamp(0.0, double.infinity);
+                final cleared = rem <= 0;
+
+                String payDateStr = '-';
+                if (pays.isNotEmpty) {
+                  payDateStr =
+                      dateFmt.format(pays.first.createdAt);
+                  if (pays.length > 1) {
+                    payDateStr +=
+                        ' +${pays.length - 1}';
+                  }
+                }
+
+                final rowBg = idx % 2 == 0
+                    ? cLightGrey
+                    : PdfColors.white;
+
+                pw.Widget cell(
+                  String text, {
+                  pw.TextAlign align =
+                      pw.TextAlign.left,
+                  PdfColor? color,
+                  double size = 8,
+                  bool bold = false,
+                }) =>
+                    pw.Padding(
+                      padding: const pw.EdgeInsets
+                          .symmetric(
+                          horizontal: 5, vertical: 7),
+                      child: pw.Text(text,
+                          textAlign: align,
+                          style: pw.TextStyle(
+                              color: color ?? cDarkText,
+                              fontSize: size,
+                              fontWeight: bold
+                                  ? pw.FontWeight.bold
+                                  : pw.FontWeight
+                                      .normal)),
+                    );
+
+                return pw.TableRow(
+                  decoration:
+                      pw.BoxDecoration(color: rowBg),
+                  children: [
+                    cell('${idx + 1 + (ob > 0 ? 1 : 0)}',
+                        align: pw.TextAlign.center,
+                        color: cSubGrey),
+                    cell(bill.billNumber,
+                        color: cBlue,
+                        size: 9,
+                        bold: true),
+                    cell(dateFmt.format(bill.billDate),
+                        color: PdfColor.fromHex(
+                            '4b5563')),
+                    cell(
+                        'Rs. ${fmt.format(bill.billTotal)}',
+                        align: pw.TextAlign.right,
+                        size: 9,
+                        bold: true),
+                    cell(payDateStr,
+                        align: pw.TextAlign.right,
+                        color: pays.isNotEmpty
+                            ? cMidDark
+                            : cSubGrey),
+                    cell(
+                        paid > 0
+                            ? 'Rs. ${fmt.format(paid)}'
+                            : '-',
+                        align: pw.TextAlign.right,
+                        color:
+                            paid > 0 ? cGreen : cSubGrey,
+                        bold: paid > 0),
+                    cleared
+                        ? pw.Padding(
+                            padding:
+                                const pw.EdgeInsets
+                                    .symmetric(
+                                horizontal: 5,
+                                vertical: 7),
+                            child: pw.Text(
+                              'Bill Cleared',
+                              textAlign:
+                                  pw.TextAlign.right,
+                              style: pw.TextStyle(
+                                  color: cGreen,
+                                  fontSize: 8,
+                                  fontWeight:
+                                      pw.FontWeight
+                                          .bold),
+                            ),
+                          )
+                        : cell(
+                            'Rs. ${fmt.format(rem)}',
+                            align: pw.TextAlign.right,
+                            color: cRed,
+                            size: 9,
+                            bold: true),
+                  ],
+                );
+              }),
+
+              // Totals row
+              pw.TableRow(
+                decoration:
+                    pw.BoxDecoration(color: cBlue),
+                children: [
+                  for (final t in [
+                    ('', pw.TextAlign.left, cWhite, 9.0,
+                        false),
+                    ('Total', pw.TextAlign.left, cWhite,
+                        9.0, true),
+                    ('', pw.TextAlign.left, cWhite, 9.0,
+                        false),
+                    ('Rs. ${fmt.format(totalBilled)}',
+                        pw.TextAlign.right, cWhite, 10.0,
+                        true),
+                    ('', pw.TextAlign.left, cWhite, 9.0,
+                        false),
+                    ('Rs. ${fmt.format(totalRcvd)}',
+                        pw.TextAlign.right, cGrnLight,
+                        10.0, true),
+                    (closingBal > 0
+                        ? 'Rs. ${fmt.format(closingBal)} Due'
+                        : 'Settled',
+                        pw.TextAlign.right,
+                        closingBal > 0
+                            ? cRedLight
+                            : cGrnLight,
+                        9.0, true),
+                  ])
+                    pw.Padding(
+                      padding: const pw.EdgeInsets
+                          .symmetric(
+                          horizontal: 5, vertical: 8),
+                      child: pw.Text(t.$1,
+                          textAlign: t.$2,
+                          style: pw.TextStyle(
+                              color: t.$3,
+                              fontSize: t.$4,
+                              fontWeight: t.$5
+                                  ? pw.FontWeight.bold
+                                  : pw.FontWeight
+                                      .normal)),
+                    ),
+                ],
+              ),
+            ],
+          ),
+
+          pw.SizedBox(height: 16),
+
+          // ── Footer ──────────────────────────────────────────────────
+          pw.Row(
+            mainAxisAlignment:
+                pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment:
+                pw.CrossAxisAlignment.end,
+            children: [
+              pw.Column(
+                crossAxisAlignment:
+                    pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('Notes:',
+                      style: pw.TextStyle(
+                          color: cDarkText,
+                          fontSize: 8,
+                          fontWeight:
+                              pw.FontWeight.bold)),
+                  pw.SizedBox(height: 3),
+                  pw.Text(
+                    '- Amounts in Indian Rupees (Rs.)',
+                    style: pw.TextStyle(
+                        color: cGrey, fontSize: 7.5)),
+                  pw.Text(
+                    '- Multiple payments: earliest date + count',
+                    style: pw.TextStyle(
+                        color: cGrey, fontSize: 7.5)),
+                  pw.Text(
+                    '- Computer-generated statement',
+                    style: pw.TextStyle(
+                        color: cGrey, fontSize: 7.5)),
+                ],
+              ),
+              pw.Column(
+                crossAxisAlignment:
+                    pw.CrossAxisAlignment.center,
+                children: [
+                  pw.SizedBox(height: 28),
+                  pw.Container(
+                    width: 120,
+                    decoration: pw.BoxDecoration(
+                      border: pw.Border(
+                        top: pw.BorderSide(
+                            color: cMidDark),
+                      ),
+                    ),
+                    padding:
+                        const pw.EdgeInsets.only(top: 4),
+                    child: pw.Column(
+                      children: [
+                        pw.Text(
+                          'Authorised Signatory',
+                          textAlign: pw.TextAlign.center,
+                          style: pw.TextStyle(
+                              color: cGrey,
+                              fontSize: 7.5),
+                        ),
+                        pw.SizedBox(height: 2),
+                        pw.Text(
+                          companyName,
+                          textAlign: pw.TextAlign.center,
+                          style: pw.TextStyle(
+                              color: cBlue,
+                              fontSize: 8,
+                              fontWeight:
+                                  pw.FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+          pw.SizedBox(height: 10),
+          pw.Divider(color: cBlue, thickness: 1.5),
+        ],
+      ),
+    );
+
+    final bytes = await doc.save();
+    final safeName = widget.partyName
+        .replaceAll(RegExp(r'[^\w\s]'), '')
+        .replaceAll(' ', '_');
+
+    if (!mounted) return;
+    // XFile.fromData works on web (PWA) + Android without filesystem access
+    await Share.shareXFiles(
+      [XFile.fromData(bytes,
+          name: '${safeName}_statement.pdf',
+          mimeType: 'application/pdf')],
+      subject: '${widget.partyName} — Party Statement',
+    );
+  }
+
+
+  // ── Show Share Options Sheet ──────────────────────────────────────────────
+  void _showShareOptions() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ShareOptionsSheet(
+        onPdf:   _generateAndSharePdf,
+        onImage: _showTransactionPicker,
+      ),
+    );
+  }
+
+  // ── Show Transaction Picker for Image ──────────────────────────────────────
+  void _showTransactionPicker() {
+    if (_payments.isEmpty) {
+      _snack(context, 'No payment entries found', ok: false);
+      return;
+    }
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _TransactionPickerSheet(
+        payments: _payments,
+        bills:    _bills,
+        onSelect: (payment) {
+          Navigator.of(ctx).pop();
+          _generateAndShareImage(payment);
+        },
+      ),
+    );
+  }
+
+  // ── Generate & Share Receipt Image ─────────────────────────────────────────
+  Future<void> _generateAndShareImage(_PaymentRecord payment) async {
+    if (!mounted) return;
+    HapticFeedback.mediumImpact();
+
+    const companyName = 'Neelkant Garments';
+    final fmt     = NumberFormat('#,##,##0.##');
+    final dateFmt = DateFormat('dd MMM yyyy, hh:mm a');
+
+    final ob          = _party?.openingBalance ?? 0.0;
+    final totalAmount = (ob + _totalBilled - _totalAllReceived)
+        .clamp(0.0, double.infinity);
+    final amountPaid  = payment.amount;
+    final balance     = (totalAmount - amountPaid).clamp(0.0, double.infinity);
+    final payDate     = dateFmt.format(payment.createdAt);
+
+    // ── Canvas layout constants ────────────────────────────────────────────
+    const double cW       = 900;
+    const double padH     = 48.0;   // horizontal padding
+    const double headerH  = 110.0;
+    const double divH     = 1.0;
+    const double rowH     = 52.0;
+    const double sectionH = 44.0;
+    const double footerH  = 48.0;
+
+    // rows: CLIENT, RECEIPT NUMBER, DATE, divider, TOTAL AMOUNT, AMOUNT PAID,
+    //       BALANCE DUE, divider, ACCOUNT DETAILS header, ACCOUNT NAME, CATEGORY
+    final double bodyH = headerH
+        + divH + 14          // top divider + gap
+        + rowH * 3           // CLIENT, RECEIPT NUMBER, DATE
+        + 14 + divH + 14     // gap + divider + gap
+        + rowH * 3           // TOTAL AMOUNT, AMOUNT PAID, BALANCE DUE
+        + 14 + divH + 14     // gap + divider + gap
+        + sectionH           // ACCOUNT DETAILS header
+        + rowH * 2           // ACCOUNT NAME, CATEGORY
+        + footerH;           // bottom padding
+
+    final double cH = bodyH;
+
+    final recorder = ui.PictureRecorder();
+    final canvas   = Canvas(recorder);
+
+    // ── Overall background (app-matching dark) ─────────────────────────────
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, cW, cH),
+      Paint()..color = const Color(0xFF0F1011),
+    );
+
+    // ── Card ──────────────────────────────────────────────────────────────
+    const double cardMargin = 24.0;
+    final cardRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(cardMargin, cardMargin, cW - cardMargin * 2, cH - cardMargin * 2),
+      const Radius.circular(18),
+    );
+    canvas.drawRRect(cardRect, Paint()..color = const Color(0xFF1A1B1E));
+    canvas.drawRRect(
+      cardRect,
+      Paint()
+        ..color = const Color(0xFF2C2D32)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+
+    // ── Helper: paragraph ─────────────────────────────────────────────────
+    void drawPara(
+      String text,
+      double x,
+      double y, {
+      double fontSize = 14,
+      Color color = const Color(0xFFF1F2F5),
+      bool bold = false,
+      double maxWidth = 800,
+      ui.TextAlign align = ui.TextAlign.left,
+    }) {
+      final pb = ui.ParagraphBuilder(ui.ParagraphStyle(
+        textAlign:  align,
+        maxLines:   1,
+        ellipsis:   '…',
+      ))
+        ..pushStyle(ui.TextStyle(
+          color:      color,
+          fontSize:   fontSize,
+          fontWeight: bold ? ui.FontWeight.w700 : ui.FontWeight.w400,
+        ))
+        ..addText(text);
+      final para = pb.build()..layout(ui.ParagraphConstraints(width: maxWidth));
+      canvas.drawParagraph(para, Offset(x, y));
+    }
+
+    // ── Helper: horizontal divider inside card ─────────────────────────────
+    void drawDiv(double y) {
+      canvas.drawLine(
+        Offset(cardMargin + padH, y),
+        Offset(cW - cardMargin - padH, y),
+        Paint()
+          ..color = const Color(0xFF2C2D32)
+          ..strokeWidth = divH,
+      );
+    }
+
+    // ── Helper: label + right-aligned value row ────────────────────────────
+    const double innerLeft  = cardMargin + padH;
+    const double innerRight = cW - cardMargin - padH;
+    const double innerW     = cW - cardMargin * 2 - padH * 2;
+
+    void drawRow(String label, String value, double y,
+        {Color valueColor = const Color(0xFFF1F2F5)}) {
+      drawPara(label, innerLeft, y + 16,
+          fontSize: 11, color: const Color(0xFF565860));
+      drawPara(value, innerLeft, y + 16,
+          fontSize: 15,
+          color: valueColor,
+          bold: true,
+          align: ui.TextAlign.right,
+          maxWidth: innerW);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // HEADER
+    // ════════════════════════════════════════════════════════════════════════
+    const double hBase = cardMargin + 28;
+    drawPara(
+      companyName.toUpperCase(),
+      innerLeft,
+      hBase,
+      fontSize: 22,
+      color: const Color(0xFFF1F2F5),
+      bold: true,
+      align: ui.TextAlign.center,
+      maxWidth: innerW,
+    );
+    drawPara(
+      'PAYMENT RECEIPT',
+      innerLeft,
+      hBase + 34,
+      fontSize: 11,
+      color: const Color(0xFF565860),
+      align: ui.TextAlign.center,
+      maxWidth: innerW,
+    );
+
+    // ── Divider after header ───────────────────────────────────────────────
+    double curY = cardMargin + headerH;
+    drawDiv(curY);
+    curY += 14;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // META ROWS
+    // ════════════════════════════════════════════════════════════════════════
+    drawRow('CLIENT', widget.partyName, curY);
+    curY += rowH;
+    drawRow('RECEIPT NUMBER', '1', curY);
+    curY += rowH;
+    drawRow('DATE', payDate, curY);
+    curY += rowH;
+
+    curY += 14;
+    drawDiv(curY);
+    curY += 14;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // AMOUNT ROWS
+    // ════════════════════════════════════════════════════════════════════════
+    drawRow('TOTAL AMOUNT', '₹${fmt.format(totalAmount)}', curY);
+    curY += rowH;
+    drawRow('AMOUNT PAID', '₹${fmt.format(amountPaid)}', curY,
+        valueColor: const Color(0xFF4ADE80));
+    curY += rowH;
+    drawRow(
+      'BALANCE DUE',
+      balance > 0 ? '₹${fmt.format(balance)}' : 'Settled',
+      curY,
+      valueColor: balance > 0
+          ? const Color(0xFFFBBF24)
+          : const Color(0xFF4ADE80),
+    );
+    curY += rowH;
+
+    curY += 14;
+    drawDiv(curY);
+    curY += 14;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ACCOUNT DETAILS SECTION
+    // ════════════════════════════════════════════════════════════════════════
+    drawPara('ACCOUNT DETAILS', innerLeft, curY + 12,
+        fontSize: 13,
+        color: const Color(0xFFF1F2F5),
+        bold: true,
+        maxWidth: innerW);
+    curY += sectionH;
+
+    drawRow('ACCOUNT NAME', widget.partyName, curY);
+    curY += rowH;
+    drawRow('CATEGORY', 'Party Ledger', curY);
+
+    // ── Render to PNG ──────────────────────────────────────────────────────
+    final picture  = recorder.endRecording();
+    final uiImage  = await picture.toImage(cW.toInt(), cH.toInt());
+    final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null || !mounted) return;
+    final bytes = byteData.buffer.asUint8List();
+
+    final safeName = widget.partyName
+        .replaceAll(RegExp(r'[^\w\s]'), '')
+        .replaceAll(' ', '_');
+
+    await Share.shareXFiles(
+      [
+        XFile.fromData(bytes,
+            name: '${safeName}_receipt.png', mimeType: 'image/png'),
+      ],
+      subject: '${widget.partyName} — Payment Receipt',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final fmt     = NumberFormat('#,##,##0.##');
@@ -489,7 +1342,11 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
           // ── Hero header ─────────────────────────────────────────────────
           SliverPersistentHeader(
             pinned: true,
-            delegate: _HeroDelegate(partyName: widget.partyName),
+            delegate: _HeroDelegate(
+              partyName: widget.partyName,
+              onShare:   _bills.isNotEmpty ? _showShareOptions : null,
+              hasBills:  _bills.isNotEmpty,
+            ),
           ),
 
           // ── Stats ────────────────────────────────────────────────────────
@@ -622,8 +1479,14 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _HeroDelegate extends SliverPersistentHeaderDelegate {
-  final String partyName;
-  const _HeroDelegate({required this.partyName});
+  final String       partyName;
+  final VoidCallback? onShare;
+  final bool          hasBills;
+  const _HeroDelegate({
+    required this.partyName,
+    this.onShare,
+    this.hasBills = false,
+  });
 
   @override
   double get minExtent => 56;
@@ -655,15 +1518,25 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
                         color: _T.text2, size: 17),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
-                  Text(
-                    partyName,
-                    style: const TextStyle(
-                      color: _T.text,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.2,
+                  Expanded(
+                    child: Text(
+                      partyName,
+                      style: const TextStyle(
+                        color: _T.text,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.2,
+                      ),
                     ),
                   ),
+                  if (hasBills && onShare != null)
+                    IconButton(
+                      icon: const Icon(Icons.ios_share_rounded,
+                          color: _T.muted2, size: 18),
+                      onPressed: onShare,
+                      tooltip: 'Share',
+                    ),
+                  const SizedBox(width: 4),
                 ],
               ),
             ),
@@ -677,11 +1550,23 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Back button
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back_ios_rounded,
-                        color: _T.text2, size: 17),
-                    onPressed: () => Navigator.of(context).pop(),
+                  // Back button + share icon row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_ios_rounded,
+                            color: _T.text2, size: 17),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                      if (hasBills && onShare != null)
+                        IconButton(
+                          icon: const Icon(Icons.ios_share_rounded,
+                              color: _T.muted2, size: 18),
+                          onPressed: onShare,
+                          tooltip: 'Share',
+                        ),
+                    ],
                   ),
                   Expanded(
                     child: Padding(
@@ -2128,6 +3013,304 @@ class _ReceivedDetailSheet extends StatelessWidget {
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.3)),
                       ],
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Share Options Sheet — choose between PDF and Image
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ShareOptionsSheet extends StatelessWidget {
+  final VoidCallback onPdf;
+  final VoidCallback onImage;
+  const _ShareOptionsSheet({required this.onPdf, required this.onImage});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: _T.panel,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 36),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 32, height: 3,
+            margin: const EdgeInsets.only(bottom: 20),
+            decoration: BoxDecoration(
+              color: _T.line2,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const Text(
+            'Share Statement',
+            style: TextStyle(
+                color: _T.text, fontSize: 15, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Choose how to share this party\'s information',
+            style: TextStyle(color: _T.muted2, fontSize: 11),
+          ),
+          const SizedBox(height: 20),
+          _ShareOptionTile(
+            icon: Icons.picture_as_pdf_rounded,
+            label: 'Share as PDF',
+            subtitle: 'Full party statement with all bills',
+            color: _T.red,
+            onTap: () {
+              Navigator.of(context).pop();
+              onPdf();
+            },
+          ),
+          const SizedBox(height: 10),
+          _ShareOptionTile(
+            icon: Icons.image_rounded,
+            label: 'Share as Image',
+            subtitle: 'Payment receipt for a specific transaction',
+            color: _T.green,
+            onTap: () {
+              Navigator.of(context).pop();
+              onImage();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ShareOptionTile extends StatelessWidget {
+  final IconData     icon;
+  final String       label;
+  final String       subtitle;
+  final Color        color;
+  final VoidCallback onTap;
+  const _ShareOptionTile({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _T.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _T.line2),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: color.withValues(alpha: 0.25)),
+                ),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: const TextStyle(
+                            color: _T.text,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 2),
+                    Text(subtitle,
+                        style: const TextStyle(
+                            color: _T.muted2, fontSize: 11)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded,
+                  color: _T.muted, size: 18),
+            ],
+          ),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Transaction Picker Sheet — select which payment to generate a receipt for
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TransactionPickerSheet extends StatelessWidget {
+  final List<_PaymentRecord>            payments;
+  final List<SaleBillEntity>            bills;
+  final void Function(_PaymentRecord)   onSelect;
+
+  const _TransactionPickerSheet({
+    required this.payments,
+    required this.bills,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt     = NumberFormat('#,##,##0.##');
+    final dateFmt = DateFormat('dd MMM yyyy  hh:mm a');
+    final billMap = {for (final b in bills) b.saleBillId: b.billNumber};
+    final sorted  = List<_PaymentRecord>.from(payments)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final maxH    = MediaQuery.of(context).size.height * 0.78;
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: maxH),
+      decoration: const BoxDecoration(
+        color: _T.panel,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.only(top: 14, bottom: 16),
+            decoration: BoxDecoration(
+              color: _T.line2,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 36, height: 36,
+                  decoration: BoxDecoration(
+                    color: _T.green.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(9),
+                    border: Border.all(color: _T.green.withValues(alpha: 0.22)),
+                  ),
+                  child: const Icon(Icons.receipt_rounded,
+                      color: _T.green, size: 15),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('SELECT TRANSACTION',
+                          style: TextStyle(
+                              color: _T.text,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.4)),
+                      Text('${sorted.length} payment entries',
+                          style: const TextStyle(
+                              color: _T.muted2, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Text(
+              'Select the payment entry to generate a receipt for',
+              style: TextStyle(color: _T.muted2, fontSize: 11),
+            ),
+          ),
+          Container(height: 1, color: _T.line2),
+          if (sorted.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(32),
+              child: Text('No payment entries found',
+                  style: TextStyle(color: _T.muted2, fontSize: 13)),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                padding: const EdgeInsets.fromLTRB(0, 8, 0, 28),
+                physics: const BouncingScrollPhysics(),
+                itemCount: sorted.length,
+                separatorBuilder: (_, __) =>
+                    Container(height: 1, color: _T.line),
+                itemBuilder: (_, i) {
+                  final p      = sorted[i];
+                  final billNo = p.linkedBillId != null
+                      ? (billMap[p.linkedBillId] ?? p.linkedBillId!)
+                      : 'Opening Balance';
+                  return GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      onSelect(p);
+                    },
+                    behavior: HitTestBehavior.opaque,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: _T.green.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: _T.green.withValues(alpha: 0.18)),
+                            ),
+                            child: const Icon(Icons.arrow_downward_rounded,
+                                color: _T.green, size: 14),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(billNo,
+                                    style: const TextStyle(
+                                        color: _T.text,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 2),
+                                Text(dateFmt.format(p.createdAt),
+                                    style: const TextStyle(
+                                        color: _T.muted2, fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('₹${fmt.format(p.amount)}',
+                                  style: const TextStyle(
+                                      color: _T.green,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.3)),
+                              const SizedBox(height: 2),
+                              const Text('Tap to select',
+                                  style: TextStyle(
+                                      color: _T.muted, fontSize: 10)),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },

@@ -171,7 +171,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
                   billsAsync.maybeWhen(
                     data: (bills) {
                       final partyCount = bills
-                          .map((b) => b.partyName)
+                          .map((b) => b.partyName.toLowerCase())
                           .toSet()
                           .length;
                       return Text(
@@ -213,10 +213,13 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
                 );
               }
 
-              // Group bills by party name
-              final grouped = <String, List<SaleBillEntity>>{};
+              // Group bills by party name (case-insensitive)
+              final grouped  = <String, List<SaleBillEntity>>{};
+              final dispName = <String, String>{};
               for (final b in bills) {
-                grouped.putIfAbsent(b.partyName, () => []).add(b);
+                final key = b.partyName.trim().toLowerCase();
+                grouped.putIfAbsent(key, () => []).add(b);
+                dispName.putIfAbsent(key, () => b.partyName.trim());
               }
               final names = grouped.keys.toList();
 
@@ -228,11 +231,11 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
                       const SizedBox(height: 8),
                   itemBuilder: (ctx, i) => _PartyCard(
                     key:       ValueKey(names[i]),
-                    partyName: names[i],
+                    partyName: dispName[names[i]]!,
                     bills:     grouped[names[i]]!,
                     onTap: () => Navigator.of(context).push(
                       _slideRoute(
-                          PartyDetailScreen(partyName: names[i])),
+                          PartyDetailScreen(partyName: dispName[names[i]]!)),
                     ),
                   ),
                 ),
