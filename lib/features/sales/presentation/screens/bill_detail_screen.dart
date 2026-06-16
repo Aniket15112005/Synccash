@@ -62,17 +62,20 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _idSub = ref.listenManual<String?>(
-        currentCashbookIdProvider,
-        (prev, next) {
-          if (next != null && next.isNotEmpty && next != _cashbookId) {
-            _cashbookId = next;
-            _txSub?.cancel();
-            _startStream(next);
-          }
-        },
-        fireImmediately: true,
-      );
+      Future.delayed(const Duration(milliseconds: 310), () {
+          if (!mounted) return;
+        _idSub = ref.listenManual<String?>(
+          currentCashbookIdProvider,
+          (prev, next) {
+            if (next != null && next.isNotEmpty && next != _cashbookId) {
+              _cashbookId = next;
+              _txSub?.cancel();
+              _startStream(next);
+            }
+          },
+          fireImmediately: true,
+        );
+      });
     });
   }
 

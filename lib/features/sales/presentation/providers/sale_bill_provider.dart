@@ -27,7 +27,7 @@ final saleBillSearchProvider =
 // ── bills stream with search filter ──────────────────────────────────────────
 
 final filteredSaleBillsProvider =
-    StreamProvider.autoDispose<List<SaleBillEntity>>((ref) {
+    StreamProvider<List<SaleBillEntity>>((ref) {
   final cashbookId = ref.watch(currentCashbookIdProvider);
   final search = ref.watch(saleBillSearchProvider).toLowerCase().trim();
   final repo = ref.watch(_saleBillRepoProvider);

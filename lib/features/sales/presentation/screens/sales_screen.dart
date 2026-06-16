@@ -147,25 +147,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
                   ),
                 ],
               ),
-              background: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFF0D0F1C), Color(0xFF080A0E)],
-                  ),
-                ),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 16),
-                    child: Icon(Icons.receipt_long_rounded,
-                        size: 90,
-                        color:
-                            _T.accent.withValues(alpha: 0.04)),
-                  ),
-                ),
-              ),
+              background: Container(color: _T.bg),
             ),
           ),
 
@@ -288,18 +270,21 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _idSub = ref.listenManual<String?>(
-        currentCashbookIdProvider,
-        (prev, next) {
-          if (next != null && next.isNotEmpty && next != _cashbookId) {
-            _cashbookId = next;
-            _txSub?.cancel();
-            _partySub?.cancel();
-            _start(next);
-          }
-        },
-        fireImmediately: true,
-      );
+      Future.delayed(const Duration(milliseconds: 80), () {
+        if (!mounted) return;
+        _idSub = ref.listenManual<String?>(
+          currentCashbookIdProvider,
+          (prev, next) {
+            if (next != null && next.isNotEmpty && next != _cashbookId) {
+              _cashbookId = next;
+              _txSub?.cancel();
+              _partySub?.cancel();
+              _start(next);
+            }
+          },
+          fireImmediately: true,
+        );
+      });
     });
   }
 
@@ -354,168 +339,208 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
-    final fmt       = NumberFormat('#,##,##0.00');
+    final fmt       = NumberFormat('#,##,##0.##');
     final totalBill = widget.bills
         .fold<double>(0.0, (s, b) => s + b.billTotal);
     final outstanding =
         (totalBill - _received).clamp(0.0, double.infinity);
     final settled = outstanding <= 0;
     final partial = _received > 0 && outstanding > 0;
-
     final statusColor =
         settled ? _T.green : (partial ? _T.amber : _T.red);
+    final lastBill = widget.bills.isNotEmpty
+        ? widget.bills.reduce(
+            (a, b) => a.billCreatedAt.isAfter(b.billCreatedAt) ? a : b)
+        : null;
+    final dateFmt = DateFormat('dd MMM');
 
     return GestureDetector(
-      onTap: widget.onTap,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        widget.onTap();
+      },
       child: Container(
-        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              _T.card,
-              const Color(0xFF0C0E16),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(18),
+          color: _T.card,
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: _T.border),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
-              blurRadius: 8,
-              offset: const Offset(0, 3),
-            ),
-          ],
         ),
-        child: Row(
-          children: [
-            // ── Avatar ──────────────────────────────────────────────────
-            _CircleAvatar(name: widget.partyName, size: 46),
-            const SizedBox(width: 12),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Status stripe
+              Container(
+                width: 3,
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.8),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    bottomLeft: Radius.circular(12),
+                  ),
+                ),
+              ),
 
-            // ── Left info ────────────────────────────────────────────────
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.partyName,
-                      style: const TextStyle(
-                          color: _T.text,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14.5,
-                          letterSpacing: -0.1)),
-                  if (_place.isNotEmpty) ...[
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on_rounded,
-                            color: _T.muted, size: 10),
-                        const SizedBox(width: 2),
-                        Text(_place,
-                            style: const TextStyle(
-                                color: _T.muted, fontSize: 11)),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 6),
-                  Row(
+              // Main content
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 13, 10, 13),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: _T.border,
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        child: Text(
-                          '${widget.bills.length} bill${widget.bills.length == 1 ? '' : 's'}',
-                          style: const TextStyle(
-                              color: _T.muted,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w500),
+                      _CircleAvatar(name: widget.partyName, size: 42),
+                      const SizedBox(width: 12),
+
+                      // Left: party name + tags
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              widget.partyName,
+                              style: const TextStyle(
+                                  color: _T.text,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                  letterSpacing: -0.2),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 5),
+                            Wrap(
+                              spacing: 5,
+                              runSpacing: 4,
+                              children: [
+                                _Tag(
+                                  label: '${widget.bills.length} bill'
+                                      '${widget.bills.length == 1 ? '' : 's'}',
+                                  color: _T.muted,
+                                ),
+                                if (_place.isNotEmpty)
+                                  _Tag(
+                                    label: _place,
+                                    icon: Icons.location_on_rounded,
+                                    color: _T.muted,
+                                  ),
+                                if (_ob > 0)
+                                  _Tag(
+                                    label: 'OB ₹${_shortFmt(_ob)}',
+                                    color: _T.accent,
+                                    filled: true,
+                                  ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
-                      if (_ob > 0) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: _T.accent.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(5),
-                            border: Border.all(
-                                color: _T.accent.withValues(alpha: 0.15)),
-                          ),
-                          child: Text(
-                            'OB ₹${_shortFmt(_ob)}',
+                      const SizedBox(width: 10),
+
+                      // Right: bill total + status pill + last bill date
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '₹${fmt.format(totalBill)}',
                             style: const TextStyle(
-                                color: _T.accent,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600),
+                              color: _T.text,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                              letterSpacing: -0.4,
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 5),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: statusColor.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                  color: statusColor.withValues(alpha: 0.25)),
+                            ),
+                            child: Text(
+                              settled
+                                  ? '✓ Settled'
+                                  : '₹${fmt.format(outstanding)} due',
+                              style: TextStyle(
+                                  color: statusColor,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                          if (lastBill != null) ...[
+                            const SizedBox(height: 5),
+                            Text(
+                              dateFmt.format(lastBill.billDate),
+                              style: const TextStyle(
+                                  color: _T.muted, fontSize: 10),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.chevron_right_rounded,
+                          color: _T.muted.withValues(alpha: 0.3), size: 16),
                     ],
                   ),
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-
-            // ── Right amounts (highlighted) ──────────────────────────────
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                // Label
-                const Text('Bill Amt',
-                    style: TextStyle(
-                        color: _T.muted,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.2)),
-                const SizedBox(height: 3),
-                // Bill total — larger, bright
-                Text(
-                  '₹${fmt.format(totalBill)}',
-                  style: const TextStyle(
-                      color: _T.text,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 18,
-                      letterSpacing: -0.5),
-                ),
-                const SizedBox(height: 6),
-                // Remaining — color-coded, prominent
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: statusColor.withValues(alpha: 0.25)),
-                  ),
-                  child: Text(
-                    settled
-                        ? '✓ Settled'
-                        : '₹${fmt.format(outstanding)} due',
-                    style: TextStyle(
-                        color: statusColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right_rounded,
-                color: _T.muted.withValues(alpha: 0.3), size: 16),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tag chip widget
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _Tag extends StatelessWidget {
+  final String    label;
+  final Color     color;
+  final IconData? icon;
+  final bool      filled;
+  const _Tag({
+    required this.label,
+    required this.color,
+    this.icon,
+    this.filled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: filled
+              ? color.withValues(alpha: 0.10)
+              : _T.border.withValues(alpha: 0.8),
+          borderRadius: BorderRadius.circular(5),
+          border: filled
+              ? Border.all(color: color.withValues(alpha: 0.22))
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, color: color, size: 9),
+              const SizedBox(width: 3),
+            ],
+            Text(label,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
 }
 
 String _shortFmt(double v) {
@@ -966,39 +991,31 @@ class _CircleAvatar extends StatelessWidget {
   const _CircleAvatar({required this.name, required this.size});
 
   @override
+  @override
   Widget build(BuildContext context) {
-    final colors = [
-      [const Color(0xFF4C6EF5), const Color(0xFF3451D1)],
-      [const Color(0xFF7950F2), const Color(0xFF5C3DD8)],
-      [const Color(0xFF1C7ED6), const Color(0xFF1465B0)],
-      [const Color(0xFF0CA678), const Color(0xFF08845F)],
-      [const Color(0xFFE67700), const Color(0xFFC46000)],
+    const colors = [
+      Color(0xFF3D5A8A),
+      Color(0xFF4A7A6E),
+      Color(0xFF7A5A8A),
+      Color(0xFF8A6A3D),
+      Color(0xFF4A6A7A),
     ];
-    final idx = name.isNotEmpty ? name.codeUnitAt(0) % colors.length : 0;
+    final c = colors[name.isNotEmpty ? name.codeUnitAt(0) % colors.length : 0];
     return Container(
       width: size, height: size,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: colors[idx],
-        ),
+        color: c.withValues(alpha: 0.18),
         shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: colors[idx][0].withValues(alpha: 0.25),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        border: Border.all(color: c.withValues(alpha: 0.35)),
       ),
       child: Center(
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : '?',
           style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-              fontSize: size * 0.38),
+            color: c,
+            fontWeight: FontWeight.w800,
+            fontSize: size * 0.40,
+          ),
         ),
       ),
     );

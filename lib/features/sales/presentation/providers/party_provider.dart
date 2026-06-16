@@ -87,7 +87,7 @@ final _partyRepoProvider =
     Provider((ref) => PartyRepository(FirebaseFirestore.instance));
 
 final partiesProvider =
-    StreamProvider.autoDispose<List<PartyEntity>>((ref) {
+    StreamProvider<List<PartyEntity>>((ref) {
   final id = ref.watch(currentCashbookIdProvider);
   if (id == null || id.isEmpty) return Stream.value([]);
   return ref.watch(_partyRepoProvider).watchParties(id);

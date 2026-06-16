@@ -30,6 +30,7 @@ class _T {
   static const green   = Color(0xFF4ADE80);
   static const amber   = Color(0xFFFBBF24);
   static const red     = Color(0xFFFC8181);
+  static const darkOrange = Color(0xFFD4580A);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,10 +148,10 @@ class AllBillsScreen extends ConsumerWidget {
               color: _T.bg,
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
               child: _ThreeStats(
-                billed:   totalBilled,
-                received: totalReceived,
-                due:      due,
-                fmt:      fmt,
+                billed:         totalBilled,
+                received:       totalReceived,
+                closingBalance: due,
+                fmt:            fmt,
               ),
             ),
           ),
@@ -419,6 +420,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     final fmt     = NumberFormat('#,##,##0.##');
     final dateFmt = DateFormat('dd MMM yy');
     final ob      = _party?.openingBalance ?? 0.0;
+    final closingBalance = ob + _totalBilled - _totalReceived;
     final recent  = _bills.take(_kPage).toList();
     final hasMore = _bills.length > _kPage;
 
@@ -441,10 +443,10 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
               color: _T.bg,
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
               child: _ThreeStats(
-                billed:   _totalBilled,
-                received: _totalReceived,
-                due:      _totalDue,
-                fmt:      fmt,
+                billed:         _totalBilled,
+                received:       _totalReceived,
+                closingBalance: closingBalance,
+                fmt:            fmt,
               ),
             ),
           ),
@@ -727,9 +729,10 @@ class _BillRow extends StatelessWidget {
   });
 
   @override
+  @override
   Widget build(BuildContext context) {
-    final settled  = remaining <= 0;
-    final partial  = received > 0 && remaining > 0;
+    final settled = remaining <= 0;
+    final partial = received > 0 && remaining > 0;
     final Color statusColor =
         settled ? _T.green : (partial ? _T.amber : _T.red);
 
@@ -740,99 +743,109 @@ class _BillRow extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             color: _T.surface,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: _T.line2),
           ),
-          padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
-          child: Row(
-            children: [
-              // Status icon
-              Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: statusColor.withValues(alpha: 0.18)),
-                ),
-                child: Icon(Icons.receipt_rounded,
-                    color: statusColor, size: 16),
-              ),
-              const SizedBox(width: 12),
-
-              // Bill no + date
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      bill.billNumber,
-                      style: const TextStyle(
-                        color: _T.text,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      dateFmt.format(bill.billDate),
-                      style: const TextStyle(
-                          color: _T.muted2, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Amount + status pill
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    '₹${fmt.format(bill.billTotal)}',
-                    style: const TextStyle(
-                      color: _T.text,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.4,
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Status stripe
+                Container(
+                  width: 3,
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.8),
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(12),
+                      bottomLeft: Radius.circular(12),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                          color: statusColor.withValues(alpha: 0.22)),
-                    ),
-                    child: Text(
-                      settled
-                          ? 'Settled'
-                          : '₹${fmt.format(remaining)} due',
-                      style: TextStyle(
-                        color: statusColor,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                      ),
+                ),
+
+                // Content
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 6, 12),
+                    child: Row(
+                      children: [
+                        // Bill no + date
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                bill.billNumber,
+                                style: const TextStyle(
+                                  color: _T.text,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                dateFmt.format(bill.billDate),
+                                style: const TextStyle(
+                                    color: _T.muted2, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Amount + status pill
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              '₹${fmt.format(bill.billTotal)}',
+                              style: const TextStyle(
+                                color: _T.text,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.4,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: statusColor.withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: statusColor.withValues(alpha: 0.25)),
+                              ),
+                              child: Text(
+                                settled
+                                    ? '✓ Settled'
+                                    : '₹${fmt.format(remaining)} due',
+                                style: TextStyle(
+                                  color: statusColor,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        // Menu / chevron
+                        if (onEdit != null || onDelete != null)
+                          _BillMenu(onEdit: onEdit, onDelete: onDelete)
+                        else
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: Icon(Icons.chevron_right_rounded,
+                                color: _T.muted.withValues(alpha: 0.3), size: 16),
+                          ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-
-              // Menu / chevron
-              if (onEdit != null || onDelete != null)
-                _BillMenu(onEdit: onEdit, onDelete: onDelete)
-              else
-                Padding(
-                  padding: const EdgeInsets.only(left: 8),
-                  child: Icon(Icons.chevron_right_rounded,
-                      color: _T.muted.withValues(alpha: 0.3), size: 16),
                 ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1196,13 +1209,13 @@ class _SheetField extends StatelessWidget {
 class _ThreeStats extends StatelessWidget {
   final double       billed;
   final double       received;
-  final double       due;
+  final double       closingBalance;
   final NumberFormat fmt;
 
   const _ThreeStats({
     required this.billed,
     required this.received,
-    required this.due,
+    required this.closingBalance,
     required this.fmt,
   });
 
@@ -1231,9 +1244,9 @@ class _ThreeStats extends StatelessWidget {
               Container(width: 1, color: _T.line2),
               Expanded(
                 child: _StatBlock(
-                    label: 'DUE',
-                    value: due > 0 ? '₹${fmt.format(due)}' : '—',
-                    color: due > 0 ? _T.amber : _T.muted)),
+                    label: 'CLOSING BAL.',
+                    value: closingBalance > 0 ? '₹${fmt.format(closingBalance)}' : '—',
+                    color: closingBalance > 0 ? _T.darkOrange : _T.muted)),
             ],
           ),
         ),
@@ -1446,7 +1459,7 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        color: _T.surface,
+        color: _T.bg,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         child: Row(
           children: [
