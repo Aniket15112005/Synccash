@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1061,13 +1064,23 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         .replaceAll(' ', '_');
 
     if (!mounted) return;
-    // XFile.fromData works on web (PWA) + Android without filesystem access
-    await Share.shareXFiles(
-      [XFile.fromData(bytes,
-          name: '${safeName}_statement.pdf',
-          mimeType: 'application/pdf')],
-      subject: '${widget.partyName} — Party Statement',
-    );
+    if (kIsWeb) {
+      await Share.shareXFiles(
+        [XFile.fromData(bytes,
+            name: '${safeName}_statement.pdf',
+            mimeType: 'application/pdf')],
+        subject: '${widget.partyName} — Party Statement',
+      );
+    } else {
+      final dir  = await getTemporaryDirectory();
+      final file = File('${dir.path}/${safeName}_statement.pdf');
+      await file.writeAsBytes(bytes);
+      if (!mounted) return;
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: '${widget.partyName} — Party Statement',
+      );
+    }
   }
 
 
@@ -1314,13 +1327,22 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         .replaceAll(RegExp(r'[^\w\s]'), '')
         .replaceAll(' ', '_');
 
-    await Share.shareXFiles(
-      [
-        XFile.fromData(bytes,
-            name: '${safeName}_receipt.png', mimeType: 'image/png'),
-      ],
-      subject: '${widget.partyName} — Payment Receipt',
-    );
+    if (kIsWeb) {
+      await Share.shareXFiles(
+        [XFile.fromData(bytes,
+            name: '${safeName}_receipt.png', mimeType: 'image/png')],
+        subject: '${widget.partyName} — Payment Receipt',
+      );
+    } else {
+      final dir  = await getTemporaryDirectory();
+      final file = File('${dir.path}/${safeName}_receipt.png');
+      await file.writeAsBytes(bytes);
+      if (!mounted) return;
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: '${widget.partyName} — Payment Receipt',
+      );
+    }
   }
 
   @override
