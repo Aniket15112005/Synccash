@@ -749,26 +749,27 @@ class _BillRow extends StatelessWidget {
           ),
           child: IntrinsicHeight(
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Status stripe
-                Container(
-                  width: 3,
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.8),
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(12),
-                      bottomLeft: Radius.circular(12),
-                    ),
-                  ),
-                ),
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    // Status stripe
+    Container(
+      width: 3,
+      decoration: BoxDecoration(
+        color: statusColor.withValues(alpha: 0.8),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(12),
+          bottomLeft: Radius.circular(12),
+        ),
+      ),
+    ),
 
-                // Content
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 6, 12),
-                    child: Row(
-                      children: [
+    // Content
+    Expanded(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 6, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
                         // Bill no + date
                         Expanded(
                           child: Column(
@@ -795,9 +796,11 @@ class _BillRow extends StatelessWidget {
                         ),
 
                         // Amount + status pill
+                        // Amount + status pill
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
                               '₹${fmt.format(bill.billTotal)}',
@@ -806,26 +809,32 @@ class _BillRow extends StatelessWidget {
                                 fontSize: 15,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.4,
+                                height: 1.0,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 2),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 3),
+                                  horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
                                 color: statusColor.withValues(alpha: 0.10),
                                 borderRadius: BorderRadius.circular(20),
                                 border: Border.all(
                                     color: statusColor.withValues(alpha: 0.25)),
                               ),
+                              clipBehavior: Clip.antiAlias,
                               child: Text(
                                 settled
                                     ? '✓ Settled'
                                     : '₹${fmt.format(remaining)} due',
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: statusColor,
                                   fontSize: 10,
                                   fontWeight: FontWeight.w700,
+                                  height: 1.0,
                                 ),
                               ),
                             ),

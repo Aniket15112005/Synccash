@@ -238,9 +238,9 @@ class TransactionListItem extends ConsumerWidget {
                             Text(
                               'B.no: $_billNo',
                               style: const TextStyle(
-                                fontSize: 11,
+                                fontSize: 13,
                                 color: Color(0xFF6B7280),
-                                fontWeight: FontWeight.w500,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
                           ],
