@@ -11,6 +11,7 @@ import 'package:synccash/features/transactions/presentation/providers/transactio
 // ADDED: sales bill imports
 import 'package:synccash/features/sales/domain/entities/sale_bill_entity.dart';
 import 'package:synccash/features/sales/presentation/widgets/bill_no_dropdown_field.dart';
+import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
 
 class _C {
   static const bg       = Color(0xFF08090B);
@@ -182,6 +183,43 @@ void initState() {
 
       if (existing != null) {
         await ref.read(transactionRepositoryProvider).updateTransaction(tx);
+      } else if (_type == 'income' && _selectedBill != null) {
+        // Overflow-aware: excess beyond the selected bill flows to OB then other bills
+        await ref.read(saleBillActionsProvider.notifier).recordPaymentWithOverflow(
+          cashbookId:     tx.cashbookId,
+          selectedBillId: _selectedBill!.saleBillId,
+          partyName:      _selectedBill!.partyName,
+          totalAmount:    tx.amount,
+          description:    tx.description,
+          category:       tx.category,
+          createdBy:      tx.createdBy,
+          createdByName:  tx.creatorName,
+          createdAt:      tx.createdAt,
+        );
+      } else if (_type == 'income' && _isObPayment) {
+        // OB payment: excess beyond OB remaining flows to pending bills (oldest first / FIFO)
+        await ref.read(saleBillActionsProvider.notifier).recordObPaymentWithOverflow(
+          cashbookId:    tx.cashbookId,
+          partyName:     _descCtrl.text.trim(),
+          totalAmount:   tx.amount,
+          description:   tx.description,
+          category:      tx.category,
+          createdBy:     tx.createdBy,
+          createdByName: tx.creatorName,
+          createdAt:     tx.createdAt,
+        );
+      } else if (_type == 'income') {
+        // No bill/OB selected: still apply overflow order (OB first → bills FIFO → unlinked remainder)
+        await ref.read(saleBillActionsProvider.notifier).recordObPaymentWithOverflow(
+          cashbookId:    tx.cashbookId,
+          partyName:     _descCtrl.text.trim(),
+          totalAmount:   tx.amount,
+          description:   tx.description,
+          category:      tx.category,
+          createdBy:     tx.createdBy,
+          createdByName: tx.creatorName,
+          createdAt:     tx.createdAt,
+        );
       } else {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
       }
@@ -830,10 +868,12 @@ class _SubmitButton extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        type == 'income' ? 'Save Income' : 'Save Expense',
+                        type == 'income' ? 'Record Income' : 'Record Expense',
                         style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w700,
-                          color: Colors.black87, letterSpacing: -0.2,
+                          color: Colors.black87,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
                         ),
                       ),
                     ],
@@ -856,8 +896,10 @@ class _FieldLabel extends StatelessWidget {
     return Text(
       text,
       style: const TextStyle(
-        fontSize: 12, color: _C.textSec,
-        fontWeight: FontWeight.w600, letterSpacing: 0.2,
+        color: _C.textSec,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 0.4,
       ),
     );
   }

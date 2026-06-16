@@ -455,10 +455,6 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
             ),
           ),
 
-          // Progress bar full width
-          SliverToBoxAdapter(
-            child: _FullWidthProgress(pct: _pct, due: _totalDue),
-          ),
           SliverToBoxAdapter(
             child: Container(height: 1, color: _T.line),
           ),
@@ -870,6 +866,7 @@ class _BillMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) => PopupMenuButton<String>(
         padding: EdgeInsets.zero,
+        tooltip: '', 
         icon: Icon(Icons.more_vert_rounded,
             color: _T.muted.withValues(alpha: 0.5), size: 18),
         iconSize: 18,
