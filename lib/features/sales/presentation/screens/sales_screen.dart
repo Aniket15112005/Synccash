@@ -26,7 +26,8 @@ class _T {
   static const text   = Color(0xFFE8ECF4);
   static const green  = Color(0xFF38D68A);
   static const amber  = Color(0xFFF5A623);
-  static const red    = Color(0xFFE85C5C);
+  static const red        = Color(0xFFE85C5C);
+  static const darkOrange = Color(0xFFD4580A);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,6 +292,7 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
   void _start(String cashbookId) {
     if (!mounted) return;
     final q = widget.partyName.trim().toLowerCase();
+    final billIds = widget.bills.map((b) => b.saleBillId).toSet();
 
     _txSub = FirebaseFirestore.instance
         .collection('cashbooks')
@@ -302,9 +304,14 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
       if (!mounted) return;
       double total = 0.0;
       for (final d in snap.docs) {
-        final desc = (d['description'] as String? ?? '').toLowerCase();
-        if (desc.contains(q)) {
-          total += (d['amount'] as num?)?.toDouble() ?? 0.0;
+        final raw      = d.data();
+        final linkedId = raw['linkedSaleBillId'] as String?;
+        final amount   = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+        final desc     = (raw['description'] as String? ?? '').toLowerCase();
+        if (linkedId != null && linkedId.isNotEmpty) {
+          if (billIds.contains(linkedId)) total += amount;
+        } else if (desc.contains(q)) {
+          total += amount;
         }
       }
       setState(() => _received = total);
@@ -346,6 +353,7 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
         .fold<double>(0.0, (s, b) => s + b.billTotal);
     final outstanding =
         (totalBill - _received).clamp(0.0, double.infinity);
+    final closingBalance = _ob + totalBill - _received;
     final settled = outstanding <= 0;
     final partial = _received > 0 && outstanding > 0;
     final statusColor =
@@ -427,7 +435,7 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
                                   ),
                                 if (_ob > 0)
                                   _Tag(
-                                    label: 'OB ₹${_shortFmt(_ob)}',
+                                    label: 'OB ₹${fmt.format(_ob)}',
                                     color: _T.accent,
                                     filled: true,
                                   ),
@@ -444,9 +452,9 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            '₹${fmt.format(totalBill)}',
+                            '₹${fmt.format(closingBalance)}',
                             style: const TextStyle(
-                              color: _T.text,
+                              color: _T.darkOrange,
                               fontWeight: FontWeight.w800,
                               fontSize: 16,
                               letterSpacing: -0.4,
