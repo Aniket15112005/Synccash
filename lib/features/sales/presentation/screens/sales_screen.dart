@@ -295,6 +295,7 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
   double _obReceived   = 0.0;
   double _ob           = 0.0;
   String _place    = '';
+  String _description = '';
 
   @override
   void initState() {
@@ -361,9 +362,10 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
         setState(() {
           _ob    = (d['openingBalance'] as num?)?.toDouble() ?? 0.0;
           _place = d['place'] as String? ?? '';
+          _description = d['description'] as String? ?? '';
         });
       } else {
-        setState(() { _ob = 0.0; _place = ''; });
+        setState(() { _ob = 0.0; _place = ''; _description = ''; });
       }
     });
   }
@@ -374,6 +376,22 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
     _txSub?.cancel();
     _partySub?.cancel();
     super.dispose();
+  }
+
+  void _showEditSheet(BuildContext context) {
+    if (_cashbookId == null) return;
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditPartySheet(
+        partyName:          widget.partyName,
+        cashbookId:         _cashbookId!,
+        currentPlace:       _place,
+        currentDescription: _description,
+      ),
+    );
   }
 
   @override
@@ -617,7 +635,40 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
                               ],
                             ),
                           ),
-                         
+                          PopupMenuButton<String>(
+                            padding: EdgeInsets.zero,
+                            tooltip: '',
+                            iconSize: 18,
+                            icon: Icon(Icons.more_vert_rounded,
+                                color: _T.muted.withValues(alpha: 0.5), size: 18),
+                            color: const Color(0xFF141921),
+                            elevation: 8,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              side: const BorderSide(color: _T.border),
+                            ),
+                            onSelected: (v) {
+                              if (v == 'edit') _showEditSheet(context);
+                            },
+                            itemBuilder: (_) => [
+                              PopupMenuItem<String>(
+                                value: 'edit',
+                                height: 42,
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.edit_rounded,
+                                        color: _T.accent, size: 15),
+                                    const SizedBox(width: 10),
+                                    const Text('Edit Party',
+                                        style: TextStyle(
+                                            color: _T.accent,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ],
@@ -632,6 +683,228 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
   }
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Edit Party Sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EditPartySheet extends StatefulWidget {
+  final String partyName;
+  final String cashbookId;
+  final String currentPlace;
+  final String currentDescription;
+
+  const _EditPartySheet({
+    required this.partyName,
+    required this.cashbookId,
+    required this.currentPlace,
+    required this.currentDescription,
+  });
+
+  @override
+  State<_EditPartySheet> createState() => _EditPartySheetState();
+}
+
+class _EditPartySheetState extends State<_EditPartySheet> {
+  late final _nameCtrl  = TextEditingController(text: widget.partyName);
+  late final _placeCtrl = TextEditingController(text: widget.currentPlace);
+  late final _descCtrl  = TextEditingController(text: widget.currentDescription);
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _placeCtrl.dispose();
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final newName  = _nameCtrl.text.trim();
+    final newPlace = _placeCtrl.text.trim();
+    final newDesc  = _descCtrl.text.trim();
+    if (newName.isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      final db     = FirebaseFirestore.instance;
+      final oldKey = widget.partyName.trim().toLowerCase();
+      final newKey = newName.toLowerCase();
+      final batch  = db.batch();
+
+      if (newKey != oldKey) {
+        // Party renamed — copy doc to new key, delete old, update all bills
+        final oldSnap = await db
+            .collection('cashbooks').doc(widget.cashbookId)
+            .collection('parties').doc(oldKey).get();
+        final data = Map<String, dynamic>.from(
+            oldSnap.exists ? (oldSnap.data() ?? {}) : {});
+        data['place']       = newPlace;
+        data['description'] = newDesc;
+        batch.set(
+          db.collection('cashbooks').doc(widget.cashbookId)
+              .collection('parties').doc(newKey),
+          data,
+        );
+        batch.delete(
+          db.collection('cashbooks').doc(widget.cashbookId)
+              .collection('parties').doc(oldKey),
+        );
+        final billsSnap = await db
+            .collection('cashbooks').doc(widget.cashbookId)
+            .collection('sale_bills')
+            .where('partyName', isEqualTo: widget.partyName)
+            .get();
+        for (final doc in billsSnap.docs) {
+          batch.update(doc.reference, {'partyName': newName});
+        }
+      } else {
+        batch.set(
+          db.collection('cashbooks').doc(widget.cashbookId)
+              .collection('parties').doc(oldKey),
+          {'place': newPlace, 'description': newDesc},
+          SetOptions(merge: true),
+        );
+      }
+
+      await batch.commit();
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('Party updated',
+              style: TextStyle(color: Colors.white)),
+          backgroundColor: _T.green.withValues(alpha: 0.9),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8)),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed: $e',
+              style: const TextStyle(color: Colors.white)),
+          backgroundColor: _T.red.withValues(alpha: 0.9),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8)),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF141921),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 28 + bottom),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: _T.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(
+                    color: _T.accent.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                        color: _T.accent.withValues(alpha: 0.20)),
+                  ),
+                  child: const Icon(Icons.business_rounded,
+                      color: _T.accent, size: 20),
+                ),
+                const SizedBox(width: 12),
+                const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Edit Party',
+                        style: TextStyle(
+                            color: _T.text,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700)),
+                    Text('Update party details',
+                        style: TextStyle(
+                            color: _T.muted, fontSize: 12)),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            TextFormField(
+              controller: _nameCtrl,
+              style: const TextStyle(color: _T.text),
+              textCapitalization: TextCapitalization.words,
+              decoration: _fieldDec('Party / Client Name *',
+                  icon: Icons.business_rounded),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _placeCtrl,
+              style: const TextStyle(color: _T.text),
+              textCapitalization: TextCapitalization.words,
+              decoration: _fieldDec('Location / Place',
+                  hint: 'e.g. Mumbai',
+                  icon: Icons.location_on_rounded),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _descCtrl,
+              style: const TextStyle(color: _T.text),
+              maxLines: 2,
+              decoration: _fieldDec('Note / Description',
+                  hint: 'Any details…',
+                  icon: Icons.notes_rounded),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _saving ? null : _save,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _T.accent,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor:
+                      _T.accent.withValues(alpha: 0.35),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  elevation: 0,
+                ),
+                child: _saving
+                    ? const SizedBox(
+                        width: 20, height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.5, color: Colors.white))
+                    : const Text('Save Changes',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 15)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Tag chip widget

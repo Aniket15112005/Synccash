@@ -67,7 +67,7 @@ class _AnimatedBackgroundState extends State<_AnimatedBackground>
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        Container(color: _T.bg),
+        Container(color: const Color(0xFFF4F5F7)),
         // Scale animation — lower portion of screen
         Positioned.fill(
           child: AnimatedBuilder(
@@ -749,8 +749,8 @@ class _PartyTile extends StatelessWidget {
       onTap: onTap,
       child: Container(
         color: index.isEven
-            ? _T.surface.withValues(alpha: 0.5)
-            : Colors.transparent,
+            ? const Color(0xFFE8EAF0)
+            : const Color(0xFFF4F5F7),
         child: IntrinsicHeight(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -772,7 +772,7 @@ class _PartyTile extends StatelessWidget {
                 child: Text(
                   '${index + 1}',
                   style: TextStyle(
-                      color: _T.muted.withValues(alpha: 0.5),
+                      color: const Color(0xFFBCC2CC),
                       fontSize: 10,
                       fontWeight: FontWeight.w600),
                 ),
@@ -789,10 +789,6 @@ class _PartyTile extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
                   child: Row(
                     children: [
-                      // Avatar
-                      _CircleAvatar(name: party.name, size: 40),
-                      const SizedBox(width: 12),
-
                       // Info
                       Expanded(
                         child: Column(
@@ -801,7 +797,7 @@ class _PartyTile extends StatelessWidget {
                           children: [
                             Text(party.name,
                                 style: const TextStyle(
-                                    color: _T.text,
+                                    color: Color(0xFF1F2937),
                                     fontWeight: FontWeight.w700,
                                     fontSize: 13,
                                     letterSpacing: -0.1)),
@@ -814,7 +810,7 @@ class _PartyTile extends StatelessWidget {
                                 const SizedBox(width: 2),
                                 Text(place,
                                     style: const TextStyle(
-                                        color: _T.muted, fontSize: 10)),
+                                        color: Color(0xFF6B7280), fontSize: 10)),
                               ]),
                             ] else if (desc.isNotEmpty) ...[
                               const SizedBox(height: 3),
@@ -822,7 +818,7 @@ class _PartyTile extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                      color: _T.muted, fontSize: 10)),
+                                      color: Color(0xFF6B7280), fontSize: 10)),
                             ],
 
                             if (!hasSaved) ...[
@@ -847,7 +843,7 @@ class _PartyTile extends StatelessWidget {
                         ),
                       ),
 
-                      // Amount column (CR / DR style)
+                      // Amount (CR / DR style)
                       if (hasSaved) ...[
                         Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -887,41 +883,59 @@ class _PartyTile extends StatelessWidget {
                                         letterSpacing: 0.5)),
                               ),
                             ],
-                            const SizedBox(height: 8),
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _ActionBtn(
-                                  icon:  Icons.edit_rounded,
-                                  color: _T.accent,
-                                  onTap: onEdit,
-                                ),
-                                if (onDelete != null) ...[
-                                  const SizedBox(width: 5),
-                                  _ActionBtn(
-                                    icon:  Icons.delete_outline_rounded,
-                                    color: _T.muted2,
-                                    onTap: onDelete!,
-                                    small: true,
-                                  ),
-                                ],
-                              ],
-                            ),
                           ],
                         ),
-                      ] else ...[
-                        Container(
-                          width: 26, height: 26,
-                          decoration: BoxDecoration(
-                            color: _T.gold.withValues(alpha: 0.06),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                                color: _T.gold.withValues(alpha: 0.12)),
-                          ),
-                          child: const Icon(Icons.add_rounded,
-                              color: _T.gold, size: 13),
-                        ),
+                        const SizedBox(width: 4),
                       ],
+                      // Three-dot menu
+                      PopupMenuButton<String>(
+                        padding: EdgeInsets.zero,
+                        icon: const Icon(Icons.more_vert_rounded,
+                            color: _T.muted2, size: 20),
+                        iconSize: 20,
+                        color: _T.card2,
+                        elevation: 8,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: const BorderSide(color: _T.line2),
+                        ),
+                        onSelected: (v) {
+                          HapticFeedback.selectionClick();
+                          if (v == 'edit') onEdit();
+                          if (v == 'delete' && onDelete != null) onDelete!();
+                        },
+                        itemBuilder: (_) => [
+                          PopupMenuItem<String>(
+                            value: 'edit',
+                            height: 42,
+                            child: Row(children: [
+                              const Icon(Icons.edit_rounded,
+                                  color: _T.accent2, size: 15),
+                              const SizedBox(width: 10),
+                              const Text('Edit',
+                                  style: TextStyle(
+                                      color: _T.accent2,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600)),
+                            ]),
+                          ),
+                          if (onDelete != null)
+                            PopupMenuItem<String>(
+                              value: 'delete',
+                              height: 42,
+                              child: Row(children: [
+                                const Icon(Icons.delete_outline_rounded,
+                                    color: _T.red, size: 15),
+                                const SizedBox(width: 10),
+                                const Text('Delete',
+                                    style: TextStyle(
+                                        color: _T.red,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600)),
+                              ]),
+                            ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -1246,11 +1260,9 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                 ),
               ),
 
-              // Avatar + name
+              // Party name
               Row(
                 children: [
-                  _CircleAvatar(name: widget.party.name, size: 50),
-                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,

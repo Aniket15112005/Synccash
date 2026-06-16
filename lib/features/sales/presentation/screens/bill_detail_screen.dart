@@ -10,6 +10,9 @@ import 'package:synccash/features/auth/presentation/providers/auth_provider.dart
     show currentCashbookIdProvider;
 import '../../domain/entities/sale_bill_entity.dart';
 import '../providers/sale_bill_provider.dart';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:share_plus/share_plus.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Theme
@@ -161,6 +164,70 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
       (widget.bill.billTotal - _received).clamp(0.0, double.infinity);
   bool get _settled => _remaining <= 0;
 
+  // ── Share ───────────────────────────────────────────────────────────────
+  bool _isGeneratingShare = false;
+
+  Future<void> _generateAndShare() async {
+    if (_isGeneratingShare || !mounted) return;
+    HapticFeedback.mediumImpact();
+    setState(() => _isGeneratingShare = true);
+
+    final overlayKey = GlobalKey();
+    OverlayEntry? entry;
+    try {
+      entry = OverlayEntry(
+        builder: (_) => Positioned(
+          left: -5000,
+          top: 0,
+          width: 420,
+          child: Material(
+            type: MaterialType.transparency,
+            child: RepaintBoundary(
+              key: overlayKey,
+              child: _BillShareCard(
+                bill:         widget.bill,
+                received:     _received,
+                remaining:    _remaining,
+                settled:      _settled,
+                transactions: List<_TxItem>.from(_transactions),
+                generatedAt:  DateTime.now(),
+              ),
+            ),
+          ),
+        ),
+      );
+      if (!mounted) return;
+      Overlay.of(context).insert(entry);
+      await Future.delayed(const Duration(milliseconds: 150));
+
+      final boundary = overlayKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) throw Exception('Render boundary not found');
+
+      final image    = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) throw Exception('Failed to encode image');
+
+      final bytes    = byteData.buffer.asUint8List();
+      final safeName = widget.bill.billNumber
+          .replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+
+      // XFile.fromData works on web (PWA) + mobile without filesystem access
+      await Share.shareXFiles(
+        [XFile.fromData(bytes,
+            name: 'synccash_bill_$safeName.png',
+            mimeType: 'image/png')],
+        subject: '${widget.bill.partyName}  ·  ${widget.bill.billNumber}',
+      );
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        _snackBar('Could not generate image: $e', success: false));
+    } finally {
+      entry?.remove();
+      if (mounted) setState(() => _isGeneratingShare = false);
+    }
+  }
+
   void _showPaymentDetail(_TxItem tx) {
     HapticFeedback.selectionClick();
     showModalBottomSheet(
@@ -287,10 +354,13 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
               onPressed: () => Navigator.of(context).pop(),
             ),
             actions: [
-              Padding(
-                padding: const EdgeInsets.only(right: 16),
-                child: Center(child: _StatusBadge(settled: settled, partial: partial)),
+              Center(child: _StatusBadge(settled: settled, partial: partial)),
+              const SizedBox(width: 4),
+              _BillMoreMenu(
+                onShare:      _generateAndShare,
+                isGenerating: _isGeneratingShare,
               ),
+              const SizedBox(width: 8),
             ],
             flexibleSpace: FlexibleSpaceBar(
               titlePadding: const EdgeInsets.fromLTRB(56, 0, 90, 16),
@@ -1578,3 +1648,254 @@ InputDecoration _fieldDec(
         borderSide: const BorderSide(color: _T.red, width: 1.5),
       ),
     );
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Bill page three-dot menu
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BillMoreMenu extends StatelessWidget {
+  final VoidCallback onShare;
+  final bool         isGenerating;
+  const _BillMoreMenu({required this.onShare, required this.isGenerating});
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+        padding: EdgeInsets.zero,
+        icon: isGenerating
+            ? const SizedBox(
+                width: 20, height: 20,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.0, color: _T.muted))
+            : const Icon(Icons.more_vert_rounded, color: _T.text, size: 22),
+        color: _T.card2,
+        elevation: 8,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: _T.border),
+        ),
+        onSelected: (v) { if (v == 'share') onShare(); },
+        itemBuilder: (_) => [
+          PopupMenuItem<String>(
+            value: 'share',
+            height: 46,
+            child: Row(children: [
+              const Icon(Icons.share_rounded, color: _T.accent, size: 16),
+              const SizedBox(width: 10),
+              const Text('Share Bill',
+                  style: TextStyle(
+                      color: _T.text, fontSize: 13,
+                      fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        ],
+      );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+//  Shareable bill card — receipt format (rendered off-screen → HD PNG)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BillShareCard extends StatelessWidget {
+  final SaleBillEntity bill;
+  final double         received;
+  final double         remaining;
+  final bool           settled;
+  final List<_TxItem>  transactions;
+  final DateTime       generatedAt;
+
+  const _BillShareCard({
+    required this.bill,
+    required this.received,
+    required this.remaining,
+    required this.settled,
+    required this.transactions,
+    required this.generatedAt,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt     = NumberFormat('#,##,##0.00');
+    final dateFmt = DateFormat('dd MMM yyyy, h:mm a');
+    final genFmt  = DateFormat('dd MMM yyyy  ·  hh:mm a');
+    final partial = received > 0 && remaining > 0;
+    final Color balColor = settled ? const Color(0xFF38D68A)
+                         : partial ? const Color(0xFFF5A623)
+                         :           const Color(0xFFE85C5C);
+
+    // Card colours — matches screenshot aesthetic
+    const cOuter  = Color(0xFF1A1C24);
+    const cCard   = Color(0xFF252836);
+    const cLine   = Color(0xFF363844);
+    const cLabel  = Color(0xFF8A8FA0);
+    const cValue  = Color(0xFFF0F2F8);
+    const cHeader = Color(0xFFFFFFFF);
+
+    Widget divider() => Container(
+      margin: const EdgeInsets.symmetric(vertical: 14),
+      height: 1, color: cLine,
+    );
+
+    return SizedBox(
+      width: 420,
+      child: Container(
+        color: cOuter,
+        padding: const EdgeInsets.all(20),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+          decoration: BoxDecoration(
+            color: cCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: cLine),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+
+              // ── Header ───────────────────────────────────────────────
+              Center(
+                child: Column(
+                  children: [
+                    Text(
+                      bill.partyName.toUpperCase(),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: cHeader,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2),
+                    ),
+                    const SizedBox(height: 5),
+                    const Text(
+                      'BILL PAYMENT RECEIPT',
+                      style: TextStyle(
+                          color: cLabel,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.5),
+                    ),
+                  ],
+                ),
+              ),
+
+              divider(),
+
+              // ── Bill details ─────────────────────────────────────────
+              _ReceiptRow(label: 'CLIENT',
+                  value: bill.partyName,
+                  cLabel: cLabel, cValue: cValue),
+              const SizedBox(height: 10),
+              _ReceiptRow(label: 'BILL NO.',
+                  value: bill.billNumber,
+                  cLabel: cLabel, cValue: cValue),
+              const SizedBox(height: 10),
+              _ReceiptRow(label: 'DATE',
+                  value: dateFmt.format(bill.billDate),
+                  cLabel: cLabel, cValue: cValue),
+              if ((bill.billNote ?? '').isNotEmpty) ...[          
+                const SizedBox(height: 10),
+                _ReceiptRow(label: 'NOTE',
+                    value: bill.billNote!,
+                    cLabel: cLabel, cValue: cValue),
+              ],
+
+              divider(),
+
+              // ── Financials ───────────────────────────────────────────
+              _ReceiptRow(label: 'BILL TOTAL',
+                  value: '₹${fmt.format(bill.billTotal)}',
+                  cLabel: cLabel, cValue: cValue),
+              const SizedBox(height: 10),
+              _ReceiptRow(label: 'AMOUNT PAID',
+                  value: '₹${fmt.format(received)}',
+                  cLabel: cLabel, cValue: cValue),
+              const SizedBox(height: 10),
+              _ReceiptRow(
+                label: 'BALANCE DUE',
+                value: settled
+                    ? 'FULLY PAID'
+                    : '₹${fmt.format(remaining)}',
+                cLabel: cLabel,
+                cValue: balColor,
+                bold: true,
+              ),
+
+              divider(),
+
+              // ── Account details ──────────────────────────────────────
+              const Text(
+                'ACCOUNT DETAILS',
+                style: TextStyle(
+                    color: cValue,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8),
+              ),
+              const SizedBox(height: 12),
+              _ReceiptRow(label: 'ACCOUNT NAME',
+                  value: bill.partyName,
+                  cLabel: cLabel, cValue: cValue),
+              const SizedBox(height: 10),
+              const _ReceiptRow(label: 'CATEGORY',
+                  value: 'Party Ledger',
+                  cLabel: cLabel, cValue: cValue),
+
+              // ── Footer ───────────────────────────────────────────────
+              const SizedBox(height: 20),
+              Center(
+                child: Text(
+                  'Generated ${genFmt.format(generatedAt)}',
+                  style: const TextStyle(
+                      color: Color(0xFF4A4F5C), fontSize: 9.5),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Receipt row  (label left, value right)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ReceiptRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color  cLabel;
+  final Color  cValue;
+  final bool   bold;
+  const _ReceiptRow({
+    required this.label,
+    required this.value,
+    required this.cLabel,
+    required this.cValue,
+    this.bold = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 5,
+            child: Text(label,
+                style: TextStyle(
+                    color: cLabel,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.4)),
+          ),
+          Expanded(
+            flex: 5,
+            child: Text(value,
+                textAlign: TextAlign.end,
+                style: TextStyle(
+                    color: cValue,
+                    fontSize: 13,
+                    fontWeight: bold ? FontWeight.w800 : FontWeight.w600)),
+          ),
+        ],
+      );
+}
