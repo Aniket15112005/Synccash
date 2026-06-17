@@ -229,6 +229,36 @@ final bankTransactionsStreamProvider =
     StreamProvider.family<List<TransactionEntity>, String>(
   (ref, cashbookId) {
     final repo = ref.read(transactionRepositoryProvider);
+    return repo.getTransactionsStream(cashbookId, limit: 0).map((txs) {
+      // Own bank entries — shown as-is in bank
+      final bankTxs = txs
+          .where((tx) => tx.category.toLowerCase() == 'bank')
+          .toList();
+
+      // CB entries — reflected in bank with FLIPPED type:
+      //   CB income → bank expense (money in cashbook = money out of bank)
+      //   CB expense → bank income (money out of cashbook = money into bank)
+      final cbFlipped = txs
+          .where((tx) => tx.category.toLowerCase() == 'cb')
+          .map((tx) => tx.copyWith(
+                type: tx.type.toLowerCase() == 'income' ? 'expense' : 'income',
+              ))
+          .toList();
+
+      return [...bankTxs, ...cbFlipped]
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    });
+  },
+);
+
+/// Pure bank entries only — used by the NORMAL dashboard balance card to
+/// subtract bank activity from the cashbook's pre-aggregated totals.
+/// Must NOT include CB mirror entries, otherwise the subtraction goes wrong
+/// (CB mirrors were never in cashbook.totalIncome/Expense to begin with).
+final bankOnlyTransactionsStreamProvider =
+    StreamProvider.family<List<TransactionEntity>, String>(
+  (ref, cashbookId) {
+    final repo = ref.read(transactionRepositoryProvider);
     return repo.getTransactionsStream(cashbookId, limit: 0).map(
       (txs) => txs.where((tx) => tx.category.toLowerCase() == 'bank').toList(),
     );

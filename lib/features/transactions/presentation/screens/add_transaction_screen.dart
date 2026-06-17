@@ -263,9 +263,6 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdByName: tx.creatorName,
           createdAt:     tx.createdAt,
         );
-      } else if (_category == 'Bank' || _category == 'UPI') {
-        // Bank/UPI income with no bill/OB selected — plain addTransaction
-        await ref.read(transactionRepositoryProvider).addTransaction(tx);
       } else if (_type == 'income') {
         await ref.read(saleBillActionsProvider.notifier).recordObPaymentWithOverflow(
           cashbookId:    tx.cashbookId,

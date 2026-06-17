@@ -149,7 +149,7 @@ class _AddFAB extends StatelessWidget {
   }
 }
 
-// ── Greeting header ───────────────────────────────────────────────────────────
+
 
 class _GreetingHeader extends ConsumerWidget {
   const _GreetingHeader();
@@ -224,31 +224,7 @@ class _GreetingHeader extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
       child: Row(
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _greeting(),
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  firstName,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.6,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          const Spacer(), 
           // ── UPI pill — visible to ALL users (Android + iOS/PWA) ─────────
           GestureDetector(
             onTap: () {
@@ -397,7 +373,7 @@ class _BalanceCardSection extends ConsumerWidget {
     final cashbookAsync = ref.watch(cashbookStreamProvider);
     final cashbookId    = ref.watch(currentCashbookIdProvider);
     final bankAsync     = cashbookId != null
-        ? ref.watch(bankTransactionsStreamProvider(cashbookId))
+        ? ref.watch(bankOnlyTransactionsStreamProvider(cashbookId))
         : const AsyncValue<List<TransactionEntity>>.data([]);
     final upiAsync      = cashbookId != null
         ? ref.watch(upiTransactionsStreamProvider(cashbookId))
@@ -430,7 +406,7 @@ class _BalanceCardSection extends ConsumerWidget {
               incomeOverride:  adjIncome,
               expenseOverride: adjExpense,
               balanceOverride: adjBalance,
-              categoryLabel:   'RETAIL',
+              categoryLabel:   '',
             ),
           ),
         );

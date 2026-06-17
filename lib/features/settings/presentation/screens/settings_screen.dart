@@ -112,36 +112,39 @@ class _MainSheet extends StatelessWidget {
       child: Column(
         children: [
           const _SectionLabel('DATA'),
-          const SizedBox(height: 8),
-          _SettingsTile(
-            icon: Icons.upload_file_rounded,
-            iconColor: const Color(0xFF3B82F6),
-            title: 'Export',
-            subtitle: 'Save as PDF or Excel spreadsheet',
-            onTap: () => onNavigate(_SettingsPage.export),
-            trailing: const _ChevronIcon(),
-          ).animate().fadeIn(delay: 60.ms, duration: 220.ms).slideX(
-              begin: 0.04, end: 0, curve: Curves.easeOut),
-          const SizedBox(height: 8),
-          _SettingsTile(
-            icon: Icons.download_rounded,
-            iconColor: const Color(0xFF8B5CF6),
-            title: 'Import',
-            subtitle: 'Restore from a .synccash backup file',
-            onTap: () => onNavigate(_SettingsPage.import),
-            trailing: const _ChevronIcon(),
-          ).animate().fadeIn(delay: 100.ms, duration: 220.ms).slideX(
-              begin: 0.04, end: 0, curve: Curves.easeOut),
-          const SizedBox(height: 8),
-                    _SettingsTile(
-            icon: Icons.cloud_done_rounded,
-            iconColor: const Color(0xFF10B981),
-            title: 'Backup',
-            subtitle: 'Create a local backup of all transactions',
-            onTap: () => onNavigate(_SettingsPage.backup),
-            trailing: const _ChevronIcon(),
-          ).animate().fadeIn(delay: 140.ms, duration: 220.ms).slideX(
-              begin: 0.04, end: 0, curve: Curves.easeOut),
+          // Export, Import, Backup — iOS/PWA only (kIsWeb covers PWA + web)
+          if (kIsWeb) ...[
+            const SizedBox(height: 8),
+            _SettingsTile(
+              icon: Icons.upload_file_rounded,
+              iconColor: const Color(0xFF3B82F6),
+              title: 'Export',
+              subtitle: 'Save as PDF or Excel spreadsheet',
+              onTap: () => onNavigate(_SettingsPage.export),
+              trailing: const _ChevronIcon(),
+            ).animate().fadeIn(delay: 60.ms, duration: 220.ms).slideX(
+                begin: 0.04, end: 0, curve: Curves.easeOut),
+            const SizedBox(height: 8),
+            _SettingsTile(
+              icon: Icons.download_rounded,
+              iconColor: const Color(0xFF8B5CF6),
+              title: 'Import',
+              subtitle: 'Restore from a .synccash backup file',
+              onTap: () => onNavigate(_SettingsPage.import),
+              trailing: const _ChevronIcon(),
+            ).animate().fadeIn(delay: 100.ms, duration: 220.ms).slideX(
+                begin: 0.04, end: 0, curve: Curves.easeOut),
+            const SizedBox(height: 8),
+            _SettingsTile(
+              icon: Icons.cloud_done_rounded,
+              iconColor: const Color(0xFF10B981),
+              title: 'Backup',
+              subtitle: 'Create a local backup of all transactions',
+              onTap: () => onNavigate(_SettingsPage.backup),
+              trailing: const _ChevronIcon(),
+            ).animate().fadeIn(delay: 140.ms, duration: 220.ms).slideX(
+                begin: 0.04, end: 0, curve: Curves.easeOut),
+          ],
           // ─── Sales tile ─────────────────────────────────────────────
           const SizedBox(height: 8),
           _SettingsTile(

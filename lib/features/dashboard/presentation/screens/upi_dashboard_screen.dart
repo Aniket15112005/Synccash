@@ -18,6 +18,8 @@ import 'package:synccash/features/transactions/presentation/screens/add_transact
 import 'package:synccash/features/transactions/presentation/widgets/transaction_list_item.dart';
 import 'package:synccash/features/dashboard/presentation/screens/bank_dashboard_screen.dart';
 import 'package:synccash/features/dashboard/presentation/screens/cb_dashboard_screen.dart';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 // ── UPI theme colours ─────────────────────────────────────────────────────────
 const _kUpiPrimary    = Color(0xFFA78BFA);  // purple 400
@@ -188,31 +190,7 @@ class _UpiHeader extends ConsumerWidget {
       child: Row(
         children: [
           // ── Greeting + name ──────────────────────────────────────────
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _upiGreeting(),
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  firstName,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.6,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          const Spacer(),
           // ── "Cash" pill — taps back to normal dashboard ──────────────
           GestureDetector(
             onTap: () {
@@ -245,77 +223,79 @@ class _UpiHeader extends ConsumerWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          // ── "Bank" pill — taps to Bank dashboard ────────────────────
-          GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const BankDashboardScreen()),
-              );
-            },
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0E2A1F),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF1B4D35)),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.account_balance_rounded,
-                      size: 14, color: Color(0xFF34D399)),
-                  SizedBox(width: 6),
-                  Text(
-                    'Bank',
-                    style: TextStyle(
-                      color: Color(0xFF34D399),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.2,
+          if (kIsWeb || (!kIsWeb && Platform.isIOS)) ...[
+            const SizedBox(width: 8),
+            // ── "Bank" pill — taps to Bank dashboard ────────────────────
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (_) => const BankDashboardScreen()),
+                );
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0E2A1F),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF1B4D35)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.account_balance_rounded,
+                        size: 14, color: Color(0xFF34D399)),
+                    SizedBox(width: 6),
+                    Text(
+                      'Bank',
+                      style: TextStyle(
+                        color: Color(0xFF34D399),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.2,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          // ── "CB" pill — taps to CB dashboard ──────────────────────────
-          GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const CbDashboardScreen()),
-              );
-            },
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A1200),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF3D2800)),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.book_rounded, size: 14, color: Color(0xFFFBBF24)),
-                  SizedBox(width: 6),
-                  Text(
-                    'CB',
-                    style: TextStyle(
-                      color: Color(0xFFFBBF24),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.2,
+            const SizedBox(width: 8),
+            // ── "CB" pill — taps to CB dashboard ──────────────────────────
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (_) => const CbDashboardScreen()),
+                );
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1200),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF3D2800)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.book_rounded, size: 14, color: Color(0xFFFBBF24)),
+                    SizedBox(width: 6),
+                    Text(
+                      'CB',
+                      style: TextStyle(
+                        color: Color(0xFFFBBF24),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.2,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
+          ],
           const SizedBox(width: 12),
           // ── Settings button ──────────────────────────────────────────
           GestureDetector(
@@ -420,7 +400,7 @@ class _UpiBalanceCard extends StatefulWidget {
 }
 
 class _UpiBalanceCardState extends State<_UpiBalanceCard> {
-  bool _hide = true;
+  bool _hide = false;
 
   @override
   Widget build(BuildContext context) {

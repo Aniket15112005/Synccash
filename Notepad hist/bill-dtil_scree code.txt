@@ -1,0 +1,1904 @@
+import 'dart:async';
+import 'dart:math' as math;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
+    show currentCashbookIdProvider;
+import '../../domain/entities/sale_bill_entity.dart';
+import '../providers/sale_bill_provider.dart';
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Design tokens — Arc Ledger aesthetic
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _T {
+  static const bg      = Color(0xFF070C12);
+  static const surface = Color(0xFF0C1420);
+  static const panel   = Color(0xFF101B2A);
+  static const line    = Color(0xFF182438);
+  static const line2   = Color(0xFF1E2E44);
+  static const muted   = Color(0xFF3A5070);
+  static const muted2  = Color(0xFF5C7898);
+  static const accent  = Color(0xFF4472D8);
+  static const accent2 = Color(0xFF7AAAF8);
+  static const text    = Color(0xFFCEDFF8);
+  static const text2   = Color(0xFF8AACCE);
+  static const green   = Color(0xFF24CCA0);
+  static const amber   = Color(0xFFEDA030);
+  static const red     = Color(0xFFDE4E68);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Bill Detail Screen
+// ─────────────────────────────────────────────────────────────────────────────
+
+class BillDetailScreen extends ConsumerStatefulWidget {
+  final SaleBillEntity bill;
+  final int billCount;
+  const BillDetailScreen({
+    super.key,
+    required this.bill,
+    this.billCount = 1,
+  });
+
+  @override
+  ConsumerState<BillDetailScreen> createState() => _BillDetailScreenState();
+}
+
+class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
+    with TickerProviderStateMixin {
+  StreamSubscription<QuerySnapshot>? _txSub;
+  ProviderSubscription<String?>?     _idSub;
+  String?                            _cashbookId;
+
+  List<_TxItem> _transactions = [];
+  bool          _loading      = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _idSub = ref.listenManual<String?>(
+        currentCashbookIdProvider,
+        (prev, next) {
+          if (next != null && next.isNotEmpty && next != _cashbookId) {
+            _cashbookId = next;
+            _txSub?.cancel();
+            _startStream(next);
+          }
+        },
+        fireImmediately: true,
+      );
+    });
+  }
+
+  void _startStream(String cashbookId) {
+    if (!mounted) return;
+    final billId = widget.bill.saleBillId;
+    final partyQ = widget.bill.partyName.trim().toLowerCase();
+
+    _txSub = FirebaseFirestore.instance
+        .collection('cashbooks')
+        .doc(cashbookId)
+        .collection('transactions')
+        .where('type', isEqualTo: 'income')
+        .snapshots()
+        .listen(
+      (snap) {
+        if (!mounted) return;
+        final items = snap.docs
+            .where((doc) {
+              final raw      = doc.data();
+              final linkedId = raw['linkedSaleBillId'] as String?;
+              if (linkedId != null && linkedId.isNotEmpty) {
+                return linkedId == billId;
+              }
+              if (widget.billCount > 1) return false;
+              return (raw['description'] as String? ?? '')
+                  .toLowerCase()
+                  .contains(partyQ);
+            })
+            .map((doc) {
+              final raw = doc.data();
+              return _TxItem(
+                id:          raw['transactionId'] as String? ?? doc.id,
+                amount:      (raw['amount'] as num?)?.toDouble() ?? 0.0,
+                createdAt:   (raw['createdAt'] as Timestamp?)?.toDate() ??
+                             DateTime.now(),
+                description: raw['description'] as String? ?? '',
+                isLinked:    (raw['linkedSaleBillId'] as String? ?? '').isNotEmpty,
+              );
+            })
+            .toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+        setState(() {
+          _transactions = items;
+          _loading      = false;
+        });
+      },
+      onError: (_) {
+        if (mounted) setState(() => _loading = false);
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _idSub?.close();
+    _txSub?.cancel();
+    super.dispose();
+  }
+
+  void _recordPayment() {
+    if (_cashbookId == null) return;
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _RecordPaymentSheet(
+        bill:        widget.bill,
+        cashbookId:  _cashbookId!,
+        remaining:   _remaining,
+      ),
+    );
+  }
+
+  double get _received =>
+      _transactions.fold<double>(0.0, (s, t) => s + t.amount);
+  double get _remaining =>
+      (widget.bill.billTotal - _received).clamp(0.0, double.infinity);
+  bool get _settled => _remaining <= 0;
+
+  void _showPaymentDetail(_TxItem tx) {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _PaymentDetailSheet(
+        tx:   tx,
+        bill: widget.bill,
+      ),
+    );
+  }
+
+  Future<void> _deletePayment(_TxItem tx) async {
+    if (_cashbookId == null) return;
+    HapticFeedback.mediumImpact();
+
+    final fmt = NumberFormat('#,##,##0.00');
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _T.panel,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: _T.line2)),
+        title: const Text(
+          'Delete Payment?',
+          style: TextStyle(
+              color: _T.text, fontWeight: FontWeight.w700, fontSize: 16),
+        ),
+        content: Text(
+          'Payment of ₹${fmt.format(tx.amount)} will be permanently deleted '
+          'and the cashbook balance will be updated accordingly.',
+          style: const TextStyle(
+              color: _T.muted2, fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: _T.muted2)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete',
+                style: TextStyle(
+                    color: _T.red, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final db          = FirebaseFirestore.instance;
+      final cashbookRef = db.collection('cashbooks').doc(_cashbookId);
+      final txRef       = cashbookRef.collection('transactions').doc(tx.id);
+
+      await db.runTransaction((txn) async {
+        final txSnap = await txn.get(txRef);
+        if (!txSnap.exists) return;
+
+        final data   = txSnap.data()!;
+        final amount = (data['amount'] as num?)?.toDouble() ?? tx.amount;
+
+        txn.delete(txRef);
+
+        txn.update(cashbookRef, {
+          'balance': FieldValue.increment(-amount),
+          'income':  FieldValue.increment(-amount),
+        });
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snackBar('Payment entry deleted', success: true),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snackBar('Failed to delete: $e', success: false),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt       = NumberFormat('#,##,##0.00');
+    final dateFmt   = DateFormat('dd MMM yyyy');
+    final timeFmt   = DateFormat('dd MMM  ·  hh:mm a');
+    final received  = _received;
+    final remaining = _remaining;
+    final settled   = _settled;
+    final partial   = received > 0 && remaining > 0;
+    final pct = widget.bill.billTotal > 0
+        ? (received / widget.bill.billTotal).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Scaffold(
+      backgroundColor: _T.bg,
+      body: CustomScrollView(
+        physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics()),
+        slivers: [
+
+          // ── Arc Hero Header ───────────────────────────────────────────────
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _ArcHeader(
+              bill:     widget.bill,
+              pct:      pct,
+              received: received,
+              remaining: remaining,
+              settled:  settled,
+              partial:  partial,
+              loading:  _loading,
+              fmt:      fmt,
+            ),
+          ),
+
+          // ── Body ──────────────────────────────────────────────────────────
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+
+                // ── Bill info card ────────────────────────────────────────
+                _BillInfoCard(
+                  bill:    widget.bill,
+                  dateFmt: dateFmt,
+                ).animate().fadeIn(delay: 60.ms, duration: 300.ms)
+                 .slideY(begin: 0.04, end: 0, curve: Curves.easeOutCubic),
+                const SizedBox(height: 20),
+
+                // ── Payments section header ────────────────────────────────
+                _TapeHeader(
+                  label: 'PAYMENT HISTORY',
+                  count: _loading ? null : _transactions.length,
+                ).animate().fadeIn(delay: 100.ms, duration: 280.ms),
+                const SizedBox(height: 8),
+
+                // ── Payment list ──────────────────────────────────────────
+                if (_loading)
+                  _PaymentLoadingShimmer()
+                else if (_transactions.isEmpty)
+                  _EmptyPayments().animate().fadeIn(delay: 120.ms)
+                else
+                  ...List.generate(_transactions.length, (i) {
+                    final tx = _transactions[i];
+                    return RepaintBoundary(
+                      child: _PaymentTile(
+                        tx:       tx,
+                        timeFmt:  timeFmt,
+                        fmt:      fmt,
+                        index:    i,
+                        onTap:    () => _showPaymentDetail(tx),
+                        onDelete: () => _deletePayment(tx),
+                      ),
+                    );
+                  }),
+
+                // ── Action buttons ────────────────────────────────────────
+                if (!settled) ...[
+                  const SizedBox(height: 28),
+                  _ActionButtons(
+                    bill:            widget.bill,
+                    cashbookId:      _cashbookId,
+                    remaining:       remaining,
+                    onRecordPayment: _recordPayment,
+                  ).animate().fadeIn(
+                    delay: Duration(
+                        milliseconds: 140 + _transactions.length * 40),
+                    duration: 300.ms,
+                  ),
+                ] else ...[
+                  const SizedBox(height: 24),
+                  _SettledBanner()
+                      .animate()
+                      .fadeIn(delay: 120.ms, duration: 400.ms)
+                      .scale(begin: const Offset(0.96, 0.96)),
+                ],
+              ]),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Arc Hero Header — radial payment ring + bill identity
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ArcHeader extends SliverPersistentHeaderDelegate {
+  final SaleBillEntity bill;
+  final double         pct;
+  final double         received;
+  final double         remaining;
+  final bool           settled;
+  final bool           partial;
+  final bool           loading;
+  final NumberFormat   fmt;
+
+  const _ArcHeader({
+    required this.bill,
+    required this.pct,
+    required this.received,
+    required this.remaining,
+    required this.settled,
+    required this.partial,
+    required this.loading,
+    required this.fmt,
+  });
+
+  @override double get minExtent => 64;
+  @override double get maxExtent => 280;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final progress  = (shrinkOffset / (maxExtent - minExtent)).clamp(0.0, 1.0);
+    final collapsed = progress > 0.72;
+    final arcColor  = settled ? _T.green : (partial ? _T.amber : _T.muted2);
+    final top       = MediaQuery.of(context).padding.top;
+
+    return Stack(
+      children: [
+        // Base background
+        Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF0A1220), _T.bg],
+            ),
+          ),
+        ),
+
+        // Radial glow behind arc
+        if (progress < 0.7)
+          Positioned(
+            top: top + 10 - shrinkOffset * 0.4,
+            left: 0, right: 0,
+            child: Opacity(
+              opacity: (1 - progress * 1.4).clamp(0.0, 1.0),
+              child: Center(
+                child: Container(
+                  width: 220, height: 220,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(colors: [
+                      arcColor.withValues(alpha: 0.07),
+                      Colors.transparent,
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+        // Expanded: arc + identity
+        if (!collapsed)
+          Positioned(
+            top: top,
+            left: 0, right: 0, bottom: 0,
+            child: Opacity(
+              opacity: (1 - progress * 1.8).clamp(0.0, 1.0),
+              child: Column(
+                children: [
+                  // Back button row
+                  SizedBox(
+                    height: 44,
+                    child: Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back_ios_rounded,
+                              color: _T.text2, size: 17),
+                          onPressed: () => Navigator.of(context).pop(),
+                        ),
+                        const Spacer(),
+                        Padding(
+                          padding: const EdgeInsets.only(right: 16),
+                          child: _StatusBadge(settled: settled, partial: partial),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Arc ring
+                  Expanded(
+                    child: Center(
+                      child: SizedBox(
+                        width: 154, height: 154,
+                        child: CustomPaint(
+                          painter: _ArcPainter(
+                            pct: loading ? 0.0 : pct,
+                            color: arcColor,
+                          ),
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (loading)
+                                  SizedBox(
+                                    width: 18, height: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 1.5,
+                                        color: _T.accent.withValues(alpha: 0.5)),
+                                  )
+                                else ...[
+                                  Text(
+                                    settled ? 'PAID' : '₹${fmt.format(remaining)}',
+                                    style: TextStyle(
+                                      color: arcColor,
+                                      fontSize: settled ? 14 : 15,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: settled ? 1.2 : -0.4,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    settled ? 'Fully settled' : 'remaining',
+                                    style: TextStyle(
+                                        color: _T.muted2.withValues(alpha: 0.7),
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w500),
+                                  ),
+                                  if (!loading && !settled) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${(pct * 100).toStringAsFixed(0)}%',
+                                      style: const TextStyle(
+                                          color: _T.muted2,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Bill identity
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            bill.partyName,
+                            style: const TextStyle(
+                              color: _T.text,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Container(
+                          width: 3, height: 3,
+                          margin: const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: const BoxDecoration(
+                            color: _T.muted,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        Text(
+                          bill.billNumber,
+                          style: const TextStyle(
+                              color: _T.muted2, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        // Collapsed bar
+        if (collapsed)
+          Positioned(
+            left: 0, right: 0, top: 0, bottom: 0,
+            child: Container(
+              color: _T.bg,
+              padding: EdgeInsets.only(top: top),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_rounded,
+                        color: _T.text2, size: 17),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(bill.partyName,
+                            style: const TextStyle(
+                                color: _T.text,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700)),
+                        Text(bill.billNumber,
+                            style: const TextStyle(
+                                color: _T.muted2, fontSize: 10)),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 16),
+                    child: _StatusBadge(settled: settled, partial: partial),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        // Bottom divider
+        Positioned(
+          left: 0, right: 0, bottom: 0,
+          child: Container(height: 1, color: _T.line),
+        ),
+      ],
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _ArcHeader old) =>
+      old.pct != pct || old.settled != settled || old.loading != loading;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Arc painter — radial progress ring
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ArcPainter extends CustomPainter {
+  final double pct;
+  final Color  color;
+  const _ArcPainter({required this.pct, required this.color});
+
+  static const _start  = -math.pi * 0.8;
+  static const _sweep  = math.pi * 1.6;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c    = Offset(size.width / 2, size.height / 2);
+    final r    = size.width / 2 - 10;
+    final rect = Rect.fromCircle(center: c, radius: r);
+
+    // Track
+    final track = Paint()
+      ..color = _T.line2.withValues(alpha: 0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 10
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(rect, _start, _sweep, false, track);
+
+    if (pct <= 0) return;
+
+    // Progress
+    final progress = Paint()
+      ..shader = SweepGradient(
+        startAngle: _start,
+        endAngle: _start + _sweep,
+        colors: [
+          color.withValues(alpha: 0.6),
+          color,
+        ],
+      ).createShader(rect)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 10
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(rect, _start, _sweep * pct, false, progress);
+
+    // Tip dot
+    final tipAngle = _start + _sweep * pct;
+    final tx = c.dx + r * math.cos(tipAngle);
+    final ty = c.dy + r * math.sin(tipAngle);
+    final dot = Paint()..color = color;
+    canvas.drawCircle(Offset(tx, ty), 5, dot);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ArcPainter old) =>
+      old.pct != pct || old.color != color;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Payment Detail Sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PaymentDetailSheet extends StatelessWidget {
+  final _TxItem        tx;
+  final SaleBillEntity bill;
+
+  const _PaymentDetailSheet({required this.tx, required this.bill});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt     = NumberFormat('#,##,##0.00');
+    final dateFmt = DateFormat('dd MMM yyyy  ·  hh:mm a');
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: _T.panel,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 36),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 36, height: 4,
+              margin: const EdgeInsets.only(bottom: 24),
+              decoration: BoxDecoration(
+                color: _T.line2,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+
+          // Amount hero
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            decoration: BoxDecoration(
+              color: _T.green.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _T.green.withValues(alpha: 0.15)),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  width: 48, height: 48,
+                  decoration: BoxDecoration(
+                    color: _T.green.withValues(alpha: 0.10),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: _T.green.withValues(alpha: 0.22)),
+                  ),
+                  child: const Icon(Icons.arrow_downward_rounded,
+                      color: _T.green, size: 22),
+                ),
+                const SizedBox(height: 12),
+                const Text('Payment Received',
+                    style: TextStyle(
+                        color: _T.green,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                        letterSpacing: 0.4)),
+                const SizedBox(height: 6),
+                Text(
+                  '₹${fmt.format(tx.amount)}',
+                  style: const TextStyle(
+                      color: _T.green,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 32,
+                      letterSpacing: -1),
+                ),
+                if (tx.isLinked) ...[
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _T.green.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: _T.green.withValues(alpha: 0.18)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.link_rounded,
+                            color: _T.green, size: 11),
+                        SizedBox(width: 4),
+                        Text('Linked to bill',
+                            style: TextStyle(
+                                color: _T.green,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Details
+          Container(
+            decoration: BoxDecoration(
+              color: _T.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _T.line2),
+            ),
+            child: Column(
+              children: [
+                _DetailRow(
+                  icon:  Icons.calendar_today_rounded,
+                  label: 'Date & Time',
+                  value: dateFmt.format(tx.createdAt),
+                ),
+                _Divider(),
+                _DetailRow(
+                  icon:  Icons.receipt_long_rounded,
+                  label: 'Bill No.',
+                  value: bill.billNumber,
+                ),
+                _Divider(),
+                _DetailRow(
+                  icon:  Icons.business_rounded,
+                  label: 'Party',
+                  value: bill.partyName,
+                ),
+                if (tx.description.isNotEmpty) ...[
+                  _Divider(),
+                  _DetailRow(
+                    icon:  Icons.notes_rounded,
+                    label: 'Description',
+                    value: tx.description,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          SizedBox(
+            height: 48,
+            child: OutlinedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _T.muted2,
+                side: const BorderSide(color: _T.line2),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Close',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 14)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final IconData icon;
+  final String   label;
+  final String   value;
+  const _DetailRow(
+      {required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          children: [
+            Icon(icon, color: _T.muted, size: 14),
+            const SizedBox(width: 10),
+            Text(label,
+                style: const TextStyle(color: _T.muted, fontSize: 12)),
+            const Spacer(),
+            Flexible(
+              child: Text(value,
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(
+                      color: _T.text,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12)),
+            ),
+          ],
+        ),
+      );
+}
+
+class _Divider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 1,
+        margin: const EdgeInsets.symmetric(horizontal: 16),
+        color: _T.line,
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Bill info card — ledger table rows
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BillInfoCard extends StatelessWidget {
+  final SaleBillEntity bill;
+  final DateFormat     dateFmt;
+  const _BillInfoCard({required this.bill, required this.dateFmt});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _T.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _T.line2),
+      ),
+      child: Column(
+        children: [
+          _LedgerRow(
+            label: 'Party',
+            value: bill.partyName,
+            isFirst: true,
+          ),
+          _LedgerRow(
+            label: 'Bill No.',
+            value: bill.billNumber,
+          ),
+          _LedgerRow(
+            label: 'Date',
+            value: dateFmt.format(bill.billDate),
+          ),
+          if ((bill.billNote ?? '').isNotEmpty)
+            _LedgerRow(
+              label: 'Note',
+              value: bill.billNote!,
+              isLast: true,
+            )
+          else
+            const SizedBox.shrink(),
+        ],
+      ),
+    );
+  }
+}
+
+class _LedgerRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool   isFirst;
+  final bool   isLast;
+  const _LedgerRow({
+    required this.label,
+    required this.value,
+    this.isFirst = false,
+    this.isLast = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => Column(
+        children: [
+          Container(
+            color: isFirst
+                ? _T.line.withValues(alpha: 0.5)
+                : Colors.transparent,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 66,
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                        color: _T.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.3),
+                  ),
+                ),
+                Container(
+                  width: 1, height: 14,
+                  margin: const EdgeInsets.only(right: 12),
+                  color: _T.line2,
+                ),
+                Expanded(
+                  child: Text(
+                    value,
+                    style: const TextStyle(
+                        color: _T.text, fontSize: 12.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!isLast)
+            Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              color: _T.line,
+            ),
+        ],
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tape section header — terminal-style divider
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TapeHeader extends StatelessWidget {
+  final String label;
+  final int?   count;
+  const _TapeHeader({required this.label, this.count});
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          Container(
+            width: 3, height: 12,
+            decoration: BoxDecoration(
+              color: _T.accent2.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+                color: _T.muted2,
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.8),
+          ),
+          const SizedBox(width: 6),
+          if (count != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: _T.line2,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '$count',
+                style: const TextStyle(
+                    color: _T.muted2,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700),
+              ),
+            ),
+          const Spacer(),
+          // Perforated tape line
+          Expanded(
+            child: CustomPaint(
+              painter: _PerforationPainter(),
+              child: const SizedBox(height: 1),
+            ),
+          ),
+        ],
+      );
+}
+
+class _PerforationPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = _T.line2.withValues(alpha: 0.6)
+      ..strokeWidth = 1;
+    const dashW = 4.0;
+    const gapW  = 4.0;
+    double x = 0;
+    while (x < size.width) {
+      canvas.drawLine(Offset(x, 0), Offset(x + dashW, 0), paint);
+      x += dashW + gapW;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter _) => false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Payment tile — bank statement entry style
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PaymentTile extends StatelessWidget {
+  final _TxItem      tx;
+  final DateFormat   timeFmt;
+  final NumberFormat fmt;
+  final int          index;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const _PaymentTile({
+    required this.tx,
+    required this.timeFmt,
+    required this.fmt,
+    required this.index,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 1),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Left date stamp
+                Container(
+                  width: 52,
+                  color: _T.surface,
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 12, horizontal: 6),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        DateFormat('dd').format(tx.createdAt),
+                        style: const TextStyle(
+                          color: _T.text2,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          height: 1,
+                        ),
+                      ),
+                      Text(
+                        DateFormat('MMM').format(tx.createdAt)
+                            .toUpperCase(),
+                        style: const TextStyle(
+                            color: _T.muted,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Separator
+                Container(
+                  width: 1,
+                  color: tx.isLinked
+                      ? _T.green.withValues(alpha: 0.3)
+                      : _T.line,
+                ),
+
+                // Content
+                Expanded(
+                  child: Container(
+                    color: _T.bg,
+                    padding: const EdgeInsets.fromLTRB(12, 11, 8, 11),
+                    child: Row(
+                      children: [
+                        // Description + time
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                tx.description.isNotEmpty
+                                    ? tx.description
+                                    : 'Payment received',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: _T.text,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 3),
+                              Row(
+                                children: [
+                                  Text(
+                                    DateFormat('hh:mm a')
+                                        .format(tx.createdAt),
+                                    style: TextStyle(
+                                        color: _T.muted.withValues(alpha: 0.8),
+                                        fontSize: 10),
+                                  ),
+                                  if (tx.isLinked) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 5, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: _T.green.withValues(alpha: 0.08),
+                                        borderRadius: BorderRadius.circular(3),
+                                        border: Border.all(
+                                            color: _T.green
+                                                .withValues(alpha: 0.18)),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.link_rounded,
+                                              color: _T.green, size: 8),
+                                          SizedBox(width: 2),
+                                          Text('linked',
+                                              style: TextStyle(
+                                                  color: _T.green,
+                                                  fontSize: 8,
+                                                  fontWeight: FontWeight.w700)),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Amount
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              '+ ₹${fmt.format(tx.amount)}',
+                              style: const TextStyle(
+                                  color: _T.green,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                  letterSpacing: -0.3),
+                            ),
+                            const SizedBox(height: 2),
+                            const Text('CR',
+                                style: TextStyle(
+                                    color: _T.green,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5)),
+                          ],
+                        ),
+
+                        const SizedBox(width: 4),
+                        _PaymentPopupMenu(onDelete: onDelete),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ).animate(delay: Duration(milliseconds: index * 40))
+       .fadeIn(duration: 240.ms)
+       .slideX(begin: 0.03, end: 0, curve: Curves.easeOutCubic);
+}
+
+class _PaymentPopupMenu extends StatelessWidget {
+  final VoidCallback onDelete;
+  const _PaymentPopupMenu({required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+        padding: EdgeInsets.zero,
+        iconSize: 18,
+        icon: Icon(
+          Icons.more_vert_rounded,
+          color: _T.muted.withValues(alpha: 0.5),
+          size: 18,
+        ),
+        color: _T.panel,
+        elevation: 8,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: const BorderSide(color: _T.line2)),
+        onSelected: (v) {
+          if (v == 'delete') onDelete();
+        },
+        itemBuilder: (_) => [
+          PopupMenuItem<String>(
+            value: 'delete',
+            height: 44,
+            child: Row(
+              children: [
+                const Icon(Icons.delete_outline_rounded,
+                    color: _T.red, size: 15),
+                const SizedBox(width: 10),
+                const Text('Delete Entry',
+                    style: TextStyle(
+                        color: _T.red,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Loading shimmer
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PaymentLoadingShimmer extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Column(
+        children: List.generate(
+          3,
+          (_) => Container(
+            margin: const EdgeInsets.only(bottom: 1),
+            height: 60,
+            decoration: BoxDecoration(
+              color: _T.surface,
+              border: Border(bottom: BorderSide(color: _T.line)),
+            ),
+          ),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Empty payments placeholder
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _EmptyPayments extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 36),
+        decoration: BoxDecoration(
+          color: _T.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _T.line2),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                color: _T.line2,
+                shape: BoxShape.circle,
+                border: Border.all(color: _T.line2),
+              ),
+              child: const Icon(Icons.payments_outlined,
+                  color: _T.muted, size: 20),
+            ),
+            const SizedBox(height: 10),
+            const Text('No payments recorded',
+                style: TextStyle(
+                    color: _T.text2,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13)),
+            const SizedBox(height: 4),
+            const Text('Use "Record Payment" below to add one.',
+                style: TextStyle(color: _T.muted, fontSize: 11)),
+          ],
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Settled banner
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SettledBanner extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
+        decoration: BoxDecoration(
+          color: _T.green.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _T.green.withValues(alpha: 0.18)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                color: _T.green.withValues(alpha: 0.10),
+                shape: BoxShape.circle,
+                border: Border.all(color: _T.green.withValues(alpha: 0.20)),
+              ),
+              child: const Icon(Icons.check_rounded,
+                  color: _T.green, size: 20),
+            ),
+            const SizedBox(width: 14),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Bill Fully Settled',
+                    style: TextStyle(
+                        color: _T.green,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14)),
+                SizedBox(height: 2),
+                Text('All payments have been received.',
+                    style: TextStyle(color: _T.muted2, fontSize: 11)),
+              ],
+            ),
+          ],
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Action buttons
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ActionButtons extends ConsumerWidget {
+  final SaleBillEntity bill;
+  final String?        cashbookId;
+  final double         remaining;
+  final VoidCallback   onRecordPayment;
+
+  const _ActionButtons({
+    required this.bill,
+    required this.cashbookId,
+    required this.remaining,
+    required this.onRecordPayment,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final fmt       = NumberFormat('#,##,##0.00');
+    final actState  = ref.watch(saleBillActionsProvider);
+    final isLoading = actState.isLoading;
+    final enabled   = cashbookId != null && !isLoading;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 50,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: enabled
+                  ? LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        _T.accent.withValues(alpha: 0.9),
+                        _T.accent,
+                      ],
+                    )
+                  : null,
+              color: enabled ? null : _T.line2,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ElevatedButton.icon(
+              onPressed: enabled ? onRecordPayment : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                elevation: 0,
+              ),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Record Payment',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 46,
+          child: OutlinedButton.icon(
+            onPressed: enabled
+                ? () => _confirmSettle(context, ref, fmt)
+                : null,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _T.green,
+              side: BorderSide(
+                  color: enabled
+                      ? _T.green.withValues(alpha: 0.35)
+                      : _T.line2),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: isLoading
+                ? const SizedBox(
+                    width: 13, height: 13,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: _T.green))
+                : const Icon(Icons.check_circle_outline_rounded, size: 15),
+            label: Text(
+              remaining > 0
+                  ? 'Settle (write off ₹${fmt.format(remaining)})'
+                  : 'Mark as Settled',
+              style: const TextStyle(
+                  fontWeight: FontWeight.w600, fontSize: 12),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _confirmSettle(BuildContext ctx, WidgetRef ref, NumberFormat fmt) {
+    HapticFeedback.mediumImpact();
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        backgroundColor: _T.panel,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: _T.line2)),
+        title: const Text('Mark as Settled?',
+            style: TextStyle(
+                color: _T.text, fontWeight: FontWeight.w700, fontSize: 16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (remaining > 0)
+              Text(
+                '₹${fmt.format(remaining)} is still outstanding. '
+                'This will record a final income entry and mark the bill as settled.',
+                style: const TextStyle(
+                    color: _T.muted2, fontSize: 13, height: 1.5),
+              )
+            else
+              const Text(
+                'This will mark the bill as fully settled.',
+                style: TextStyle(color: _T.muted2, fontSize: 13, height: 1.5),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel',
+                style: TextStyle(color: _T.muted2)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final user = FirebaseAuth.instance.currentUser;
+              if (cashbookId == null || user == null) return;
+              await ref
+                  .read(saleBillActionsProvider.notifier)
+                  .settleWithPayment(
+                    cashbookId:    cashbookId!,
+                    billId:        bill.saleBillId,
+                    billNumber:    bill.billNumber,
+                    partyName:     bill.partyName,
+                    remaining:     remaining,
+                    createdBy:     user.uid,
+                    createdByName: user.displayName ?? '',
+                  );
+            },
+            child: const Text('Settle',
+                style: TextStyle(
+                    color: _T.green, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Record Payment sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _RecordPaymentSheet extends ConsumerStatefulWidget {
+  final SaleBillEntity bill;
+  final String         cashbookId;
+  final double         remaining;
+
+  const _RecordPaymentSheet({
+    required this.bill,
+    required this.cashbookId,
+    required this.remaining,
+  });
+
+  @override
+  ConsumerState<_RecordPaymentSheet> createState() =>
+      _RecordPaymentSheetState();
+}
+
+class _RecordPaymentSheetState extends ConsumerState<_RecordPaymentSheet> {
+  final _formKey  = GlobalKey<FormState>();
+  final _amtCtrl  = TextEditingController();
+  final _noteCtrl = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _amtCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  String _fmtNum(double v) =>
+      v == v.truncateToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _showSnack('Not signed in. Please restart the app.', success: false);
+      return;
+    }
+    setState(() => _submitting = true);
+    try {
+      final amount = double.parse(_amtCtrl.text.trim());
+      await ref.read(saleBillActionsProvider.notifier).recordPayment(
+            cashbookId:    widget.cashbookId,
+            billId:        widget.bill.saleBillId,
+            billNumber:    widget.bill.billNumber,
+            partyName:     widget.bill.partyName,
+            amount:        amount,
+            createdBy:     user.uid,
+            createdByName: user.displayName ?? '',
+            note:          _noteCtrl.text.trim(),
+          );
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          _snackBar('Payment of ₹${_fmtNum(amount)} recorded', success: true),
+        );
+      }
+    } catch (e) {
+      if (mounted) _showSnack('Failed to save: $e', success: false);
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _showSnack(String msg, {required bool success}) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(_snackBar(msg, success: success));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final fmt    = NumberFormat('#,##,##0.00');
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: _T.panel,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottom),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: _T.line2,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  Container(
+                    width: 40, height: 40,
+                    decoration: BoxDecoration(
+                      color: _T.green.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: _T.green.withValues(alpha: 0.18)),
+                    ),
+                    child: const Icon(Icons.add_rounded,
+                        color: _T.green, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Record Payment',
+                            style: TextStyle(
+                                color: _T.text,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16)),
+                        Text(
+                          '${widget.bill.partyName}  ·  ${widget.bill.billNumber}',
+                          style: const TextStyle(
+                              color: _T.muted2, fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                margin: const EdgeInsets.only(top: 12, bottom: 16),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: _T.surface,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _T.line2),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.account_balance_wallet_outlined,
+                        color: _T.muted, size: 13),
+                    const SizedBox(width: 8),
+                    const Text('Remaining balance',
+                        style: TextStyle(color: _T.muted, fontSize: 11)),
+                    const Spacer(),
+                    Text('₹${fmt.format(widget.remaining)}',
+                        style: const TextStyle(
+                            color: _T.amber,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12)),
+                  ],
+                ),
+              ),
+              TextFormField(
+                controller: _amtCtrl,
+                autofocus: true,
+                style: const TextStyle(color: _T.text, fontSize: 16,
+                    fontWeight: FontWeight.w500),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: _fieldDec(
+                    label: 'Amount Received (₹)',
+                    hint: '0.00',
+                    icon: Icons.currency_rupee_rounded),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Required';
+                  final n = double.tryParse(v.trim());
+                  if (n == null || n <= 0) return 'Enter a valid amount';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _noteCtrl,
+                style: const TextStyle(color: _T.text, fontSize: 13),
+                maxLines: 2,
+                decoration: _fieldDec(
+                    label: 'Note (optional)',
+                    hint: 'e.g. Cheque payment, cash received…',
+                    icon: Icons.notes_rounded),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 50,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: _submitting
+                        ? null
+                        : const LinearGradient(
+                            colors: [_T.green, Color(0xFF1AB88A)]),
+                    color: _submitting
+                        ? _T.green.withValues(alpha: 0.25)
+                        : null,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: ElevatedButton(
+                    onPressed: _submitting ? null : _save,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
+                    child: _submitting
+                        ? const SizedBox(
+                            width: 20, height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.5, color: Colors.white))
+                        : const Text('Save Payment',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700, fontSize: 14)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Center(
+                child: Text(
+                  'This will appear in your income transactions on the dashboard',
+                  style: TextStyle(color: _T.muted, fontSize: 10),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Shared small widgets
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TxItem {
+  final String   id;
+  final double   amount;
+  final DateTime createdAt;
+  final String   description;
+  final bool     isLinked;
+  const _TxItem({
+    required this.id,
+    required this.amount,
+    required this.createdAt,
+    required this.description,
+    required this.isLinked,
+  });
+}
+
+class _SummaryRow extends StatelessWidget {
+  final IconData icon;
+  final String   label;
+  final String   value;
+  final Color    valueColor;
+  const _SummaryRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.valueColor,
+  });
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          Icon(icon, color: _T.muted, size: 13),
+          const SizedBox(width: 8),
+          Text(label,
+              style: const TextStyle(color: _T.muted, fontSize: 12)),
+          const Spacer(),
+          Text(value,
+              style: TextStyle(
+                  color: valueColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13)),
+        ],
+      );
+}
+
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _InfoRow({required this.label, required this.value});
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 70,
+              child: Text(label,
+                  style: const TextStyle(
+                      color: _T.muted, fontSize: 12)),
+            ),
+            Expanded(
+              child: Text(value,
+                  style: const TextStyle(
+                      color: _T.text, fontSize: 12.5)),
+            ),
+          ],
+        ),
+      );
+}
+
+class _StatusBadge extends StatelessWidget {
+  final bool settled;
+  final bool partial;
+  const _StatusBadge({required this.settled, required this.partial});
+  @override
+  Widget build(BuildContext context) {
+    final Color c    = settled ? _T.green : _T.amber;
+    final String lbl =
+        settled ? 'SETTLED' : (partial ? 'PARTIAL' : 'PENDING');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: c.withValues(alpha: 0.22)),
+      ),
+      child: Text(lbl,
+          style: TextStyle(
+              color: c,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.9)),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Shared helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+SnackBar _snackBar(String msg, {required bool success}) => SnackBar(
+      content: Text(msg,
+          style: const TextStyle(color: Colors.white, fontSize: 13)),
+      backgroundColor: success
+          ? _T.green.withValues(alpha: 0.9)
+          : _T.red.withValues(alpha: 0.9),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    );
+
+InputDecoration _fieldDec(
+        {required String label, String? hint, IconData? icon}) =>
+    InputDecoration(
+      labelText: label,
+      hintText: hint,
+      labelStyle: const TextStyle(color: _T.muted, fontSize: 12),
+      hintStyle: const TextStyle(color: _T.muted, fontSize: 12),
+      prefixIcon: icon != null
+          ? Icon(icon, color: _T.muted, size: 16)
+          : null,
+      filled: true,
+      fillColor: _T.surface,
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: _T.line2),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: _T.accent2, width: 1.5),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: _T.red),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: _T.red, width: 1.5),
+      ),
+    );

@@ -669,6 +669,30 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
           .read(transactionRepositoryProvider)
           .updateTransaction(updated);
 
+      // Stamp or clear isObPayment / obPartyName.
+      // These fields are NOT part of TransactionEntity so updateTransaction
+      // never touches them. We write them in a separate update so that
+      // party_detail_screen's Strategy-1 detection works correctly:
+      //   • editing to OB  → isObPayment:true + obPartyName = description
+      //   • editing away   → both fields deleted (FieldValue.delete)
+      final txDocRef = FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(widget.transaction.cashbookId)
+          .collection('transactions')
+          .doc(widget.transaction.transactionId);
+
+      if (_isObPayment) {
+        await txDocRef.update({
+          'isObPayment': true,
+          'obPartyName': _descCtrl.text.trim(),
+        });
+      } else {
+        await txDocRef.update({
+          'isObPayment': FieldValue.delete(),
+          'obPartyName': FieldValue.delete(),
+        });
+      }
+
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {

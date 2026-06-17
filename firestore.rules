@@ -24,6 +24,16 @@ service cloud.firestore {
       return data.category == 'bank';
     }
 
+    // CB (Cashbook) transactions are iOS/PWA-only.
+    function isCbTransaction(data) {
+      return data.category == 'cb';
+    }
+
+    // True when the category is restricted to iOS/PWA users (bank or cb).
+    function isRestrictedCategory(data) {
+      return isBankTransaction(data) || isCbTransaction(data);
+    }
+
     // ── Users ──────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow read, write: if request.auth != null
@@ -52,31 +62,32 @@ service cloud.firestore {
       // ── Active Transactions ───────────────────────────────────────────────
       match /transactions/{transactionId} {
 
-        // Individual document read: Android users cannot read bank-category docs.
+        // Individual document read: Android users cannot read bank or CB docs.
         // List/query reads: open to all members (Firestore can't restrict per-field
-        // on collection queries; bank UI is hidden from Android so they won't query).
+        // on collection queries; restricted UIs are hidden from Android so they
+        // won't query those categories).
         allow get:  if isCashbookMember(database, cashbookId)
-                    && (!isBankTransaction(resource.data) || isIosUser(database));
+                    && (!isRestrictedCategory(resource.data) || isIosUser(database));
         allow list: if isCashbookMember(database, cashbookId);
 
         // Android: can only create entries where they are the creator AND
-        //          cannot create bank-category transactions.
+        //          cannot create bank or CB-category transactions.
         // iOS/web: can create any category, including restoring deleted entries
         //          with a different createdBy (recycle-bin restore).
         allow create: if isCashbookMember(database, cashbookId)
-                      && (!isBankTransaction(request.resource.data) || isIosUser(database))
+                      && (!isRestrictedCategory(request.resource.data) || isIosUser(database))
                       && (request.auth.uid == request.resource.data.createdBy
                           || isIosUser(database));
 
         // Update rules:
         //   1. Must be a cashbook member.
-        //   2. Android users can only edit their OWN non-bank entries.
+        //   2. Android users can only edit their OWN non-restricted entries.
         //      iOS/web users can edit any entry.
         //   3. The `createdBy` field may only be changed by iOS/web users.
-        //   4. Android users cannot touch bank-category transactions at all.
+        //   4. Android users cannot touch bank or CB-category transactions at all.
         allow update: if isCashbookMember(database, cashbookId)
-                      && (!isBankTransaction(resource.data) || isIosUser(database))
-                      && (!isBankTransaction(request.resource.data) || isIosUser(database))
+                      && (!isRestrictedCategory(resource.data) || isIosUser(database))
+                      && (!isRestrictedCategory(request.resource.data) || isIosUser(database))
                       && (request.auth.uid == resource.data.createdBy
                           || isIosUser(database))
                       && (request.resource.data.createdBy == resource.data.createdBy

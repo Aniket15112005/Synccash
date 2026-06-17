@@ -18,6 +18,8 @@ import 'package:synccash/features/transactions/presentation/screens/add_transact
 import 'package:synccash/features/transactions/presentation/widgets/transaction_list_item.dart';
 import 'package:synccash/features/dashboard/presentation/screens/bank_dashboard_screen.dart';
 import 'package:synccash/features/dashboard/presentation/screens/upi_dashboard_screen.dart';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 // ── CB theme colours ──────────────────────────────────────────────────────────
 const _kCbPrimary   = Color(0xFFFBBF24); // amber 400
@@ -186,31 +188,7 @@ class _CbHeader extends ConsumerWidget {
       child: Row(
         children: [
           // ── Greeting + name ──────────────────────────────────────────
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _cbGreeting(),
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  firstName,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.6,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          const Spacer(),
           // ── "Cash" pill — pops back to normal dashboard ──────────────
           GestureDetector(
             onTap: () {
@@ -244,42 +222,44 @@ class _CbHeader extends ConsumerWidget {
               ),
             ),
           ),
-          const SizedBox(width: 6),
-          // ── "Bank" pill — taps to Bank dashboard ─────────────────────
-          GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const BankDashboardScreen()),
-              );
-            },
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0E2A1F),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF1B4D35)),
-              ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.account_balance_rounded,
-                      size: 13, color: Color(0xFF34D399)),
-                  SizedBox(width: 5),
-                  Text(
-                    'Bank',
-                    style: TextStyle(
-                      color: Color(0xFF34D399),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.2,
+          if (kIsWeb || (!kIsWeb && Platform.isIOS)) ...[
+            const SizedBox(width: 6),
+            // ── "Bank" pill — taps to Bank dashboard ─────────────────────
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(builder: (_) => const BankDashboardScreen()),
+                );
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0E2A1F),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF1B4D35)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.account_balance_rounded,
+                        size: 13, color: Color(0xFF34D399)),
+                    SizedBox(width: 5),
+                    Text(
+                      'Bank',
+                      style: TextStyle(
+                        color: Color(0xFF34D399),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.2,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
+          ],
           const SizedBox(width: 6),
           // ── "UPI" pill — taps to UPI dashboard ───────────────────────
           GestureDetector(
@@ -420,7 +400,7 @@ class _CbBalanceCard extends StatefulWidget {
 }
 
 class _CbBalanceCardState extends State<_CbBalanceCard> {
-  bool _hide = true;
+  bool _hide = false;
 
   @override
   Widget build(BuildContext context) {

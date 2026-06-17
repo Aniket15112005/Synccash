@@ -84,19 +84,24 @@ class _PayEntry {
 }
 
 class _PartyExportData {
-  final String         name;
+  final String          name;
   final List<_BillData> bills;
   final double          openingBalance;
+  // FIX: track how much of the opening balance has been paid
+  final double          obPaid;
 
   const _PartyExportData({
     required this.name,
     required this.bills,
     this.openingBalance = 0.0,
+    this.obPaid         = 0.0,
   });
 
   double get totalBilled   =>
       bills.fold(0.0, (s, b) => s + b.bill.billTotal) + openingBalance;
-  double get totalReceived => bills.fold(0.0, (s, b) => s + b.received);
+  // FIX: include obPaid so totals/stats reflect OB payments correctly
+  double get totalReceived =>
+      bills.fold(0.0, (s, b) => s + b.received) + obPaid;
   double get totalBalance  =>
       (totalBilled - totalReceived).clamp(0.0, double.infinity);
 }
@@ -403,6 +408,19 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
     final start = _startDate;
     final end   = _endDate;
 
+    // FIX: build per-party bill totals (all bills, not date-filtered)
+    // so we can detect single-bill overflow → OB routing.
+    final allBillTotals  = <String, double>{};    // billId  -> billTotal
+    final partyAllBillIds = <String, Set<String>>{}; // partyKey -> Set<billId>
+    for (final doc in billsSnap.docs) {
+      final d    = doc.data();
+      final name = (d['partyName'] as String? ?? '').trim().toLowerCase();
+      final id   = d['saleBillId']  as String? ?? doc.id;
+      final tot  = (d['billTotal']  as num?)?.toDouble() ?? 0.0;
+      allBillTotals[id] = tot;
+      partyAllBillIds.putIfAbsent(name, () => {}).add(id);
+    }
+
     final result = <_PartyExportData>[];
 
     for (final partyName in _selected) {
@@ -455,10 +473,48 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
       // Sort bills by date ascending
       partyBills.sort((a, b) => a.bill.billDate.compareTo(b.bill.billDate));
 
+      // FIX: compute how much of the opening balance has been paid.
+      // Handles explicit isObPayment transactions AND single-bill overflow.
+      double obPaid = 0.0;
+      if (ob > 0) {
+        final allBillIds = partyAllBillIds[partyKey] ?? {};
+        for (final txDoc in txSnap.docs) {
+          final raw         = txDoc.data();
+          final linkedId    = raw['linkedSaleBillId'] as String?;
+          final amount      = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+          final isObPay     = raw['isObPayment'] as bool? ?? false;
+          final obPartyRaw  =
+              (raw['obPartyName'] as String? ?? '').toLowerCase().trim();
+          final desc        =
+              (raw['description'] as String? ?? '').toLowerCase();
+
+          if (linkedId != null && linkedId.isNotEmpty &&
+              allBillIds.contains(linkedId)) {
+            // Single-bill party: excess payment above billTotal routes to OB.
+            if (allBillIds.length == 1) {
+              final billTotal = allBillTotals[linkedId] ?? 0.0;
+              final overflow  =
+                  (amount - billTotal).clamp(0.0, double.infinity);
+              if (overflow > 0) {
+                final rem = (ob - obPaid).clamp(0.0, double.infinity);
+                obPaid += overflow > rem ? rem : overflow;
+              }
+            }
+          } else if (isObPay &&
+              (obPartyRaw == partyKey ||
+               (obPartyRaw.isEmpty && desc.contains(partyKey)))) {
+            // Explicitly-flagged OB payment for this party.
+            obPaid += amount;
+          }
+        }
+        obPaid = obPaid.clamp(0.0, ob);
+      }
+
       result.add(_PartyExportData(
-        name:            partyName,
-        bills:           partyBills,
-        openingBalance:  ob,
+        name:           partyName,
+        bills:          partyBills,
+        openingBalance: ob,
+        obPaid:         obPaid,
       ));
     }
 
@@ -624,7 +680,7 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
                             fontSize: 20,
                             fontWeight: pw.FontWeight.bold)),
                     pw.SizedBox(height: 2),
-                    pw.Text('BILLPORT — MULTI-PARTY STATEMENT',
+                    pw.Text('BILLPORT - MULTI-PARTY STATEMENT',
                         style: pw.TextStyle(
                             color: PdfColor.fromHex('7ab3d8'),
                             fontSize: 8,
@@ -831,6 +887,7 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
                 ),
 
                 // Opening Balance row (if any)
+                // FIX: show actual obPaid + remaining balance, not hardcoded values
                 if (party.openingBalance > 0)
                   pw.TableRow(
                     decoration: pw.BoxDecoration(color: cLightBlue),
@@ -838,14 +895,30 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
                       dCell('OB', align: pw.TextAlign.center, color: cSubGrey),
                       dCell('Opening Balance',
                           color: cMidDark, size: 8.5, bold: true),
-                      dCell('—', color: cSubGrey),
+                      dCell('-', color: cSubGrey),
                       dCell('Rs. ${fmt.format(party.openingBalance)}',
                           align: pw.TextAlign.right, size: 8.5, bold: true),
-                      dCell('—', align: pw.TextAlign.right, color: cSubGrey),
-                      dCell('—', align: pw.TextAlign.right, color: cSubGrey),
-                      dCell('Rs. ${fmt.format(party.openingBalance)} Due',
+                      dCell('-', align: pw.TextAlign.right, color: cSubGrey),
+                      // Paid column: actual obPaid amount
+                      dCell(
+                          party.obPaid > 0
+                              ? 'Rs. \${fmt.format(party.obPaid)}'
+                              : '-',
                           align: pw.TextAlign.right,
-                          color: cRed, size: 8, bold: true),
+                          color: party.obPaid > 0 ? cGreen : cSubGrey,
+                          bold: party.obPaid > 0),
+                      // Balance/Status column: remaining OB or Cleared
+                      () {
+                        final obRem = (party.openingBalance - party.obPaid)
+                            .clamp(0.0, double.infinity);
+                        return obRem <= 0
+                            ? dCell('Cleared',
+                                align: pw.TextAlign.right,
+                                color: cGreen, bold: true)
+                            : dCell('Rs. \${fmt.format(obRem)} Due',
+                                align: pw.TextAlign.right,
+                                color: cRed, size: 8, bold: true);
+                      }(),
                     ],
                   ),
 
@@ -1075,16 +1148,22 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
       ]);
 
       // Opening Balance row
+      // FIX: show actual obPaid + remaining balance, not hardcoded values
       if (party.openingBalance > 0) {
+        final obRem = (party.openingBalance - party.obPaid)
+            .clamp(0.0, double.infinity);
         sheet.appendRow([
           TextCellValue('OB'),
           TextCellValue('Opening Balance'),
-          TextCellValue('—'),
+          TextCellValue('-'),
           DoubleCellValue(party.openingBalance),
-          TextCellValue('—'),
-          DoubleCellValue(party.openingBalance),
-          TextCellValue('—'),
-          TextCellValue('Pending'),
+          // Actual amount received toward OB
+          party.obPaid > 0
+              ? DoubleCellValue(party.obPaid)
+              : TextCellValue('-'),
+          DoubleCellValue(obRem),
+          TextCellValue('-'),
+          TextCellValue(obRem <= 0 ? 'Cleared' : 'Pending'),
         ]);
       }
 
