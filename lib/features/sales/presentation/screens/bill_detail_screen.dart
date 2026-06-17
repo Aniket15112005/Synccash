@@ -107,6 +107,9 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
               // exactly 1 bill; with multiple bills every bill would show
               // the same unlinked transactions, which is incorrect.
               if (widget.billCount > 1) return false;
+              // Exclude isObPayment=true transactions — those belong to the
+              // opening balance, not to any specific bill.
+              if (raw['isObPayment'] as bool? ?? false) return false;
               return (raw['description'] as String? ?? '')
                   .toLowerCase()
                   .contains(partyQ);
@@ -158,8 +161,22 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
     );
   }
 
-  double get _received =>
-      _transactions.fold<double>(0.0, (s, t) => s + t.amount);
+  double get _received {
+    // Linked payments (explicitly tied to this bill) count in full.
+    // Unlinked/description-matched payments are capped at the bill's
+    // remaining balance so that excess cash (e.g. party overpayment or
+    // amounts that belong to OB) never inflates this bill's received total.
+    final linked = _transactions
+        .where((t) => t.isLinked)
+        .fold<double>(0.0, (s, t) => s + t.amount);
+    final unlinked = _transactions
+        .where((t) => !t.isLinked)
+        .fold<double>(0.0, (s, t) => s + t.amount);
+    final unlinkedCapped = unlinked
+        .clamp(0.0, (widget.bill.billTotal - linked).clamp(0.0, double.infinity));
+    return linked + unlinkedCapped;
+  }
+
   double get _remaining =>
       (widget.bill.billTotal - _received).clamp(0.0, double.infinity);
   bool get _settled => _remaining <= 0;

@@ -395,6 +395,9 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     final payments = <_PaymentRecord>[];
     double obPaid  = 0.0;
 
+    double totalOldUnlinked = 0.0;
+    final  oldUnlinkedRecs  = <_PaymentRecord>[];
+
     for (final raw in _rawTxs) {
       final linkedId    = raw['linkedSaleBillId'] as String?;
       final amount      = (raw['amount'] as num?)?.toDouble() ?? 0.0;
@@ -413,18 +416,48 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
       } else if (isObPayment &&
           (obPartyName == partyLow ||
            (obPartyName.isEmpty && desc.contains(partyLow)))) {
-        // Explicitly flagged OB payment — track in _obPaid, NOT in _unlinked.
-        // This prevents the amount from leaking into _recForBill() for
-        // single-bill parties and incorrectly marking bills as paid/complete.
+        // New-style flagged OB payment — track in obPaid directly.
         obPaid += amount;
         payments.add(_PaymentRecord(
             linkedBillId: null, amount: amount, createdAt: createdAt, isOb: true));
       } else if (desc.contains(partyLow)) {
         // Old-style description-matched unlinked payment (pre-isObPayment era).
-        // For single-bill parties these still count toward the bill (unchanged).
-        map['_unlinked'] = (map['_unlinked'] ?? 0.0) + amount;
-        payments.add(_PaymentRecord(
+        // Accumulated here; distributed FIFO (OB first, then bills oldest→newest)
+        // in the pass below so the correct buckets receive the money.
+        totalOldUnlinked += amount;
+        oldUnlinkedRecs.add(_PaymentRecord(
             linkedBillId: null, amount: amount, createdAt: createdAt));
+      }
+    }
+
+    // ── FIFO distribution of old-style unlinked payments ─────────────────────
+    // Rule: fill unpaid OB first; any overflow goes to bills oldest→newest.
+    if (totalOldUnlinked > 0) {
+      payments.addAll(oldUnlinkedRecs);
+
+      final ob          = (_party?.openingBalance ?? 0.0);
+      final remainingOb = (ob - obPaid).clamp(0.0, double.infinity);
+      final toOb        = totalOldUnlinked > remainingOb
+                              ? remainingOb
+                              : totalOldUnlinked;
+      obPaid           += toOb;
+      var overflow      = totalOldUnlinked - toOb;
+
+      if (overflow > 0 && _bills.isNotEmpty) {
+        final sortedBills = List<SaleBillEntity>.from(_bills)
+          ..sort((a, b) => a.billDate.compareTo(b.billDate));
+        for (final bill in sortedBills) {
+          if (overflow <= 0) break;
+          final alreadyRcvd = map[bill.saleBillId] ?? 0.0;
+          final billRemain  =
+              (bill.billTotal - alreadyRcvd).clamp(0.0, double.infinity);
+          final toThisBill  =
+              overflow > billRemain ? billRemain : overflow;
+          if (toThisBill > 0) {
+            map[bill.saleBillId] = alreadyRcvd + toThisBill;
+          }
+          overflow -= toThisBill;
+        }
       }
     }
 
@@ -441,20 +474,17 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
   }
 
   double _recForBill(SaleBillEntity b) {
-    final linked = _received[b.saleBillId] ?? 0.0;
-    if (_bills.length == 1) {
-      return linked + (_received['_unlinked'] ?? 0.0);
-    }
-    return linked;
+    // Bills get their exact share from _recomputeReceived (FIFO-distributed).
+    // No _unlinked shortcut needed — amounts go directly into map[billId].
+    return _received[b.saleBillId] ?? 0.0;
   }
 
   double get _totalBilled   => _bills.fold(0.0, (s, b) => s + b.billTotal);
   double get _totalReceived => _bills.fold(0.0, (s, b) => s + _recForBill(b));
-  // Always includes unlinked (OB / description-matched) payments — used for closing balance
+  // Includes all bill received amounts + OB payments (closing balance calc).
   double get _totalAllReceived =>
       _bills.fold(0.0, (s, b) => s + (_received[b.saleBillId] ?? 0.0))
-      + (_received['_unlinked'] ?? 0.0)
-      + _obPaid;  // new-style isObPayment=true transactions
+      + _obPaid;
   double get _totalDue =>
       (_totalBilled - _totalReceived).clamp(0.0, double.infinity);
   double get _pct =>
@@ -809,13 +839,15 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
               // Opening Balance row (first entry if ob > 0)
               if (ob > 0) ...[
                 () {
+                  // Use isOb flag: only explicitly-flagged OB payments count
+                  // here. Old-style unlinked are FIFO-distributed at display
+                  // time, so the OB portion lives in _obPaid state directly.
                   final obPays = _payments
-                      .where((p) => p.linkedBillId == null)
+                      .where((p) => p.isOb)
                       .toList()
                     ..sort((a, b) =>
                         a.createdAt.compareTo(b.createdAt));
-                  final obPaid = obPays.fold(
-                      0.0, (s, p) => s + p.amount);
+                  final obPaid = _obPaid;
                   final obCleared = obPaid >= ob;
                   final obRem =
                       (ob - obPaid).clamp(0.0, double.infinity);
@@ -1593,7 +1625,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
             SliverToBoxAdapter(
               child: _OBRow(
                 ob:       ob,
-                obPaid:   (_received['_unlinked'] ?? 0.0) + _obPaid,
+                obPaid:   _obPaid,
                 fmt:      fmt,
                 onDelete: _deleteOB,
               ),
