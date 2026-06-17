@@ -1,5 +1,6 @@
 // lib/features/transactions/presentation/screens/add_transaction_screen.dart
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +10,7 @@ import 'package:synccash/features/auth/presentation/providers/auth_provider.dart
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
 // ADDED: sales bill imports
+import 'package:synccash/features/sales/data/models/sale_bill_model.dart';
 import 'package:synccash/features/sales/domain/entities/sale_bill_entity.dart';
 import 'package:synccash/features/sales/presentation/widgets/bill_no_dropdown_field.dart';
 import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
@@ -48,7 +50,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   final _amountCtrl = TextEditingController();
   final _descCtrl   = TextEditingController();
 
-   String   _type         = 'expense';
+  String   _type         = 'expense';
   String   _category     = 'Retail';
   bool     _submitting   = false;
   DateTime _selectedDate = DateTime.now();
@@ -57,36 +59,75 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   SaleBillEntity? _selectedBill;
   bool _isObPayment = false; // ADDED: tracks if OB payment is selected
 
+  // ADDED: true while fetching the existing linked bill on edit open
+  bool _loadingBill = false;
+
   late final AnimationController _btnCtrl;
   late final Animation<double>   _btnScale;
 
- @override
-void initState() {
-  super.initState();
-  _btnCtrl = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 120),
-    reverseDuration: const Duration(milliseconds: 200),
-  );
-  _btnScale = Tween<double>(begin: 1.0, end: 0.96).animate(
-    CurvedAnimation(parent: _btnCtrl, curve: Curves.easeInOut),
-  );
-
-  // Pre-fill if editing
-  final tx = widget.existingTransaction;
-  if (tx != null) {
-    _type          = tx.type;
-    _category      = tx.category[0].toUpperCase() + tx.category.substring(1); // 'retail' → 'Retail'
-    _selectedDate  = tx.createdAt;
-    _amountCtrl.text = tx.amount.toStringAsFixed(0);
-    _descCtrl.text   = tx.description;
-  } else if (widget.initialCategory != null) {
-    _category = widget.initialCategory!;
+  static String _normalizeCategory(String cat) {
+    final lower = cat.toLowerCase();
+    if (lower == 'upi') return 'UPI';
+    return lower[0].toUpperCase() + lower.substring(1);
   }
 
-  // ADDED: rebuild when description changes so BillNoDropdownField updates
-  _descCtrl.addListener(_onDescChanged);
-}
+  @override
+  void initState() {
+    super.initState();
+    _btnCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+      reverseDuration: const Duration(milliseconds: 200),
+    );
+    _btnScale = Tween<double>(begin: 1.0, end: 0.96).animate(
+      CurvedAnimation(parent: _btnCtrl, curve: Curves.easeInOut),
+    );
+
+    // Pre-fill if editing
+    final tx = widget.existingTransaction;
+    if (tx != null) {
+      _type          = tx.type;
+      _category      = _normalizeCategory(tx.category); // 'retail'→'Retail', 'upi'→'UPI'
+      _selectedDate  = tx.createdAt;
+      _amountCtrl.text = tx.amount.toStringAsFixed(0);
+      _descCtrl.text   = tx.description;
+
+      // ADDED: load the existing linked bill so it appears pre-selected in the
+      // dropdown and the user can change it without first clearing the link.
+      if (tx.linkedSaleBillId != null && tx.linkedSaleBillId!.isNotEmpty) {
+        _loadExistingBill(tx.cashbookId, tx.linkedSaleBillId!);
+      }
+    } else if (widget.initialCategory != null) {
+      _category = widget.initialCategory!;
+    }
+
+    // ADDED: rebuild when description changes so BillNoDropdownField updates
+    _descCtrl.addListener(_onDescChanged);
+  }
+
+  // ADDED: fetches the SaleBillEntity for the existing linkedSaleBillId so
+  // it can be shown pre-selected in the dropdown when editing a transaction.
+  Future<void> _loadExistingBill(String cashbookId, String billId) async {
+    if (!mounted) return;
+    setState(() => _loadingBill = true);
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('sale_bills')
+          .doc(billId)
+          .get();
+      if (mounted && doc.exists) {
+        setState(() {
+          _selectedBill = SaleBillModel.fromFirestore(doc);
+        });
+      }
+    } catch (_) {
+      // silently ignore — dropdown will just be unselected
+    } finally {
+      if (mounted) setState(() => _loadingBill = false);
+    }
+  }
 
   // ADDED
   void _onDescChanged() => setState(() {});
@@ -149,7 +190,6 @@ void initState() {
     );
     if (picked != null) {
       setState(() {
-        // Preserve today's time if same day, otherwise use midnight
         final now = DateTime.now();
         if (picked.year == now.year &&
             picked.month == now.month &&
@@ -163,7 +203,7 @@ void initState() {
     }
   }
 
-    Future<void> _submit() async {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final user = ref.read(authProvider).value;
     if (user == null) return;
@@ -186,16 +226,19 @@ void initState() {
         type:          _type,
         category:      _category.toLowerCase(),
         description:   _descCtrl.text.trim(),
-        lastEditedBy:  user.uid,   // so Cloud Function knows who edited
+        lastEditedBy:  user.uid,
         linkedSaleBillId: _selectedBill?.saleBillId, // ADDED
       );
 
       if (existing != null) {
+        // EDIT path: always call updateTransaction.
+        // linkedSaleBillId is passed from _selectedBill (may be null if user
+        // cleared the bill selection — the repository handles the Firestore
+        // FieldValue.delete() for null so the old link is properly removed).
         await ref.read(transactionRepositoryProvider).updateTransaction(tx);
-      } else if (_category == 'Bank') {
+      } else if (_category == 'Bank' || _category == 'UPI') {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
       } else if (_type == 'income' && _selectedBill != null) {
-        // Overflow-aware: excess beyond the selected bill flows to OB then other bills
         await ref.read(saleBillActionsProvider.notifier).recordPaymentWithOverflow(
           cashbookId:     tx.cashbookId,
           selectedBillId: _selectedBill!.saleBillId,
@@ -208,7 +251,6 @@ void initState() {
           createdAt:      tx.createdAt,
         );
       } else if (_type == 'income' && _isObPayment) {
-        // OB payment: excess beyond OB remaining flows to pending bills (oldest first / FIFO)
         await ref.read(saleBillActionsProvider.notifier).recordObPaymentWithOverflow(
           cashbookId:    tx.cashbookId,
           partyName:     _descCtrl.text.trim(),
@@ -220,7 +262,6 @@ void initState() {
           createdAt:     tx.createdAt,
         );
       } else if (_type == 'income') {
-        // No bill/OB selected: still apply overflow order (OB first → bills FIFO → unlinked remainder)
         await ref.read(saleBillActionsProvider.notifier).recordObPaymentWithOverflow(
           cashbookId:    tx.cashbookId,
           partyName:     _descCtrl.text.trim(),
@@ -256,6 +297,8 @@ void initState() {
 
   @override
   Widget build(BuildContext context) {
+    final isEditing = widget.existingTransaction != null;
+
     return Scaffold(
       backgroundColor: _C.bg,
       body: Stack(
@@ -264,7 +307,11 @@ void initState() {
           SafeArea(
             child: Column(
               children: [
-                _AppBar(onBack: () => Navigator.pop(context))
+                // CHANGED: pass isEditing so the app bar title updates
+                _AppBar(
+                  onBack: () => Navigator.pop(context),
+                  isEditing: isEditing,
+                )
                     .animate()
                     .fadeIn(duration: 240.ms)
                     .slideY(begin: -0.06, end: 0, curve: Curves.easeOut),
@@ -289,36 +336,53 @@ void initState() {
                               .fadeIn(delay: 110.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 24),
-                           const _FieldLabel('Category'),
+                          const _FieldLabel('Category'),
                           const SizedBox(height: 8),
                           if (widget.categoryLocked)
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 14),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF0E2A1F),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                    color: const Color(0xFF1B4D35)),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.account_balance_rounded,
-                                      size: 14, color: Color(0xFF34D399)),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'Bank',
-                                    style: TextStyle(
-                                      color: Color(0xFF34D399),
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                            Builder(builder: (context) {
+                              final isUpi = _category == 'UPI';
+                              return Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 14),
+                                decoration: BoxDecoration(
+                                  color: isUpi
+                                      ? const Color(0xFF1A0E35)
+                                      : const Color(0xFF0E2A1F),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: isUpi
+                                        ? const Color(0xFF3D1D8A)
+                                        : const Color(0xFF1B4D35),
                                   ),
-                                ],
-                              ),
-                            ).animate().fadeIn(delay: 160.ms, duration: 280.ms)
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      isUpi
+                                          ? Icons.currency_rupee_rounded
+                                          : Icons.account_balance_rounded,
+                                      size: 14,
+                                      color: isUpi
+                                          ? const Color(0xFFA78BFA)
+                                          : const Color(0xFF34D399),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _category,
+                                      style: TextStyle(
+                                        color: isUpi
+                                            ? const Color(0xFFA78BFA)
+                                            : const Color(0xFF34D399),
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ).animate().fadeIn(delay: 160.ms, duration: 280.ms);
+                            })
                           else
                             _CategoryToggle(selected: _category, onSwitch: _switchCategory)
                                 .animate()
@@ -331,18 +395,45 @@ void initState() {
                               .animate()
                               .fadeIn(delay: 210.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
-                          // ADDED: Bill dropdown — only visible for Wholesale, appears after
-                          // user types 2+ characters in description (600 ms debounce inside widget)
-                            if (_category == 'Wholesale')
-  BillNoDropdownField(
-    partyName: _descCtrl.text,
-    selectedBill: _selectedBill,
-    onBillSelected: (bill) =>
-        setState(() { _selectedBill = bill; _isObPayment = false; }),
-    isObSelected: _isObPayment,
-    onObSelected: () =>
-        setState(() { _isObPayment = true; _selectedBill = null; }),
-  ),
+                          // ADDED: Bill dropdown — only visible for Wholesale income entries.
+                          // On edit open, shows a loading indicator while the existing bill
+                          // is being fetched; once loaded _selectedBill is pre-selected.
+                          if (_category == 'Wholesale') ...[
+                            if (_loadingBill)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Row(
+                                  children: [
+                                    const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 1.5,
+                                        color: Color(0xFF6B7280),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    const Text(
+                                      'Loading linked bill…',
+                                      style: TextStyle(
+                                        color: Color(0xFF6B7280),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              BillNoDropdownField(
+                                partyName: _descCtrl.text,
+                                selectedBill: _selectedBill,
+                                onBillSelected: (bill) =>
+                                    setState(() { _selectedBill = bill; _isObPayment = false; }),
+                                isObSelected: _isObPayment,
+                                onObSelected: () =>
+                                    setState(() { _isObPayment = true; _selectedBill = null; }),
+                              ),
+                          ],
                           const SizedBox(height: 24),
                           const _FieldLabel('Date'),
                           const SizedBox(height: 8),
@@ -354,8 +445,6 @@ void initState() {
                               .animate()
                               .fadeIn(delay: 245.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
-
-                         
                           const SizedBox(height: 36),
                           ScaleTransition(
                             scale: _btnScale,
@@ -363,6 +452,7 @@ void initState() {
                               type:       _type,
                               accent:     _accentColor,
                               submitting: _submitting,
+                              isEditing:  isEditing,
                               onTap:      _submit,
                             ),
                           )
@@ -497,7 +587,13 @@ class _AmbientGlow extends StatelessWidget {
 
 class _AppBar extends StatelessWidget {
   final VoidCallback onBack;
-  const _AppBar({required this.onBack});
+  // CHANGED: added isEditing so the title reflects add vs edit mode
+  final bool isEditing;
+
+  const _AppBar({
+    required this.onBack,
+    this.isEditing = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -507,9 +603,10 @@ class _AppBar extends StatelessWidget {
         children: [
           _IconBtn(icon: Icons.arrow_back_ios_new_rounded, onTap: onBack),
           const SizedBox(width: 14),
-          const Text(
-            'New Entry',
-            style: TextStyle(
+          // CHANGED: show 'Edit Entry' when editing, 'New Entry' otherwise
+          Text(
+            isEditing ? 'Edit Entry' : 'New Entry',
+            style: const TextStyle(
               color: _C.textPri,
               fontSize: 17,
               fontWeight: FontWeight.w700,
@@ -751,7 +848,7 @@ class _CategoryToggle extends StatelessWidget {
         border: Border.all(color: _C.border),
       ),
       child: Row(
-        children: ['Retail', 'Wholesale', 'Bank'].map((cat) {
+        children: ['Retail', 'Wholesale', 'Bank', 'UPI'].map((cat) {
           final active = selected == cat;
           return Expanded(
             child: GestureDetector(
@@ -863,10 +960,15 @@ class _SubmitButton extends StatelessWidget {
   final String type;
   final Color accent;
   final bool submitting;
+  // CHANGED: added isEditing so the button label reflects save vs record
+  final bool isEditing;
   final VoidCallback onTap;
   const _SubmitButton({
-    required this.type, required this.accent,
-    required this.submitting, required this.onTap,
+    required this.type,
+    required this.accent,
+    required this.submitting,
+    required this.onTap,
+    this.isEditing = false,
   });
 
   @override
@@ -897,18 +999,27 @@ class _SubmitButton extends StatelessWidget {
                         strokeWidth: 2, color: _C.textSec),
                   )
                 : Row(
-                    key: ValueKey<String>(type),
+                    key: ValueKey<String>('$type$isEditing'),
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        type == 'income'
-                            ? Icons.south_rounded
-                            : Icons.north_rounded,
-                        size: 16, color: Colors.black87,
+                        // CHANGED: use edit icon when in edit mode
+                        isEditing
+                            ? Icons.check_rounded
+                            : (type == 'income'
+                                ? Icons.south_rounded
+                                : Icons.north_rounded),
+                        size: 16,
+                        color: Colors.black87,
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        type == 'income' ? 'Record Income' : 'Record Expense',
+                        // CHANGED: show 'Save Changes' when editing
+                        isEditing
+                            ? 'Save Changes'
+                            : (type == 'income'
+                                ? 'Record Income'
+                                : 'Record Expense'),
                         style: const TextStyle(
                           color: Colors.black87,
                           fontSize: 15,

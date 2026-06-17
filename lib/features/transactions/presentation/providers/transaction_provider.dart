@@ -142,7 +142,7 @@ final filteredTransactionsProvider =
 
     return asyncTransactions.whenData(
       (data) => _applyTransactionFilters(
-        data.where((tx) => tx.category.toLowerCase() != 'bank').toList(),
+        data,
         activeCategory: activeCategory,
         activeName: activeName,
         activeDate: activeDate,
@@ -175,7 +175,7 @@ final allFilteredTransactionsProvider =
 
     return asyncTransactions.whenData(
       (data) => _applyTransactionFilters(
-        data.where((tx) => tx.category.toLowerCase() != 'bank').toList(),
+        data,
         activeCategory:    activeCategory,
         activeName:        activeName,
         activeDate:        activeDate,
@@ -267,6 +267,70 @@ final filteredBankTransactionsProvider =
     final dateFilter   = ref.watch(bankDateFilterProvider);
     final amountFilter = ref.watch(bankAmountFilterProvider);
     final descFilter   = ref.watch(bankDescFilterProvider);
+    return async.whenData(
+      (data) => _applyBankFilters(
+        data,
+        typeFilter:   typeFilter,
+        dateFilter:   dateFilter,
+        amountFilter: amountFilter,
+        descFilter:   descFilter,
+      ),
+    );
+  },
+);
+
+// ── UPI category providers ─────────────────────────────────────────────────────
+
+class UpiTypeFilterNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+  void setFilter(String? v) => state = v;
+}
+final upiTypeFilterProvider =
+    NotifierProvider<UpiTypeFilterNotifier, String?>(UpiTypeFilterNotifier.new);
+
+class UpiDateFilterNotifier extends Notifier<TransactionDateFilter?> {
+  @override
+  TransactionDateFilter? build() => null;
+  void setFilter(TransactionDateFilter? v) => state = v;
+}
+final upiDateFilterProvider =
+    NotifierProvider<UpiDateFilterNotifier, TransactionDateFilter?>(UpiDateFilterNotifier.new);
+
+class UpiAmountFilterNotifier extends Notifier<BankAmountFilter?> {
+  @override
+  BankAmountFilter? build() => null;
+  void setFilter(BankAmountFilter? v) => state = v;
+}
+final upiAmountFilterProvider =
+    NotifierProvider<UpiAmountFilterNotifier, BankAmountFilter?>(UpiAmountFilterNotifier.new);
+
+class UpiDescFilterNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+  void setFilter(String? v) => state = v;
+}
+final upiDescFilterProvider =
+    NotifierProvider<UpiDescFilterNotifier, String?>(UpiDescFilterNotifier.new);
+
+final upiTransactionsStreamProvider =
+    StreamProvider.family<List<TransactionEntity>, String>(
+  (ref, cashbookId) {
+    final repo = ref.read(transactionRepositoryProvider);
+    return repo.getTransactionsStream(cashbookId, limit: 0).map(
+      (txs) => txs.where((tx) => tx.category.toLowerCase() == 'upi').toList(),
+    );
+  },
+);
+
+final filteredUpiTransactionsProvider =
+    Provider.family<AsyncValue<List<TransactionEntity>>, String>(
+  (ref, cashbookId) {
+    final async        = ref.watch(upiTransactionsStreamProvider(cashbookId));
+    final typeFilter   = ref.watch(upiTypeFilterProvider);
+    final dateFilter   = ref.watch(upiDateFilterProvider);
+    final amountFilter = ref.watch(upiAmountFilterProvider);
+    final descFilter   = ref.watch(upiDescFilterProvider);
     return async.whenData(
       (data) => _applyBankFilters(
         data,

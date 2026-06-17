@@ -58,7 +58,7 @@ class TransactionRepositoryImpl implements TransactionRepository {
 
         description: tx.description,
 
-        linkedSaleBillId: tx.linkedSaleBillId, // FIX: was missing — caused all new transactions to be unlinked
+        linkedSaleBillId: tx.linkedSaleBillId,
 
       );
 
@@ -186,7 +186,6 @@ class TransactionRepositoryImpl implements TransactionRepository {
 
       await _firestore.runTransaction((transaction) async {
 
-        // FIX: all reads must come before any writes in a Firestore transaction
         final txSnapshot = await transaction.get(txRef);
 
         final cashbookSnapshot = await transaction.get(cashbookRef);
@@ -355,21 +354,23 @@ class TransactionRepositoryImpl implements TransactionRepository {
           expense += tx.amount;
         }
 
-        // FIX: include linkedSaleBillId in the update map so editing a
-        // linked transaction preserves (or updates) the bill link correctly.
-        // Only writes the field when non-null to avoid clearing existing links
-        // if the edit screen hasn't pre-populated _selectedBill yet.
+        // CHANGED: always write linkedSaleBillId.
+        // When the user clears the bill selection (_selectedBill becomes null),
+        // tx.linkedSaleBillId is null and we use FieldValue.delete() to
+        // properly remove the field from Firestore instead of leaving the old
+        // bill ID in place. The previous conditional guard
+        //   `if (tx.linkedSaleBillId != null) 'linkedSaleBillId': ...`
+        // was preventing bill-link clearing from ever being persisted.
         transaction.update(txRef, {
-          'amount':       tx.amount,
-          'type':         tx.type,
-          'category':     tx.category,
-          'description':  tx.description,
-          'createdAt':    Timestamp.fromDate(tx.createdAt),
-          'createdBy':    tx.createdBy,
-          'creatorName':  tx.creatorName,
-          'lastEditedBy': tx.lastEditedBy,
-          if (tx.linkedSaleBillId != null)
-            'linkedSaleBillId': tx.linkedSaleBillId, // FIX: was never written on edit
+          'amount':          tx.amount,
+          'type':            tx.type,
+          'category':        tx.category,
+          'description':     tx.description,
+          'createdAt':       Timestamp.fromDate(tx.createdAt),
+          'createdBy':       tx.createdBy,
+          'creatorName':     tx.creatorName,
+          'lastEditedBy':    tx.lastEditedBy,
+          'linkedSaleBillId': tx.linkedSaleBillId ?? FieldValue.delete(),
         });
 
         transaction.update(cashbookRef, {
@@ -383,8 +384,7 @@ class TransactionRepositoryImpl implements TransactionRepository {
     }
   }
 
-  // ── ONLY CHANGE: added `if (limit > 0)` guard so limit:0 fetches ALL records.
-  // ── Also removed the duplicate @override that was present in the original.
+  // limit:0 skips .limit() so all records are fetched.
   @override
   Stream<List<TransactionEntity>> getTransactionsStream(
     String cashbookId, {
@@ -396,7 +396,7 @@ class TransactionRepositoryImpl implements TransactionRepository {
         .collection('transactions')
         .orderBy('createdAt', descending: true);
 
-    if (limit > 0) query = query.limit(limit); // 0 = fetch everything
+    if (limit > 0) query = query.limit(limit);
 
     return query
         .snapshots()

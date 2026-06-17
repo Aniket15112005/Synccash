@@ -311,7 +311,7 @@ class _FilterSheetState extends ConsumerState<_FilterSheet> {
             _Label('CATEGORY', theme),
             const SizedBox(height: 10),
             _HChipRow(
-              chips: const ['Retail', 'Wholesale'],
+              chips: const ['Retail', 'Wholesale', 'Bank', 'UPI'],
               selected: categoryFilter ?? '',
               onTap: (cat) => _onCategoryChip(cat, categoryFilter != cat),
             ),

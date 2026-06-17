@@ -55,6 +55,23 @@ class _PaymentRecord {
   });
 }
 
+class _GroupedPayment {
+  final DateTime createdAt;
+  final double   amount;
+  const _GroupedPayment({required this.createdAt, required this.amount});
+}
+
+List<_GroupedPayment> _groupPayments(List<_PaymentRecord> payments) {
+  final map = <DateTime, double>{};
+  for (final p in payments) {
+    map[p.createdAt] = (map[p.createdAt] ?? 0.0) + p.amount;
+  }
+  return map.entries
+      .map((e) => _GroupedPayment(createdAt: e.key, amount: e.value))
+      .toList()
+    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  All Bills Screen
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,10 +267,13 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
   ProviderSubscription<String?>?        _idSub;
   String?                               _cashbookId;
 
-  List<SaleBillEntity> _bills    = [];
-  Map<String, double>  _received = {};
-  List<_PaymentRecord> _payments = [];
-  PartyEntity?         _party;
+  List<SaleBillEntity>       _bills    = [];
+  Map<String, double>        _received = {};
+  List<_PaymentRecord>       _payments = [];
+  PartyEntity?               _party;
+  // Raw income-tx snapshots so we can recompute _received/_payments
+  // whenever _bills changes (the two streams fire independently).
+  List<Map<String, dynamic>> _rawTxs   = [];
 
   @override
   void initState() {
@@ -322,7 +342,10 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         );
       }).toList()
         ..sort((a, b) => b.billCreatedAt.compareTo(a.billCreatedAt));
-      if (mounted) setState(() => _bills = list);
+      if (mounted) setState(() {
+        _bills = list;
+        _recomputeReceived();
+      });
     }, onError: (_) {});
 
     _txSub = FirebaseFirestore.instance
@@ -333,25 +356,9 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      final map      = <String, double>{};
-      final payments = <_PaymentRecord>[];
-      for (final doc in snap.docs) {
-        final raw       = doc.data();
-        final linkedId  = raw['linkedSaleBillId'] as String?;
-        final amount    = (raw['amount'] as num?)?.toDouble() ?? 0.0;
-        final desc      = (raw['description'] as String? ?? '').toLowerCase();
-        final createdAt = (raw['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
-        if (linkedId != null && linkedId.isNotEmpty) {
-          map[linkedId] = (map[linkedId] ?? 0.0) + amount;
-          payments.add(_PaymentRecord(
-              linkedBillId: linkedId, amount: amount, createdAt: createdAt));
-        } else if (desc.contains(partyLow)) {
-          map['_unlinked'] = (map['_unlinked'] ?? 0.0) + amount;
-          payments.add(_PaymentRecord(
-              linkedBillId: null, amount: amount, createdAt: createdAt));
-        }
-      }
-      if (mounted) setState(() { _received = map; _payments = payments; });
+      // Store raw data; _recomputeReceived filters to this party's bills.
+      _rawTxs = snap.docs.map((d) => d.data()).toList();
+      if (mounted) setState(() => _recomputeReceived());
     }, onError: (_) {});
 
     _partySub = FirebaseFirestore.instance
@@ -365,6 +372,42 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
       setState(
           () => _party = doc.exists ? PartyEntity.fromDoc(doc) : null);
     }, onError: (_) {});
+  }
+
+  // Recompute received amounts and payment records from stored raw snapshots.
+  // Called from both _billsSub and _txSub so whichever stream fires first,
+  // the other's data is still incorporated correctly.
+  // KEY FIX: only payments whose linkedBillId belongs to THIS party's bills
+  // are counted -- preventing other parties' transactions from leaking in.
+  void _recomputeReceived() {
+    final partyLow = widget.partyName.trim().toLowerCase();
+    final billIds  = {for (final b in _bills) b.saleBillId};
+
+    final map      = <String, double>{};
+    final payments = <_PaymentRecord>[];
+
+    for (final raw in _rawTxs) {
+      final linkedId  = raw['linkedSaleBillId'] as String?;
+      final amount    = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+      final desc      = (raw['description'] as String? ?? '').toLowerCase();
+      final createdAt = (raw['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+      if (linkedId != null && linkedId.isNotEmpty) {
+        // Only count this payment if the bill belongs to THIS party.
+        if (billIds.contains(linkedId)) {
+          map[linkedId] = (map[linkedId] ?? 0.0) + amount;
+          payments.add(_PaymentRecord(
+              linkedBillId: linkedId, amount: amount, createdAt: createdAt));
+        }
+      } else if (desc.contains(partyLow)) {
+        map['_unlinked'] = (map['_unlinked'] ?? 0.0) + amount;
+        payments.add(_PaymentRecord(
+            linkedBillId: null, amount: amount, createdAt: createdAt));
+      }
+    }
+
+    _received = map;
+    _payments = payments;
   }
 
   @override
@@ -982,6 +1025,120 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
             ],
           ),
 
+          pw.SizedBox(height: 14),
+
+          pw.Text('PAYMENT HISTORY',
+              style: pw.TextStyle(
+                  color: cGrey,
+                  fontSize: 8,
+                  fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 6),
+
+          pw.Table(
+            border: pw.TableBorder(
+              bottom: pw.BorderSide(
+                  color: PdfColor.fromHex('e5e7eb')),
+              horizontalInside: pw.BorderSide(
+                  color: PdfColor.fromHex('f0f0f0')),
+            ),
+            columnWidths: const {
+              0: pw.FixedColumnWidth(20),
+              1: pw.FlexColumnWidth(3.5),
+              2: pw.FlexColumnWidth(2.5),
+            },
+            children: [
+              pw.TableRow(
+                decoration: pw.BoxDecoration(color: cBlue),
+                children: [
+                  '#', 'Payment Date', 'Amount',
+                ].asMap().entries.map((e) => pw.Padding(
+                  padding: const pw.EdgeInsets.symmetric(
+                      horizontal: 5, vertical: 7),
+                  child: pw.Text(e.value,
+                      textAlign: e.key == 2
+                          ? pw.TextAlign.right
+                          : e.key == 0
+                              ? pw.TextAlign.center
+                              : pw.TextAlign.left,
+                      style: pw.TextStyle(
+                          color: cWhite,
+                          fontSize: 8,
+                          fontWeight: pw.FontWeight.bold)),
+                )).toList(),
+              ),
+              ..._groupPayments(_payments).asMap().entries.map((entry) {
+                final idx = entry.key;
+                final g   = entry.value;
+                final rowBg = idx % 2 == 0 ? cLightGrey : PdfColors.white;
+                pw.Widget pcell(
+                  String text, {
+                  pw.TextAlign align = pw.TextAlign.left,
+                  PdfColor? color,
+                  double size = 8,
+                  bool bold = false,
+                }) =>
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 7),
+                      child: pw.Text(text,
+                          textAlign: align,
+                          style: pw.TextStyle(
+                              color: color ?? cDarkText,
+                              fontSize: size,
+                              fontWeight: bold
+                                  ? pw.FontWeight.bold
+                                  : pw.FontWeight.normal)),
+                    );
+                return pw.TableRow(
+                  decoration: pw.BoxDecoration(color: rowBg),
+                  children: [
+                    pcell('${idx + 1}',
+                        align: pw.TextAlign.center,
+                        color: cSubGrey),
+                    pcell(dateFmt.format(g.createdAt),
+                        color: cMidDark),
+                    pcell('Rs. ${fmt.format(g.amount)}',
+                        align: pw.TextAlign.right,
+                        color: cGreen,
+                        size: 9,
+                        bold: true),
+                  ],
+                );
+              }),
+              pw.TableRow(
+                decoration: pw.BoxDecoration(color: cBlue),
+                children: [
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 8),
+                    child: pw.Text('',
+                        style: pw.TextStyle(
+                            color: cWhite, fontSize: 9)),
+                  ),
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 8),
+                    child: pw.Text('Total',
+                        style: pw.TextStyle(
+                            color: cWhite,
+                            fontSize: 9,
+                            fontWeight: pw.FontWeight.bold)),
+                  ),
+                  pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(
+                        horizontal: 5, vertical: 8),
+                    child: pw.Text('Rs. ${fmt.format(totalRcvd)}',
+                        textAlign: pw.TextAlign.right,
+                        style: pw.TextStyle(
+                            color: cGrnLight,
+                            fontSize: 10,
+                            fontWeight: pw.FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+
           pw.SizedBox(height: 16),
 
           // ── Footer ──────────────────────────────────────────────────
@@ -1106,7 +1263,8 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
 
   // ── Show Transaction Picker for Image ──────────────────────────────────────
   void _showTransactionPicker() {
-    if (_payments.isEmpty) {
+    final grouped = _groupPayments(_payments);
+    if (grouped.isEmpty) {
       _snack(context, 'No payment entries found', ok: false);
       return;
     }
@@ -1116,18 +1274,17 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => _TransactionPickerSheet(
-        payments: _payments,
-        bills:    _bills,
-        onSelect: (payment) {
+        grouped:  grouped,
+        onSelect: (gp) {
           Navigator.of(ctx).pop();
-          _generateAndShareImage(payment);
+          _generateAndShareImage(gp);
         },
       ),
     );
   }
 
   // ── Generate & Share Receipt Image ─────────────────────────────────────────
-  Future<void> _generateAndShareImage(_PaymentRecord payment) async {
+  Future<void> _generateAndShareImage(_GroupedPayment payment) async {
     if (!mounted) return;
     HapticFeedback.mediumImpact();
 
@@ -1135,11 +1292,21 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     final fmt     = NumberFormat('#,##,##0.##');
     final dateFmt = DateFormat('dd MMM yyyy, hh:mm a');
 
-    final ob          = _party?.openingBalance ?? 0.0;
-    final totalAmount = (ob + _totalBilled - _totalAllReceived)
-        .clamp(0.0, double.infinity);
+    final ob        = _party?.openingBalance ?? 0.0;
+    // Total original amount this party owed (all bills + opening balance).
+    final totalOwed = ob + _totalBilled;
+    // Sum every payment that was recorded STRICTLY BEFORE this payment's
+    // timestamp. _payments is already filtered to this party by
+    // _recomputeReceived, so it is safe to use directly.
+    final paidBefore = _payments
+        .where((p) => p.createdAt.isBefore(payment.createdAt))
+        .fold(0.0, (s, p) => s + p.amount);
+    // TOTAL AMOUNT on the receipt = what was owed just BEFORE this payment.
+    final totalAmount = (totalOwed - paidBefore).clamp(0.0, double.infinity);
     final amountPaid  = payment.amount;
-    final balance     = (totalAmount - amountPaid).clamp(0.0, double.infinity);
+    // BALANCE DUE on the receipt = what is still owed AFTER this payment.
+    final balance     = (totalOwed - paidBefore - payment.amount)
+        .clamp(0.0, double.infinity);
     final payDate     = dateFmt.format(payment.createdAt);
 
     // ── Canvas layout constants ────────────────────────────────────────────
@@ -2905,7 +3072,7 @@ class _BillsDetailSheet extends StatelessWidget {
 //  Received Detail Sheet — shown when RECEIVED is tapped
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ReceivedDetailSheet extends StatelessWidget {
+class _ReceivedDetailSheet extends StatefulWidget {
   final String               partyName;
   final List<_PaymentRecord> payments;
   final List<SaleBillEntity> bills;
@@ -2916,14 +3083,28 @@ class _ReceivedDetailSheet extends StatelessWidget {
   });
 
   @override
+  State<_ReceivedDetailSheet> createState() => _ReceivedDetailSheetState();
+}
+
+class _ReceivedDetailSheetState extends State<_ReceivedDetailSheet> {
+  bool _showNonSplitted = false;
+
+  @override
   Widget build(BuildContext context) {
     final fmt     = NumberFormat('#,##,##0.##');
     final dateFmt = DateFormat('dd MMM yyyy  hh:mm a');
-    final billMap = {for (final b in bills) b.saleBillId: b.billNumber};
-    final sorted  = List<_PaymentRecord>.from(payments)
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    final total   = payments.fold(0.0, (s, p) => s + p.amount);
+    final billMap = {for (final b in widget.bills) b.saleBillId: b.billNumber};
+    final total   = widget.payments.fold(0.0, (s, p) => s + p.amount);
     final maxH    = MediaQuery.of(context).size.height * 0.75;
+
+    final splitted = List<_PaymentRecord>.from(widget.payments)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final grouped = _groupPayments(widget.payments);
+
+    final itemCount  = _showNonSplitted ? grouped.length : splitted.length;
+    final countLabel = _showNonSplitted
+        ? '${grouped.length} payment${grouped.length != 1 ? "s" : ""}'
+        : '${splitted.length} entr${splitted.length != 1 ? "ies" : "y"}';
 
     return Container(
       constraints: BoxConstraints(maxHeight: maxH),
@@ -2959,7 +3140,7 @@ class _ReceivedDetailSheet extends StatelessWidget {
                               fontSize: 12,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 1.4)),
-                      Text(partyName,
+                      Text(widget.partyName,
                           style: const TextStyle(
                               color: _T.muted2, fontSize: 11)),
                     ],
@@ -2974,7 +3155,7 @@ class _ReceivedDetailSheet extends StatelessWidget {
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.4)),
-                    Text('${payments.length} payments',
+                    Text(countLabel,
                         style: const TextStyle(
                             color: _T.muted, fontSize: 10)),
                   ],
@@ -2982,8 +3163,76 @@ class _ReceivedDetailSheet extends StatelessWidget {
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _showNonSplitted = false);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: !_showNonSplitted
+                          ? _T.accent.withValues(alpha: 0.18)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: !_showNonSplitted
+                            ? _T.accent2.withValues(alpha: 0.45)
+                            : _T.line2,
+                      ),
+                    ),
+                    child: Text(
+                      'Splitted',
+                      style: TextStyle(
+                        color: !_showNonSplitted ? _T.text : _T.muted2,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _showNonSplitted = true);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _showNonSplitted
+                          ? _T.green.withValues(alpha: 0.12)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: _showNonSplitted
+                            ? _T.green.withValues(alpha: 0.35)
+                            : _T.line2,
+                      ),
+                    ),
+                    child: Text(
+                      'Non-splitted',
+                      style: TextStyle(
+                        color: _showNonSplitted ? _T.green : _T.muted2,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           Container(height: 1, color: _T.line2),
-          if (sorted.isEmpty)
+          if (itemCount == 0)
             const Padding(
               padding: EdgeInsets.all(32),
               child: Text('No payments recorded',
@@ -2993,56 +3242,93 @@ class _ReceivedDetailSheet extends StatelessWidget {
             Flexible(
               child: ListView.separated(
                 padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
-                itemCount: sorted.length,
+                itemCount: itemCount,
                 separatorBuilder: (_, __) =>
                     Container(height: 1, color: _T.line),
                 itemBuilder: (_, i) {
-                  final p      = sorted[i];
-                  final billNo = p.linkedBillId != null
-                      ? (billMap[p.linkedBillId] ?? p.linkedBillId!)
-                      : 'Opening Balance';
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 32, height: 32,
-                          decoration: BoxDecoration(
-                            color: _T.green.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: _T.green.withValues(alpha: 0.18)),
+                  if (_showNonSplitted) {
+                    final gp = grouped[i];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 32, height: 32,
+                            decoration: BoxDecoration(
+                              color: _T.green.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: _T.green.withValues(alpha: 0.18)),
+                            ),
+                            child: const Icon(Icons.arrow_downward_rounded,
+                                color: _T.green, size: 13),
                           ),
-                          child: const Icon(Icons.arrow_downward_rounded,
-                              color: _T.green, size: 13),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(billNo,
-                                  style: const TextStyle(
-                                      color: _T.text,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700)),
-                              const SizedBox(height: 2),
-                              Text(dateFmt.format(p.createdAt),
-                                  style: const TextStyle(
-                                      color: _T.muted2, fontSize: 11)),
-                            ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              dateFmt.format(gp.createdAt),
+                              style: const TextStyle(
+                                  color: _T.muted2, fontSize: 11),
+                            ),
                           ),
-                        ),
-                        Text('₹${fmt.format(p.amount)}',
-                            style: const TextStyle(
-                                color: _T.green,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.3)),
-                      ],
-                    ),
-                  );
+                          Text('₹${fmt.format(gp.amount)}',
+                              style: const TextStyle(
+                                  color: _T.green,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.3)),
+                        ],
+                      ),
+                    );
+                  } else {
+                    final p      = splitted[i];
+                    final billNo = p.linkedBillId != null
+                        ? (billMap[p.linkedBillId] ?? p.linkedBillId!)
+                        : 'Opening Balance';
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 32, height: 32,
+                            decoration: BoxDecoration(
+                              color: _T.green.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: _T.green.withValues(alpha: 0.18)),
+                            ),
+                            child: const Icon(Icons.arrow_downward_rounded,
+                                color: _T.green, size: 13),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(billNo,
+                                    style: const TextStyle(
+                                        color: _T.text,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 2),
+                                Text(dateFmt.format(p.createdAt),
+                                    style: const TextStyle(
+                                        color: _T.muted2, fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                          Text('₹${fmt.format(p.amount)}',
+                              style: const TextStyle(
+                                  color: _T.green,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.3)),
+                        ],
+                      ),
+                    );
+                  }
                 },
               ),
             ),
@@ -3051,11 +3337,6 @@ class _ReceivedDetailSheet extends StatelessWidget {
     );
   }
 }
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Share Options Sheet — choose between PDF and Image
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _ShareOptionsSheet extends StatelessWidget {
   final VoidCallback onPdf;
@@ -3185,13 +3466,11 @@ class _ShareOptionTile extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _TransactionPickerSheet extends StatelessWidget {
-  final List<_PaymentRecord>            payments;
-  final List<SaleBillEntity>            bills;
-  final void Function(_PaymentRecord)   onSelect;
+  final List<_GroupedPayment>          grouped;
+  final void Function(_GroupedPayment) onSelect;
 
   const _TransactionPickerSheet({
-    required this.payments,
-    required this.bills,
+    required this.grouped,
     required this.onSelect,
   });
 
@@ -3199,9 +3478,6 @@ class _TransactionPickerSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final fmt     = NumberFormat('#,##,##0.##');
     final dateFmt = DateFormat('dd MMM yyyy  hh:mm a');
-    final billMap = {for (final b in bills) b.saleBillId: b.billNumber};
-    final sorted  = List<_PaymentRecord>.from(payments)
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     final maxH    = MediaQuery.of(context).size.height * 0.78;
 
     return Container(
@@ -3240,13 +3516,14 @@ class _TransactionPickerSheet extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('SELECT TRANSACTION',
+                      const Text('SELECT PAYMENT',
                           style: TextStyle(
                               color: _T.text,
                               fontSize: 12,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 1.4)),
-                      Text('${sorted.length} payment entries',
+                      Text(
+                          '\${grouped.length} payment\${grouped.length != 1 ? "s" : ""}',
                           style: const TextStyle(
                               color: _T.muted2, fontSize: 11)),
                     ],
@@ -3258,12 +3535,12 @@ class _TransactionPickerSheet extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
             child: Text(
-              'Select the payment entry to generate a receipt for',
+              'Select a payment to generate a receipt for',
               style: TextStyle(color: _T.muted2, fontSize: 11),
             ),
           ),
           Container(height: 1, color: _T.line2),
-          if (sorted.isEmpty)
+          if (grouped.isEmpty)
             const Padding(
               padding: EdgeInsets.all(32),
               child: Text('No payment entries found',
@@ -3274,18 +3551,15 @@ class _TransactionPickerSheet extends StatelessWidget {
               child: ListView.separated(
                 padding: const EdgeInsets.fromLTRB(0, 8, 0, 28),
                 physics: const BouncingScrollPhysics(),
-                itemCount: sorted.length,
+                itemCount: grouped.length,
                 separatorBuilder: (_, __) =>
                     Container(height: 1, color: _T.line),
                 itemBuilder: (_, i) {
-                  final p      = sorted[i];
-                  final billNo = p.linkedBillId != null
-                      ? (billMap[p.linkedBillId] ?? p.linkedBillId!)
-                      : 'Opening Balance';
+                  final gp = grouped[i];
                   return GestureDetector(
                     onTap: () {
                       HapticFeedback.selectionClick();
-                      onSelect(p);
+                      onSelect(gp);
                     },
                     behavior: HitTestBehavior.opaque,
                     child: Padding(
@@ -3306,26 +3580,17 @@ class _TransactionPickerSheet extends StatelessWidget {
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(billNo,
-                                    style: const TextStyle(
-                                        color: _T.text,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700)),
-                                const SizedBox(height: 2),
-                                Text(dateFmt.format(p.createdAt),
-                                    style: const TextStyle(
-                                        color: _T.muted2, fontSize: 11)),
-                              ],
+                            child: Text(
+                              dateFmt.format(gp.createdAt),
+                              style: const TextStyle(
+                                  color: _T.muted2, fontSize: 11),
                             ),
                           ),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text('₹${fmt.format(p.amount)}',
+                              Text('₹${fmt.format(gp.amount)}',
                                   style: const TextStyle(
                                       color: _T.green,
                                       fontSize: 14,
@@ -3349,10 +3614,6 @@ class _TransactionPickerSheet extends StatelessWidget {
     );
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Back button
-// ─────────────────────────────────────────────────────────────────────────────
 
 class _BackBtn extends StatelessWidget {
   final VoidCallback onTap;

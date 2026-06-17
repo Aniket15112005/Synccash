@@ -52,6 +52,11 @@ class _BillNoDropdownFieldState extends ConsumerState<BillNoDropdownField> {
   @override
   void initState() {
     super.initState();
+    // If a bill is already selected (edit flow), start collapsed so the
+    // pre-selected bill chip renders immediately without waiting for the stream.
+    if (widget.selectedBill != null || widget.isObSelected) {
+      _isExpanded = false;
+    }
     _scheduleDebounce(widget.partyName);
   }
 
@@ -178,14 +183,15 @@ class _BillNoDropdownFieldState extends ConsumerState<BillNoDropdownField> {
     }).toList();
     final hasBills = pendingBills.isNotEmpty;
 
-    if (!hasBills && !hasOb) return const SizedBox.shrink();
-
     final billFmt = NumberFormat('#,##,##0', 'en_IN');
     final obFmt   = NumberFormat('#,##,##0', 'en_IN');
 
     final somethingSelected = widget.selectedBill != null || widget.isObSelected;
 
-    // ── Collapsed: show selected summary, tap to re-open ──────────────────
+    // ── Collapsed: show selected summary (pre-selected bill shows instantly) ──
+    // NOTE: this check is BEFORE the empty-state guard so a pre-selected bill
+    // (passed in from the edit flow) always renders its chip even while the
+    // pending-bills stream is still loading.
     if (!_isExpanded && somethingSelected) {
       return GestureDetector(
         onTap: () => setState(() => _isExpanded = true),
@@ -284,6 +290,9 @@ class _BillNoDropdownFieldState extends ConsumerState<BillNoDropdownField> {
         ),
       );
     }
+
+    // Nothing to show — no pending bills, no OB, nothing selected
+    if (!hasBills && !hasOb) return const SizedBox.shrink();
 
     // ── Expanded: full dropdown ────────────────────────────────────────────
     final anythingSelected = somethingSelected;

@@ -1,3 +1,4 @@
+// lib/features/dashboard/presentation/screens/upi_dashboard_screen.dart
 // ignore_for_file: use_build_context_synchronously
 import 'dart:async';
 
@@ -15,30 +16,39 @@ import 'package:synccash/features/transactions/domain/entities/transaction_entit
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
 import 'package:synccash/features/transactions/presentation/screens/add_transaction_screen.dart';
 import 'package:synccash/features/transactions/presentation/widgets/transaction_list_item.dart';
-import 'package:synccash/features/dashboard/presentation/screens/upi_dashboard_screen.dart';
+import 'package:synccash/features/dashboard/presentation/screens/bank_dashboard_screen.dart';
+
+// ── UPI theme colours ─────────────────────────────────────────────────────────
+const _kUpiPrimary    = Color(0xFFA78BFA);  // purple 400
+const _kUpiDark       = Color(0xFF7C3AED);  // purple 600
+const _kUpiDimBg      = Color(0xFF1A0E35);
+const _kUpiBorder     = Color(0xFF3D1D8A);
+const _kUpiGlowStart  = Color(0xFF0D0820);
+const _kUpiGlowMid    = Color(0xFF120D2E);
+const _kUpiGlowEnd    = Color(0xFF13103A);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-String _bankGreeting() {
+String _upiGreeting() {
   final h = DateTime.now().hour;
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
 }
 
-String _bankInitial(String? name) {
+String _upiInitial(String? name) {
   final s = name?.trim();
   return (s == null || s.isEmpty) ? 'U' : s[0].toUpperCase();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Bank Dashboard Screen
+//  UPI Dashboard Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
-class BankDashboardScreen extends ConsumerWidget {
-  const BankDashboardScreen({super.key});
+class UpiDashboardScreen extends ConsumerWidget {
+  const UpiDashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -48,12 +58,12 @@ class BankDashboardScreen extends ConsumerWidget {
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: RefreshIndicator(
-          color: AppColors.primary,
+          color: _kUpiPrimary,
           backgroundColor: AppColors.surface,
           strokeWidth: 1.5,
           onRefresh: () async {
             if (cashbookId != null) {
-              ref.invalidate(bankTransactionsStreamProvider(cashbookId));
+              ref.invalidate(upiTransactionsStreamProvider(cashbookId));
             }
           },
           child: CustomScrollView(
@@ -62,23 +72,23 @@ class BankDashboardScreen extends ConsumerWidget {
             ),
             slivers: [
               const SliverToBoxAdapter(
-                child: RepaintBoundary(child: _BankHeader()),
+                child: RepaintBoundary(child: _UpiHeader()),
               ),
               if (cashbookId != null) ...[
                 SliverToBoxAdapter(
                   child: RepaintBoundary(
-                    child: _BankBalanceSection(cashbookId: cashbookId),
+                    child: _UpiBalanceSection(cashbookId: cashbookId),
                   ),
                 ),
                 const SliverToBoxAdapter(child: SizedBox(height: 28)),
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-                    child: _BankSectionHeader(cashbookId: cashbookId),
+                    child: _UpiSectionHeader(cashbookId: cashbookId),
                   ),
                 ),
                 const SliverToBoxAdapter(child: SizedBox(height: 14)),
-                _BankRecentSliver(cashbookId: cashbookId),
+                _UpiRecentSliver(cashbookId: cashbookId),
               ] else
                 const SliverFillRemaining(
                   hasScrollBody: false,
@@ -94,17 +104,17 @@ class BankDashboardScreen extends ConsumerWidget {
           ),
         ),
       ),
-      floatingActionButton: _BankFAB(cashbookId: cashbookId),
+      floatingActionButton: _UpiFAB(cashbookId: cashbookId),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Header  (greeting + "Cash" pill + settings + avatar)
+//  Header  (greeting + "Cash" pill + "Bank" pill + settings + avatar)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BankHeader extends ConsumerWidget {
-  const _BankHeader();
+class _UpiHeader extends ConsumerWidget {
+  const _UpiHeader();
 
   void _openSettings(BuildContext ctx) {
     HapticFeedback.selectionClick();
@@ -153,8 +163,8 @@ class _BankHeader extends ConsumerWidget {
       context: ctx,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _BankProfileSheet(
-        initial: _bankInitial(user?.displayName),
+      builder: (_) => _UpiProfileSheet(
+        initial: _upiInitial(user?.displayName),
         displayName: user?.displayName,
         email: user?.email,
         onLogout: () {
@@ -182,7 +192,7 @@ class _BankHeader extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _bankGreeting(),
+                  _upiGreeting(),
                   style: const TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 12,
@@ -202,7 +212,7 @@ class _BankHeader extends ConsumerWidget {
               ],
             ),
           ),
-          // ── "Cash" pill — taps to pop back to normal dashboard ───────
+          // ── "Cash" pill — taps back to normal dashboard ──────────────
           GestureDetector(
             onTap: () {
               HapticFeedback.selectionClick();
@@ -219,8 +229,7 @@ class _BankHeader extends ConsumerWidget {
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.wallet_rounded,
-                      size: 14, color: Color(0xFF60A5FA)),
+                  Icon(Icons.wallet_rounded, size: 14, color: Color(0xFF60A5FA)),
                   SizedBox(width: 6),
                   Text(
                     'Cash',
@@ -236,32 +245,32 @@ class _BankHeader extends ConsumerWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // ── "UPI" pill — taps to UPI dashboard ──────────────────────
+          // ── "Bank" pill — taps to Bank dashboard ────────────────────
           GestureDetector(
             onTap: () {
               HapticFeedback.selectionClick();
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const UpiDashboardScreen()),
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const BankDashboardScreen()),
               );
             },
             behavior: HitTestBehavior.opaque,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFF1A0E35),
+                color: const Color(0xFF0E2A1F),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF3D1D8A)),
+                border: Border.all(color: const Color(0xFF1B4D35)),
               ),
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.account_balance_wallet_rounded,
-                      size: 14, color: Color(0xFFA78BFA)),
+                  Icon(Icons.account_balance_rounded,
+                      size: 14, color: Color(0xFF34D399)),
                   SizedBox(width: 6),
                   Text(
-                    'UPI',
+                    'Bank',
                     style: TextStyle(
-                      color: Color(0xFFA78BFA),
+                      color: Color(0xFF34D399),
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       letterSpacing: -0.2,
@@ -303,7 +312,7 @@ class _BankHeader extends ConsumerWidget {
               _openProfile(context, ref);
             },
             behavior: HitTestBehavior.opaque,
-            child: _BankAvatar(initial: _bankInitial(displayName)),
+            child: _UpiAvatar(initial: _upiInitial(displayName)),
           ),
         ],
       ),
@@ -312,16 +321,16 @@ class _BankHeader extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Balance section — computed client-side from bank transactions
+//  Balance section — computed client-side from UPI transactions
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BankBalanceSection extends ConsumerWidget {
+class _UpiBalanceSection extends ConsumerWidget {
   final String cashbookId;
-  const _BankBalanceSection({required this.cashbookId});
+  const _UpiBalanceSection({required this.cashbookId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(bankTransactionsStreamProvider(cashbookId));
+    final async = ref.watch(upiTransactionsStreamProvider(cashbookId));
     return async.when(
       data: (txs) {
         final income = txs
@@ -333,7 +342,7 @@ class _BankBalanceSection extends ConsumerWidget {
         final balance = income - expense;
         return Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          child: _BankBalanceCard(
+          child: _UpiBalanceCard(
               income: income, expense: expense, balance: balance),
         );
       },
@@ -360,21 +369,21 @@ class _BankBalanceSection extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Bank Balance Card
+//  UPI Balance Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BankBalanceCard extends StatefulWidget {
+class _UpiBalanceCard extends StatefulWidget {
   final double income;
   final double expense;
   final double balance;
-  const _BankBalanceCard(
+  const _UpiBalanceCard(
       {required this.income, required this.expense, required this.balance});
 
   @override
-  State<_BankBalanceCard> createState() => _BankBalanceCardState();
+  State<_UpiBalanceCard> createState() => _UpiBalanceCardState();
 }
 
-class _BankBalanceCardState extends State<_BankBalanceCard> {
+class _UpiBalanceCardState extends State<_UpiBalanceCard> {
   bool _hide = true;
 
   @override
@@ -388,11 +397,11 @@ class _BankBalanceCardState extends State<_BankBalanceCard> {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF061526), Color(0xFF091D35), Color(0xFF0B1E3A)],
+          colors: [_kUpiGlowStart, _kUpiGlowMid, _kUpiGlowEnd],
           stops: [0.0, 0.5, 1.0],
         ),
         border: Border.all(
-            color: const Color(0xFF1E3A5F).withValues(alpha: 0.5), width: 1.0),
+            color: _kUpiBorder.withValues(alpha: 0.5), width: 1.0),
         boxShadow: [
           BoxShadow(
               color: Colors.black.withValues(alpha: 0.4),
@@ -413,7 +422,7 @@ class _BankBalanceCardState extends State<_BankBalanceCard> {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(colors: [
-                    const Color(0xFF34D399).withValues(alpha: 0.06),
+                    _kUpiPrimary.withValues(alpha: 0.08),
                     Colors.transparent,
                   ]),
                 ),
@@ -429,11 +438,11 @@ class _BankBalanceCardState extends State<_BankBalanceCard> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Row(children: [
-                        _BankPulseDot(),
+                        _UpiPulseDot(),
                         SizedBox(width: 7),
-                        Text('BANK',
+                        Text('UPI',
                             style: TextStyle(
-                                color: Color(0xFF34D399),
+                                color: _kUpiPrimary,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: 1.6)),
@@ -442,16 +451,14 @@ class _BankBalanceCardState extends State<_BankBalanceCard> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color:
-                              const Color(0xFF34D399).withValues(alpha: 0.10),
+                          color: _kUpiPrimary.withValues(alpha: 0.10),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                              color: const Color(0xFF34D399)
-                                  .withValues(alpha: 0.20)),
+                              color: _kUpiPrimary.withValues(alpha: 0.20)),
                         ),
                         child: const Text('LIVE',
                             style: TextStyle(
-                                color: Color(0xFF34D399),
+                                color: _kUpiPrimary,
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: 1.4)),
@@ -467,7 +474,7 @@ class _BankBalanceCardState extends State<_BankBalanceCard> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Bank Balance',
+                            const Text('UPI Balance',
                                 style: TextStyle(
                                     color: Colors.white38,
                                     fontSize: 11,
@@ -540,7 +547,7 @@ class _BankBalanceCardState extends State<_BankBalanceCard> {
                   Row(
                     children: [
                       Expanded(
-                        child: _BankMetricTile(
+                        child: _UpiMetricTile(
                             label: 'Income',
                             value: widget.income,
                             icon: Icons.south_rounded,
@@ -549,7 +556,7 @@ class _BankBalanceCardState extends State<_BankBalanceCard> {
                       ),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: _BankMetricTile(
+                        child: _UpiMetricTile(
                             label: 'Expense',
                             value: widget.expense,
                             icon: Icons.north_rounded,
@@ -568,13 +575,13 @@ class _BankBalanceCardState extends State<_BankBalanceCard> {
   }
 }
 
-class _BankMetricTile extends StatelessWidget {
+class _UpiMetricTile extends StatelessWidget {
   final String label;
   final double value;
   final IconData icon;
   final Color color;
   final bool hide;
-  const _BankMetricTile(
+  const _UpiMetricTile(
       {required this.label,
       required this.value,
       required this.icon,
@@ -636,14 +643,14 @@ class _BankMetricTile extends StatelessWidget {
   }
 }
 
-class _BankPulseDot extends StatefulWidget {
-  const _BankPulseDot();
+class _UpiPulseDot extends StatefulWidget {
+  const _UpiPulseDot();
 
   @override
-  State<_BankPulseDot> createState() => _BankPulseDotState();
+  State<_UpiPulseDot> createState() => _UpiPulseDotState();
 }
 
-class _BankPulseDotState extends State<_BankPulseDot>
+class _UpiPulseDotState extends State<_UpiPulseDot>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
 
@@ -670,8 +677,7 @@ class _BankPulseDotState extends State<_BankPulseDot>
         height: 7,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Color.lerp(
-              const Color(0xFF34D399), const Color(0xFF10B981), _ctrl.value),
+          color: Color.lerp(_kUpiPrimary, _kUpiDark, _ctrl.value),
         ),
       ),
     );
@@ -682,9 +688,9 @@ class _BankPulseDotState extends State<_BankPulseDot>
 //  Section header ("Recent" + filter button + "See all")
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BankSectionHeader extends ConsumerWidget {
+class _UpiSectionHeader extends ConsumerWidget {
   final String cashbookId;
-  const _BankSectionHeader({required this.cashbookId});
+  const _UpiSectionHeader({required this.cashbookId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -702,14 +708,14 @@ class _BankSectionHeader extends ConsumerWidget {
             ),
           ),
         ),
-        const _BankFilterButton(),
+        const _UpiFilterButton(),
         const SizedBox(width: 10),
         GestureDetector(
           onTap: () {
             HapticFeedback.selectionClick();
             Navigator.of(context).push(
               MaterialPageRoute(
-                  builder: (_) => BankHistoryScreen(cashbookId: cashbookId)),
+                  builder: (_) => UpiHistoryScreen(cashbookId: cashbookId)),
             );
           },
           behavior: HitTestBehavior.opaque,
@@ -742,18 +748,18 @@ class _BankSectionHeader extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Filter button (reads active-filter count for badge)
+//  Filter button (badge count)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BankFilterButton extends ConsumerWidget {
-  const _BankFilterButton();
+class _UpiFilterButton extends ConsumerWidget {
+  const _UpiFilterButton();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final dateFilter   = ref.watch(bankDateFilterProvider);
-    final typeFilter   = ref.watch(bankTypeFilterProvider);
-    final amountFilter = ref.watch(bankAmountFilterProvider);
-    final descFilter   = ref.watch(bankDescFilterProvider);
+    final dateFilter   = ref.watch(upiDateFilterProvider);
+    final typeFilter   = ref.watch(upiTypeFilterProvider);
+    final amountFilter = ref.watch(upiAmountFilterProvider);
+    final descFilter   = ref.watch(upiDescFilterProvider);
 
     final count = (dateFilter != null ? 1 : 0) +
         (typeFilter != null ? 1 : 0) +
@@ -769,7 +775,7 @@ class _BankFilterButton extends ConsumerWidget {
           context: context,
           isScrollControlled: true,
           backgroundColor: Colors.transparent,
-          builder: (_) => const _BankFilterSheet(),
+          builder: (_) => const _UpiFilterSheet(),
         );
       },
       child: AnimatedContainer(
@@ -824,13 +830,13 @@ class _BankFilterButton extends ConsumerWidget {
 //  Recent transactions sliver (max 5)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BankRecentSliver extends ConsumerWidget {
+class _UpiRecentSliver extends ConsumerWidget {
   final String cashbookId;
-  const _BankRecentSliver({required this.cashbookId});
+  const _UpiRecentSliver({required this.cashbookId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async         = ref.watch(filteredBankTransactionsProvider(cashbookId));
+    final async         = ref.watch(filteredUpiTransactionsProvider(cashbookId));
     final currentUserId = ref.watch(currentUserIdProvider.select((id) => id));
 
     return async.when(
@@ -839,7 +845,7 @@ class _BankRecentSliver extends ConsumerWidget {
           return SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: _BankEmptyState(),
+              child: _UpiEmptyState(),
             ),
           );
         }
@@ -871,7 +877,7 @@ class _BankRecentSliver extends ConsumerWidget {
       loading: () => SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: _BankListSkeleton(),
+          child: _UpiListSkeleton(),
         ),
       ),
       error: (e, _) => SliverToBoxAdapter(
@@ -890,9 +896,9 @@ class _BankRecentSliver extends ConsumerWidget {
 //  FAB
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BankFAB extends StatelessWidget {
+class _UpiFAB extends StatelessWidget {
   final String? cashbookId;
-  const _BankFAB({this.cashbookId});
+  const _UpiFAB({this.cashbookId});
 
   @override
   Widget build(BuildContext context) {
@@ -901,10 +907,10 @@ class _BankFAB extends StatelessWidget {
         HapticFeedback.lightImpact();
         Navigator.of(context).push(
           MaterialPageRoute(
-          builder: (_) => const AddTransactionScreen(
-            initialCategory: 'Bank',
-            categoryLocked: true,
-          ),
+            builder: (_) => const AddTransactionScreen(
+              initialCategory: 'UPI',
+              categoryLocked: true,
+            ),
           ),
         );
       },
@@ -913,11 +919,11 @@ class _BankFAB extends StatelessWidget {
         height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 22),
         decoration: BoxDecoration(
-          color: const Color(0xFF059669),
+          color: _kUpiDark,
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF059669).withValues(alpha: 0.35),
+              color: _kUpiDark.withValues(alpha: 0.35),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
@@ -942,17 +948,17 @@ class _BankFAB extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Bank Filter Sheet
+//  UPI Filter Sheet
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BankFilterSheet extends ConsumerStatefulWidget {
-  const _BankFilterSheet();
+class _UpiFilterSheet extends ConsumerStatefulWidget {
+  const _UpiFilterSheet();
 
   @override
-  ConsumerState<_BankFilterSheet> createState() => _BankFilterSheetState();
+  ConsumerState<_UpiFilterSheet> createState() => _UpiFilterSheetState();
 }
 
-class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
+class _UpiFilterSheetState extends ConsumerState<_UpiFilterSheet> {
   final _descCtrl = TextEditingController();
   final _minCtrl  = TextEditingController();
   final _maxCtrl  = TextEditingController();
@@ -962,8 +968,8 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
   @override
   void initState() {
     super.initState();
-    final desc   = ref.read(bankDescFilterProvider);
-    final amount = ref.read(bankAmountFilterProvider);
+    final desc   = ref.read(upiDescFilterProvider);
+    final amount = ref.read(upiAmountFilterProvider);
     if (desc != null) _descCtrl.text = desc;
     if (amount?.minAmount != null) {
       _minCtrl.text = amount!.minAmount!.toStringAsFixed(0);
@@ -971,7 +977,7 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
     if (amount?.maxAmount != null) {
       _maxCtrl.text = amount!.maxAmount!.toStringAsFixed(0);
     }
-    _dateLabel = _labelFrom(ref.read(bankDateFilterProvider));
+    _dateLabel = _labelFrom(ref.read(upiDateFilterProvider));
   }
 
   @override
@@ -1002,7 +1008,7 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
   void _onDateChip(String label) {
     if (_dateLabel == label) {
       setState(() => _dateLabel = '');
-      ref.read(bankDateFilterProvider.notifier).setFilter(null);
+      ref.read(upiDateFilterProvider.notifier).setFilter(null);
       return;
     }
     if (label == 'Single Date') { _pickSingle(); return; }
@@ -1016,7 +1022,7 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
       'This Month': TransactionDateFilter(startDate: DateTime(now.year, now.month, 1),        endDate: now),
       'This Year':  TransactionDateFilter(startDate: DateTime(now.year, 1, 1),                endDate: now),
     };
-    ref.read(bankDateFilterProvider.notifier).setFilter(map[label]);
+    ref.read(upiDateFilterProvider.notifier).setFilter(map[label]);
   }
 
   Future<void> _pickSingle() async {
@@ -1028,14 +1034,14 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
     );
     if (!mounted || picked == null) return;
     setState(() => _dateLabel = 'Single Date');
-    ref.read(bankDateFilterProvider.notifier).setFilter(TransactionDateFilter(
+    ref.read(upiDateFilterProvider.notifier).setFilter(TransactionDateFilter(
       startDate: DateTime(picked.year, picked.month, picked.day),
       endDate:   DateTime(picked.year, picked.month, picked.day, 23, 59, 59),
     ));
   }
 
   Future<void> _pickRange() async {
-    final cur = ref.read(bankDateFilterProvider);
+    final cur = ref.read(upiDateFilterProvider);
     final picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2020),
@@ -1047,7 +1053,7 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
     );
     if (!mounted || picked == null) return;
     setState(() => _dateLabel = 'Custom');
-    ref.read(bankDateFilterProvider.notifier).setFilter(TransactionDateFilter(
+    ref.read(upiDateFilterProvider.notifier).setFilter(TransactionDateFilter(
       startDate: picked.start,
       endDate:
           DateTime(picked.end.year, picked.end.month, picked.end.day, 23, 59, 59),
@@ -1060,21 +1066,21 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
     _minCtrl.clear();
     _maxCtrl.clear();
     setState(() => _dateLabel = '');
-    ref.read(bankDateFilterProvider.notifier).setFilter(null);
-    ref.read(bankTypeFilterProvider.notifier).setFilter(null);
-    ref.read(bankAmountFilterProvider.notifier).setFilter(null);
-    ref.read(bankDescFilterProvider.notifier).setFilter(null);
+    ref.read(upiDateFilterProvider.notifier).setFilter(null);
+    ref.read(upiTypeFilterProvider.notifier).setFilter(null);
+    ref.read(upiAmountFilterProvider.notifier).setFilter(null);
+    ref.read(upiDescFilterProvider.notifier).setFilter(null);
   }
 
   void _apply() {
     _debounce?.cancel();
     final min = double.tryParse(_minCtrl.text.trim());
     final max = double.tryParse(_maxCtrl.text.trim());
-    ref.read(bankAmountFilterProvider.notifier).setFilter(
+    ref.read(upiAmountFilterProvider.notifier).setFilter(
         (min == null && max == null)
             ? null
             : BankAmountFilter(minAmount: min, maxAmount: max));
-    ref.read(bankDescFilterProvider.notifier).setFilter(
+    ref.read(upiDescFilterProvider.notifier).setFilter(
         _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim());
     Navigator.pop(context);
   }
@@ -1082,7 +1088,7 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
   @override
   Widget build(BuildContext context) {
     final theme      = Theme.of(context);
-    final typeFilter = ref.watch(bankTypeFilterProvider);
+    final typeFilter = ref.watch(upiTypeFilterProvider);
     final mq         = MediaQuery.of(context);
 
     return Padding(
@@ -1114,7 +1120,7 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Filter Bank Transactions',
+                  Text('Filter UPI Transactions',
                       style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w700, letterSpacing: -0.3)),
                   TextButton(
@@ -1135,9 +1141,9 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
             const SizedBox(height: 20),
 
             // ── Date range ────────────────────────────────────────────
-            _BKLabel('DATE RANGE', theme),
+            _UKLabel('DATE RANGE', theme),
             const SizedBox(height: 10),
-            _BKChipRow(
+            _UKChipRow(
               chips: const [
                 'Today', 'This Week', 'This Month',
                 'This Year', 'Single Date', 'Custom',
@@ -1148,9 +1154,9 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
             const SizedBox(height: 20),
 
             // ── Type ──────────────────────────────────────────────────
-            _BKLabel('TYPE', theme),
+            _UKLabel('TYPE', theme),
             const SizedBox(height: 10),
-            _BKChipRow(
+            _UKChipRow(
               chips: const ['Income', 'Expense'],
               selected: typeFilter != null
                   ? typeFilter[0].toUpperCase() + typeFilter.substring(1)
@@ -1159,7 +1165,7 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
                 HapticFeedback.selectionClick();
                 final lower = t.toLowerCase();
                 ref
-                    .read(bankTypeFilterProvider.notifier)
+                    .read(upiTypeFilterProvider.notifier)
                     .setFilter(typeFilter == lower ? null : lower);
                 setState(() {});
               },
@@ -1167,14 +1173,14 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
             const SizedBox(height: 20),
 
             // ── Amount range ──────────────────────────────────────────
-            _BKLabel('AMOUNT RANGE', theme),
+            _UKLabel('AMOUNT RANGE', theme),
             const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(
                 children: [
                   Expanded(
-                    child: _BKField(
+                    child: _UKField(
                         ctrl: _minCtrl,
                         hint: 'Min amount',
                         icon: Icons.arrow_downward_rounded,
@@ -1182,7 +1188,7 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: _BKField(
+                    child: _UKField(
                         ctrl: _maxCtrl,
                         hint: 'Max amount',
                         icon: Icons.arrow_upward_rounded,
@@ -1194,11 +1200,11 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
             const SizedBox(height: 20),
 
             // ── Description search ────────────────────────────────────
-            _BKLabel('SEARCH', theme),
+            _UKLabel('SEARCH', theme),
             const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: _BKField(
+              child: _UKField(
                   ctrl: _descCtrl,
                   hint: 'Search by description',
                   icon: Icons.notes_rounded),
@@ -1232,24 +1238,23 @@ class _BankFilterSheetState extends ConsumerState<_BankFilterSheet> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Bank History Screen  (pushed from "See All")
+//  UPI History Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
-class BankHistoryScreen extends ConsumerStatefulWidget {
+class UpiHistoryScreen extends ConsumerStatefulWidget {
   final String cashbookId;
-  const BankHistoryScreen({super.key, required this.cashbookId});
+  const UpiHistoryScreen({super.key, required this.cashbookId});
 
   @override
-  ConsumerState<BankHistoryScreen> createState() => _BankHistoryScreenState();
+  ConsumerState<UpiHistoryScreen> createState() => _UpiHistoryScreenState();
 }
 
-class _BankHistoryScreenState extends ConsumerState<BankHistoryScreen>
+class _UpiHistoryScreenState extends ConsumerState<UpiHistoryScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _fadeCtrl;
   late final Animation<double>   _fadeAnim;
 
-  // Local quick-filters (no extra providers needed)
-  String _localType  = 'all'; // 'all' | 'income' | 'expense'
+  String _localType  = 'all';
   String _localQuery = '';
   bool   _showSearch = false;
   final TextEditingController _searchCtrl = TextEditingController();
@@ -1291,7 +1296,7 @@ class _BankHistoryScreenState extends ConsumerState<BankHistoryScreen>
     final currentUserId =
         ref.watch(currentUserIdProvider.select((id) => id));
     final async =
-        ref.watch(filteredBankTransactionsProvider(widget.cashbookId));
+        ref.watch(filteredUpiTransactionsProvider(widget.cashbookId));
     final fmt = NumberFormat('#,##,##0', 'en_IN');
 
     return Scaffold(
@@ -1316,14 +1321,14 @@ class _BankHistoryScreenState extends ConsumerState<BankHistoryScreen>
                   Navigator.pop(context);
                 },
               ),
-              title: const Text('Bank History',
+              title: const Text('UPI History',
                   style: TextStyle(
                       color: AppColors.textPrimary,
                       fontSize: 17,
                       fontWeight: FontWeight.w700,
                       letterSpacing: -0.3)),
               actions: [
-                const _BankFilterButton(),
+                const _UpiFilterButton(),
                 const SizedBox(width: 4),
                 IconButton(
                   icon: Icon(
@@ -1409,7 +1414,7 @@ class _BankHistoryScreenState extends ConsumerState<BankHistoryScreen>
                                       horizontal: 14, vertical: 8),
                                   decoration: BoxDecoration(
                                     color: active
-                                        ? const Color(0xFF059669)
+                                        ? _kUpiDark
                                         : AppColors.surface,
                                     borderRadius:
                                         BorderRadius.circular(10),
@@ -1469,12 +1474,12 @@ class _BankHistoryScreenState extends ConsumerState<BankHistoryScreen>
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.account_balance_rounded,
+                              Icon(Icons.account_balance_wallet_rounded,
                                   size: 48,
                                   color: AppColors.textMuted
                                       .withValues(alpha: 0.3)),
                               const SizedBox(height: 12),
-                              const Text('No bank transactions',
+                              const Text('No UPI transactions',
                                   style: TextStyle(
                                       color: AppColors.textMuted,
                                       fontSize: 14)),
@@ -1508,7 +1513,7 @@ class _BankHistoryScreenState extends ConsumerState<BankHistoryScreen>
               },
               loading: () => SliverFillRemaining(
                 hasScrollBody: false,
-                child: _BankListSkeleton(),
+                child: _UpiListSkeleton(),
               ),
               error: (e, _) => SliverFillRemaining(
                 hasScrollBody: false,
@@ -1529,7 +1534,7 @@ class _BankHistoryScreenState extends ConsumerState<BankHistoryScreen>
 //  Micro widgets
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _BankEmptyState extends StatelessWidget {
+class _UpiEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -1541,17 +1546,17 @@ class _BankEmptyState extends StatelessWidget {
       ),
       child: const Column(
         children: [
-          Icon(Icons.account_balance_rounded,
+          Icon(Icons.account_balance_wallet_rounded,
               size: 32, color: AppColors.textSecondary),
           SizedBox(height: 14),
-          Text('No bank transactions',
+          Text('No UPI transactions',
               style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textPrimary,
                   letterSpacing: -0.2)),
           SizedBox(height: 5),
-          Text('Tap the button below to add a bank entry.',
+          Text('Tap the button below to add a UPI entry.',
               textAlign: TextAlign.center,
               style: TextStyle(
                   fontSize: 12,
@@ -1563,7 +1568,7 @@ class _BankEmptyState extends StatelessWidget {
   }
 }
 
-class _BankListSkeleton extends StatelessWidget {
+class _UpiListSkeleton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -1589,9 +1594,9 @@ class _BankListSkeleton extends StatelessWidget {
   }
 }
 
-class _BankAvatar extends StatelessWidget {
+class _UpiAvatar extends StatelessWidget {
   final String initial;
-  const _BankAvatar({required this.initial});
+  const _UpiAvatar({required this.initial});
 
   @override
   Widget build(BuildContext context) {
@@ -1602,32 +1607,37 @@ class _BankAvatar extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF1E3A5F), Color(0xFF2563EB)],
+          colors: [Color(0xFF4C1D95), _kUpiDark],
         ),
         shape: BoxShape.circle,
         border: Border.all(color: AppColors.border, width: 1.5),
       ),
       child: Center(
-        child: Text(initial,
-            style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 15)),
+        child: Text(
+          initial,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+          ),
+        ),
       ),
     );
   }
 }
 
-class _BankProfileSheet extends StatelessWidget {
+class _UpiProfileSheet extends StatelessWidget {
   final String initial;
   final String? displayName;
   final String? email;
   final VoidCallback onLogout;
-  const _BankProfileSheet(
-      {required this.initial,
-      this.displayName,
-      this.email,
-      required this.onLogout});
+
+  const _UpiProfileSheet({
+    required this.initial,
+    required this.displayName,
+    required this.email,
+    required this.onLogout,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1635,8 +1645,7 @@ class _BankProfileSheet extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        borderRadius:
-            const BorderRadius.vertical(top: Radius.circular(32)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1647,39 +1656,163 @@ class _BankProfileSheet extends StatelessWidget {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                  color: theme.colorScheme.onSurfaceVariant
-                      .withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(4)),
+                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
             ),
           ),
-          const SizedBox(height: 24),
-          _BankAvatar(initial: initial),
-          const SizedBox(height: 16),
-          Text(displayName ?? 'User',
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700)),
-          if (email != null) ...[
-            const SizedBox(height: 4),
-            Text(email!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant)),
-          ],
-          const SizedBox(height: 24),
+          Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              Container(
+                height: 100,
+                margin: const EdgeInsets.fromLTRB(0, 16, 0, 0),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF4C1D95), _kUpiDark, Color(0xFF6D28D9)],
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: -40,
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [_kUpiPrimary, _kUpiDark],
+                    ),
+                    border:
+                        Border.all(color: theme.colorScheme.surface, width: 3),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _kUpiDark.withValues(alpha: 0.3),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Text(
+                      initial,
+                      style: const TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 52),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onLogout,
-                icon: const Icon(Icons.logout_rounded, size: 18),
-                label: const Text('Sign out'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.red.shade400,
-                  side: BorderSide(
-                      color: Colors.red.shade400.withValues(alpha: 0.4)),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              children: [
+                Text(
+                  displayName ?? 'User',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 5),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color:
+                          theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.mail_outline_rounded,
+                          size: 13,
+                          color: theme.colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.6)),
+                      const SizedBox(width: 5),
+                      Text(
+                        email ?? '',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 28),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Divider(
+              height: 1,
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.2),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: InkWell(
+              onTap: onLogout,
+              borderRadius: BorderRadius.circular(16),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(Icons.logout_rounded,
+                          color: Colors.red.shade400, size: 20),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Sign out',
+                              style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.red.shade400)),
+                          Text('You will need to log in again',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: theme.colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.5))),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 18,
+                        color: theme.colorScheme.onSurfaceVariant
+                            .withValues(alpha: 0.3)),
+                  ],
                 ),
               ),
             ),
@@ -1691,12 +1824,12 @@ class _BankProfileSheet extends StatelessWidget {
   }
 }
 
-// ── Filter sheet micro-widgets ─────────────────────────────────────────────
+// ── Filter sheet micro widgets ─────────────────────────────────────────────────
 
-class _BKLabel extends StatelessWidget {
+class _UKLabel extends StatelessWidget {
   final String text;
   final ThemeData theme;
-  const _BKLabel(this.text, this.theme);
+  const _UKLabel(this.text, this.theme);
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -1705,8 +1838,7 @@ class _BKLabel extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: Text(text,
               style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant
-                    .withValues(alpha: 0.5),
+                color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.8,
                 fontSize: 10,
@@ -1715,68 +1847,79 @@ class _BKLabel extends StatelessWidget {
       );
 }
 
-class _BKChipRow extends StatelessWidget {
+class _UKChipRow extends StatelessWidget {
   final List<String> chips;
   final String selected;
   final ValueChanged<String> onTap;
-  const _BKChipRow(
-      {required this.chips,
-      required this.selected,
-      required this.onTap});
+  const _UKChipRow(
+      {required this.chips, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        height: 36,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          itemCount: chips.length,
+          itemBuilder: (_, i) => Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _UKChip(
+              label: chips[i],
+              isSelected: selected == chips[i],
+              onTap: () => onTap(chips[i]),
+            ),
+          ),
+        ),
+      );
+}
+
+class _UKChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+  const _UKChip(
+      {required this.label, required this.isSelected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SizedBox(
-      height: 36,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: chips.length,
-        itemBuilder: (_, i) => Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: GestureDetector(
-            onTap: () => onTap(chips[i]),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: selected == chips[i]
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: selected == chips[i]
-                      ? Colors.transparent
-                      : theme.colorScheme.outlineVariant
-                          .withValues(alpha: 0.35),
-                  width: 0.5,
-                ),
-              ),
-              child: Text(chips[i],
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: selected == chips[i]
-                          ? FontWeight.w600
-                          : FontWeight.w400,
-                      color: selected == chips[i]
-                          ? theme.colorScheme.onPrimary
-                          : theme.colorScheme.onSurface)),
-            ),
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? theme.colorScheme.primary
+              : theme.colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected
+                ? Colors.transparent
+                : theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
+            width: 0.5,
           ),
         ),
+        child: Text(label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+              color: isSelected
+                  ? theme.colorScheme.onPrimary
+                  : theme.colorScheme.onSurface,
+            )),
       ),
     );
   }
 }
 
-class _BKField extends StatelessWidget {
+class _UKField extends StatelessWidget {
   final TextEditingController ctrl;
   final String hint;
   final IconData icon;
   final TextInputType keyboard;
-  const _BKField(
+  const _UKField(
       {required this.ctrl,
       required this.hint,
       required this.icon,
@@ -1792,34 +1935,33 @@ class _BKField extends StatelessWidget {
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(
-            color: theme.colorScheme.onSurfaceVariant
-                .withValues(alpha: 0.45),
+            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
             fontSize: 14),
         prefixIcon: Icon(icon,
             size: 18,
-            color: theme.colorScheme.onSurfaceVariant
-                .withValues(alpha: 0.55)),
+            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.55)),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
         filled: true,
         fillColor: theme.colorScheme.surfaceContainerLow,
         border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-                color: theme.colorScheme.outlineVariant
-                    .withValues(alpha: 0.3),
-                width: 0.5)),
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+              width: 0.5),
+        ),
         enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-                color: theme.colorScheme.outlineVariant
-                    .withValues(alpha: 0.25),
-                width: 0.5)),
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.25),
+              width: 0.5),
+        ),
         focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(
-                color: theme.colorScheme.primary.withValues(alpha: 0.7),
-                width: 1.2)),
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+              color: theme.colorScheme.primary.withValues(alpha: 0.7),
+              width: 1.2),
+        ),
       ),
     );
   }

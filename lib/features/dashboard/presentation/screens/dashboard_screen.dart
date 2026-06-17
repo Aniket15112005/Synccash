@@ -16,6 +16,7 @@ import 'package:synccash/features/dashboard/presentation/widgets/balance_card.da
 import 'package:synccash/features/dashboard/presentation/widgets/synccash_filter_sheet.dart';
 import 'package:synccash/features/settings/presentation/screens/settings_screen.dart';
 import 'package:synccash/features/dashboard/presentation/screens/bank_dashboard_screen.dart';
+import 'package:synccash/features/dashboard/presentation/screens/upi_dashboard_screen.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -273,6 +274,39 @@ class _GreetingHeader extends ConsumerWidget {
                 ),
               ),
             ),
+            const SizedBox(width: 8),
+            // ── UPI pill ─────────────────────────────────────────────────
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const UpiDashboardScreen()),
+                );
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A0E35),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF3D1D8A)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.account_balance_wallet_rounded,
+                        size: 14, color: Color(0xFFA78BFA)),
+                    SizedBox(width: 6),
+                    Text('UPI',
+                        style: TextStyle(
+                            color: Color(0xFFA78BFA),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.2)),
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(width: 12),
           ],
           Row(
@@ -331,6 +365,9 @@ class _BalanceCardSection extends ConsumerWidget {
     final bankAsync     = cashbookId != null
         ? ref.watch(bankTransactionsStreamProvider(cashbookId))
         : const AsyncValue<List<TransactionEntity>>.data([]);
+    final upiAsync      = cashbookId != null
+        ? ref.watch(upiTransactionsStreamProvider(cashbookId))
+        : const AsyncValue<List<TransactionEntity>>.data([]);
 
     return cashbookAsync.when(
       data: (cashbook) {
@@ -341,8 +378,15 @@ class _BalanceCardSection extends ConsumerWidget {
         final bankExpense = bankTxs
             .where((t) => t.type == 'expense')
             .fold(0.0, (s, t) => s + t.amount);
-        final adjIncome  = cashbook.totalIncome  - bankIncome;
-        final adjExpense = cashbook.totalExpense - bankExpense;
+        final upiTxs     = upiAsync.asData?.value ?? [];
+        final upiIncome  = upiTxs
+            .where((t) => t.type == 'income')
+            .fold(0.0, (s, t) => s + t.amount);
+        final upiExpense = upiTxs
+            .where((t) => t.type == 'expense')
+            .fold(0.0, (s, t) => s + t.amount);
+        final adjIncome  = cashbook.totalIncome  - bankIncome - upiIncome;
+        final adjExpense = cashbook.totalExpense - bankExpense - upiExpense;
         final adjBalance = adjIncome - adjExpense;
         return Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),

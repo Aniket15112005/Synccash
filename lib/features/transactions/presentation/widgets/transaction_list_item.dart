@@ -1,5 +1,6 @@
 // lib/features/transactions/presentation/widgets/transaction_list_item.dart
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -12,7 +13,10 @@ import 'package:synccash/features/transactions/domain/entities/transaction_entit
 import 'package:synccash/features/transactions/presentation/providers/transaction_provider.dart';
 import 'package:synccash/features/transactions/presentation/widgets/transaction_details_sheet.dart';
 import 'package:synccash/features/transactions/data/services/recycle_bin_service.dart';
+import 'package:synccash/features/sales/data/models/sale_bill_model.dart';
+import 'package:synccash/features/sales/domain/entities/sale_bill_entity.dart';
 import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
+import 'package:synccash/features/sales/presentation/widgets/bill_no_dropdown_field.dart';
 
 final _timeFmt = DateFormat('hh:mm a');
 final _dateFmt = DateFormat('dd MMM yyyy');
@@ -80,14 +84,31 @@ class TransactionListItem extends ConsumerWidget {
         },
         onEdit: () {
           Navigator.pop(sheetCtx);
+          // Synchronously look up the bill from the already-loaded provider
+          // cache so the edit sheet opens with the bill pre-selected instantly,
+          // with no visible loading delay. Falls back to a Firestore fetch
+          // inside the sheet only if the bill isn't in the cache yet.
+          SaleBillEntity? cachedBill;
+          final billId = transaction.linkedSaleBillId;
+          if (billId != null && billId.isNotEmpty) {
+            final bills =
+                ref.read(filteredSaleBillsProvider).asData?.value ?? [];
+            try {
+              cachedBill =
+                  bills.firstWhere((b) => b.saleBillId == billId);
+            } catch (_) {
+              // not in cache — sheet will fall back to Firestore fetch
+            }
+          }
           showModalBottomSheet(
             context: ctx,
             isScrollControlled: true,
             useSafeArea: true,
             backgroundColor: Colors.transparent,
             builder: (_) => _EditTransactionSheet(
-              transaction: transaction,
-              ref: ref,
+              transaction:  transaction,
+              ref:          ref,
+              initialBill:  cachedBill,
             ),
           );
         },
@@ -233,7 +254,7 @@ class TransactionListItem extends ConsumerWidget {
                                   : const Color(0xD0A5B0C0),
                             ),
                           ),
-                          if (_billNo != null && _billNo.isNotEmpty) ...[ 
+                          if (_billNo != null && _billNo.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
                               'B.no: $_billNo',
@@ -484,8 +505,15 @@ class _SheetDivider extends StatelessWidget {
 class _EditTransactionSheet extends StatefulWidget {
   final TransactionEntity transaction;
   final WidgetRef ref;
+  // ADDED: pre-resolved bill from the provider cache — avoids the async
+  // Firestore fetch so the dropdown appears instantly when the sheet opens.
+  final SaleBillEntity? initialBill;
 
-  const _EditTransactionSheet({required this.transaction, required this.ref});
+  const _EditTransactionSheet({
+    required this.transaction,
+    required this.ref,
+    this.initialBill,
+  });
 
   @override
   State<_EditTransactionSheet> createState() => _EditTransactionSheetState();
@@ -497,6 +525,10 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
   late DateTime _selectedDate;
   late String _category;
 
+  // ADDED: bill link state
+  SaleBillEntity? _selectedBill;
+  bool _isObPayment = false;
+  bool _loadingBill = false;
 
   bool _loading = false;
 
@@ -514,10 +546,51 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
         ? 'Retail'
         : raw[0].toUpperCase() + raw.substring(1).toLowerCase();
 
+    // ADDED: rebuild when description changes so BillNoDropdownField updates
+    _descCtrl.addListener(_onDescChanged);
+
+    // ADDED: use the pre-resolved bill from the cache first (instant, no
+    // spinner). Only fall back to a Firestore fetch if the caller couldn't
+    // find it in the provider cache (e.g. stream not yet loaded).
+    final billId = widget.transaction.linkedSaleBillId;
+    if (billId != null && billId.isNotEmpty) {
+      if (widget.initialBill != null) {
+        // Already resolved — set synchronously, no loading state needed.
+        _selectedBill = widget.initialBill;
+      } else {
+        // Cache miss — fetch from Firestore (shows spinner until done).
+        _loadExistingBill(widget.transaction.cashbookId, billId);
+      }
+    }
+  }
+
+  // ADDED
+  void _onDescChanged() => setState(() {});
+
+  // ADDED: fetch the SaleBillEntity for the existing linkedSaleBillId
+  Future<void> _loadExistingBill(String cashbookId, String billId) async {
+    if (!mounted) return;
+    setState(() => _loadingBill = true);
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('sale_bills')
+          .doc(billId)
+          .get();
+      if (mounted && doc.exists) {
+        setState(() => _selectedBill = SaleBillModel.fromFirestore(doc));
+      }
+    } catch (_) {
+      // silently ignore — dropdown will just show unselected
+    } finally {
+      if (mounted) setState(() => _loadingBill = false);
+    }
   }
 
   @override
   void dispose() {
+    _descCtrl.removeListener(_onDescChanged);
     _descCtrl.dispose();
     _amountCtrl.dispose();
     super.dispose();
@@ -569,15 +642,29 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
     setState(() => _loading = true);
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
-      await widget.ref.read(transactionRepositoryProvider).updateTransaction(
-            widget.transaction.copyWith(
-              description:  _descCtrl.text.trim(),
-              amount:       amount,
-              createdAt:    _selectedDate,
-              category:     _category.toLowerCase(),
-              lastEditedBy: currentUser?.uid,
-            ),
-          );
+
+      // CHANGED: build entity directly (not via copyWith) so that
+      // linkedSaleBillId: null is forwarded as-is to the repo, which
+      // will call FieldValue.delete() and properly clear any old link.
+      final updated = TransactionEntity(
+        transactionId:    widget.transaction.transactionId,
+        cashbookId:       widget.transaction.cashbookId,
+        createdBy:        widget.transaction.createdBy,
+        creatorName:      widget.transaction.creatorName,
+        createdAt:        _selectedDate,
+        amount:           amount,
+        type:             widget.transaction.type,
+        category:         _category.toLowerCase(),
+        description:      _descCtrl.text.trim(),
+        lastEditedBy:     currentUser?.uid,
+        linkedSaleBillId: _selectedBill?.saleBillId,
+        // ^ null when user cleared the bill — repo uses FieldValue.delete()
+      );
+
+      await widget.ref
+          .read(transactionRepositoryProvider)
+          .updateTransaction(updated);
+
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -608,129 +695,187 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
       padding:
           EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
-        padding: const EdgeInsets.all(24),
+        // CHANGED: constrain max height so the sheet is scrollable when the
+        // bill dropdown is visible
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.88,
+        ),
         decoration: const BoxDecoration(
           color: Color(0xFF161922),
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // Handle
-          Container(
-            width: 32, height: 3,
-            decoration: BoxDecoration(
-              color: const Color(0xFF374151),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          const Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Edit Transaction',
-              style: TextStyle(
-                  color: Color(0xFFD1D9E6),
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700),
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Amount
-          _StyledField(
-            controller: _amountCtrl,
-            label: 'Amount',
-            keyboardType: TextInputType.number,
-          ),
-          const SizedBox(height: 12),
-
-          // Description
-          _StyledField(controller: _descCtrl, label: 'Description'),
-          const SizedBox(height: 12),
-
-          // Category — visible to ALL users (Android and iOS/web)
-          _SheetLabel('Category'),
-          const SizedBox(height: 8),
-          _SheetCategoryToggle(
-            selected: _category,
-            onSwitch: (cat) => setState(() => _category = cat),
-          ),
-          const SizedBox(height: 12),
-
-          // Date
-          GestureDetector(
-            onTap: _pickDate,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 14),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            // Handle
+            Container(
+              width: 32, height: 3,
               decoration: BoxDecoration(
-                color: const Color(0xFF0C0E12),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF1F2937)),
+                color: const Color(0xFF374151),
+                borderRadius: BorderRadius.circular(2),
               ),
-              child: Row(children: [
-                Container(
-                  width: 34, height: 34,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1F2937),
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: const Icon(Icons.calendar_today_rounded,
-                      size: 15, color: Color(0xFF9CA3AF)),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Date',
-                          style: TextStyle(
-                              color: Color(0xFF6B7280), fontSize: 12)),
-                      const SizedBox(height: 2),
+            ),
+            const SizedBox(height: 20),
+
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Edit Transaction',
+                style: TextStyle(
+                    color: Color(0xFFD1D9E6),
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Amount
+            _StyledField(
+              controller: _amountCtrl,
+              label: 'Amount',
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 12),
+
+            // Description
+            _StyledField(controller: _descCtrl, label: 'Description'),
+            const SizedBox(height: 12),
+
+            // Category
+            _SheetLabel('Category'),
+            const SizedBox(height: 8),
+            _SheetCategoryToggle(
+              selected: _category,
+              onSwitch: (cat) => setState(() {
+                _category = cat;
+                // ADDED: clear bill when switching away from Wholesale
+                if (cat != 'Wholesale') {
+                  _selectedBill = null;
+                  _isObPayment  = false;
+                }
+              }),
+            ),
+
+            // ADDED: bill dropdown — visible only for Wholesale transactions.
+            // Shows a spinner while the existing bill is being fetched, then
+            // renders the dropdown with the current bill pre-selected so the
+            // user can change it or clear it.
+            if (_category == 'Wholesale') ...[
+              if (_loadingBill)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Row(
+                    children: const [
+                      SizedBox(
+                        width: 14, height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: Color(0xFF6B7280),
+                        ),
+                      ),
+                      SizedBox(width: 10),
                       Text(
-                        '$dateLabel  ·  ${DateFormat('EEEE').format(_selectedDate)}',
-                        style: const TextStyle(
-                            color: Color(0xFFD1D9E6),
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600),
+                        'Loading linked bill…',
+                        style: TextStyle(
+                          color: Color(0xFF6B7280),
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
+                )
+              else
+                BillNoDropdownField(
+                  partyName:    _descCtrl.text,
+                  selectedBill: _selectedBill,
+                  onBillSelected: (bill) => setState(() {
+                    _selectedBill = bill;
+                    _isObPayment  = false;
+                  }),
+                  isObSelected: _isObPayment,
+                  onObSelected: () => setState(() {
+                    _isObPayment  = true;
+                    _selectedBill = null;
+                  }),
                 ),
-                const Icon(Icons.chevron_right_rounded,
-                    size: 18, color: Color(0xFF4B5563)),
-              ]),
-            ),
-          ),
+            ],
 
+            const SizedBox(height: 12),
 
-          const SizedBox(height: 20),
-
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF1d4ed8),
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: const Color(0xFF1F2937),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
+            // Date
+            GestureDetector(
+              onTap: _pickDate,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0C0E12),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF1F2937)),
+                ),
+                child: Row(children: [
+                  Container(
+                    width: 34, height: 34,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1F2937),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: const Icon(Icons.calendar_today_rounded,
+                        size: 15, color: Color(0xFF9CA3AF)),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Date',
+                            style: TextStyle(
+                                color: Color(0xFF6B7280), fontSize: 12)),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$dateLabel  ·  ${DateFormat('EEEE').format(_selectedDate)}',
+                          style: const TextStyle(
+                              color: Color(0xFFD1D9E6),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded,
+                      size: 18, color: Color(0xFF4B5563)),
+                ]),
               ),
-              onPressed: _loading ? null : _save,
-              child: _loading
-                  ? const SizedBox(
-                      width: 18, height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Text('Save Changes',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 15)),
             ),
-          ),
-          const SizedBox(height: 8),
-        ]),
+
+            const SizedBox(height: 20),
+
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF1d4ed8),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: const Color(0xFF1F2937),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                onPressed: _loading ? null : _save,
+                child: _loading
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Text('Save Changes',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 15)),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ]),
+        ),
       ),
     );
   }
