@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
     show currentCashbookIdProvider;
+import 'package:synccash/features/transactions/data/services/recycle_bin_service.dart';
+import '../../data/models/sale_bill_model.dart';
 import '../../data/repositories/sale_bill_repository_impl.dart';
 import '../../domain/entities/sale_bill_entity.dart';
 
@@ -213,19 +215,23 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
     });
   }
 
-  /// Permanently deletes a sale bill document.
+  /// Soft-deletes a sale bill: moves it to the recycle bin (deleted_bills
+  /// collection) where it stays for 15 days before permanent removal.
   Future<void> deleteBill({
     required String cashbookId,
     required String billId,
   }) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
-      await FirebaseFirestore.instance
+      final doc = await FirebaseFirestore.instance
           .collection('cashbooks')
           .doc(cashbookId)
           .collection('sale_bills')
           .doc(billId)
-          .delete();
+          .get();
+      if (!doc.exists) return;
+      final bill = SaleBillModel.fromFirestore(doc);
+      await RecycleBinService.softDeleteBill(bill, cashbookId);
     });
   }
 

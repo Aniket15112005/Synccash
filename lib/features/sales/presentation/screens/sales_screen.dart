@@ -157,18 +157,18 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
               const SizedBox(width: 16),
             ],
             flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.fromLTRB(56, 0, 110, 16),
-              title: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Sales',
-                      style: TextStyle(
-                          color: _T.text,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 22,
-                          letterSpacing: -0.5)),
-                  billsAsync.maybeWhen(
+  titlePadding: const EdgeInsets.fromLTRB(56, 0, 110, 16),
+  title: Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('Sales',
+          style: TextStyle(
+              color: _T.text,
+              fontWeight: FontWeight.w800,
+              fontSize: 20,          // ← changed from 22 to 20
+              letterSpacing: -0.5)),
+      billsAsync.maybeWhen(
                     data: (bills) {
                       final partyCount = bills
                           .map((b) => b.partyName.toLowerCase())

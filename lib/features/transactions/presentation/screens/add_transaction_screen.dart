@@ -69,6 +69,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   static String _normalizeCategory(String cat) {
     final lower = cat.toLowerCase();
     if (lower == 'upi') return 'UPI';
+    if (lower == 'cb') return 'CB';
     return lower[0].toUpperCase() + lower.substring(1);
   }
 
@@ -237,7 +238,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         // cleared the bill selection — the repository handles the Firestore
         // FieldValue.delete() for null so the old link is properly removed).
         await ref.read(transactionRepositoryProvider).updateTransaction(tx);
-      } else if (_category == 'Bank' || _category == 'UPI') {
+      } else if (_category == 'Bank' || _category == 'UPI' || _category == 'CB') {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
       } else if (_type == 'income' && _selectedBill != null) {
         await ref.read(saleBillActionsProvider.notifier).recordPaymentWithOverflow(
@@ -342,41 +343,30 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                           const SizedBox(height: 8),
                           if (widget.categoryLocked && !isEditing)
                             Builder(builder: (context) {
-                              final isUpi = _category == 'UPI';
+                              final isUpi       = _category == 'UPI';
+                              final isCb        = _category == 'CB';
+                              final bgColor     = isUpi ? const Color(0xFF1A0E35) : isCb ? const Color(0xFF1A1200) : const Color(0xFF0E2A1F);
+                              final borderColor = isUpi ? const Color(0xFF3D1D8A) : isCb ? const Color(0xFF3D2800) : const Color(0xFF1B4D35);
+                              final accentColor = isUpi ? const Color(0xFFA78BFA) : isCb ? const Color(0xFFFBBF24) : const Color(0xFF34D399);
+                              final icon        = isUpi ? Icons.currency_rupee_rounded : Icons.account_balance_rounded;
                               return Container(
                                 width: double.infinity,
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 16, vertical: 14),
                                 decoration: BoxDecoration(
-                                  color: isUpi
-                                      ? const Color(0xFF1A0E35)
-                                      : const Color(0xFF0E2A1F),
+                                  color: bgColor,
                                   borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: isUpi
-                                        ? const Color(0xFF3D1D8A)
-                                        : const Color(0xFF1B4D35),
-                                  ),
+                                  border: Border.all(color: borderColor),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(
-                                      isUpi
-                                          ? Icons.currency_rupee_rounded
-                                          : Icons.account_balance_rounded,
-                                      size: 14,
-                                      color: isUpi
-                                          ? const Color(0xFFA78BFA)
-                                          : const Color(0xFF34D399),
-                                    ),
+                                    Icon(icon, size: 14, color: accentColor),
                                     const SizedBox(width: 8),
                                     Text(
                                       _category,
                                       style: TextStyle(
-                                        color: isUpi
-                                            ? const Color(0xFFA78BFA)
-                                            : const Color(0xFF34D399),
+                                        color: accentColor,
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -851,7 +841,7 @@ class _CategoryToggle extends StatelessWidget {
         border: Border.all(color: _C.border),
       ),
       child: Row(
-        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI'].map((cat) {
+        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI', if (showBank) 'CB'].map((cat) {
           final active = selected == cat;
           return Expanded(
             child: GestureDetector(

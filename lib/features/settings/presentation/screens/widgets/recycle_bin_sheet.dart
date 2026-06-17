@@ -7,6 +7,7 @@ import 'package:synccash/core/utils/currency_formatter.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
     show currentCashbookIdProvider;
 import 'package:synccash/features/transactions/data/services/recycle_bin_service.dart';
+import 'package:synccash/features/transactions/domain/entities/deleted_bill_entity.dart';
 import 'package:synccash/features/transactions/domain/entities/deleted_transaction_entity.dart';
 import 'package:synccash/features/transactions/presentation/providers/recycle_bin_provider.dart';
 
@@ -33,6 +34,7 @@ class _RecycleBinSheetState extends ConsumerState<RecycleBinSheet> {
       final cashbookId = ref.read(currentCashbookIdProvider);
       if (cashbookId != null) {
         RecycleBinService.cleanupExpired(cashbookId);
+        RecycleBinService.cleanupExpiredBills(cashbookId);
       }
     });
   }
@@ -190,6 +192,39 @@ class _RecycleBinSheetState extends ConsumerState<RecycleBinSheet> {
     );
   }
 
+  void _showBillActions(DeletedBillEntity bill) {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetCtx) => _BillActionSheet(
+        bill: bill,
+        onRestore: () async {
+          Navigator.pop(sheetCtx);
+          try {
+            await RecycleBinService.restoreBill(bill);
+            if (mounted) _snack('Bill restored', isError: false);
+          } catch (e) {
+            if (mounted) _snack('Restore failed: \$e', isError: true);
+          }
+        },
+        onDelete: () async {
+          Navigator.pop(sheetCtx);
+          final confirmed = await _confirmBulkDelete(1);
+          if (!confirmed || !mounted) return;
+          try {
+            await RecycleBinService.permanentDeleteBill(bill);
+            if (mounted) _snack('Bill permanently deleted', isError: false);
+          } catch (e) {
+            if (mounted) _snack('Delete failed: \$e', isError: true);
+          }
+        },
+      ),
+    );
+  }
+
   void _snack(String msg, {required bool isError}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
@@ -209,7 +244,8 @@ class _RecycleBinSheetState extends ConsumerState<RecycleBinSheet> {
       return const SizedBox.shrink();
     }
 
-    final asyncItems = ref.watch(deletedTransactionsProvider(cashbookId));
+    final asyncTx    = ref.watch(deletedTransactionsProvider(cashbookId));
+    final asyncBills = ref.watch(deletedBillsProvider(cashbookId));
 
     return Container(
       decoration: const BoxDecoration(
@@ -254,7 +290,8 @@ class _RecycleBinSheetState extends ConsumerState<RecycleBinSheet> {
                   ),
                 ),
                 const Spacer(),
-                asyncItems.when(
+                // Select All — only applies to transaction entries
+                asyncTx.when(
                   data: (items) => items.isEmpty
                       ? const SizedBox.shrink()
                       : GestureDetector(
@@ -324,109 +361,175 @@ class _RecycleBinSheetState extends ConsumerState<RecycleBinSheet> {
           const SizedBox(height: 12),
 
           // ── List ──────────────────────────────────────────────────────────
-          asyncItems.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(40),
-              child: Center(
-                  child: CircularProgressIndicator(strokeWidth: 1.5,
-                      color: Color(0xFF374151))),
-            ),
-            error: (e, _) => Padding(
-              padding: const EdgeInsets.all(40),
-              child: Center(
-                  child: Text('Error: $e',
-                      style: const TextStyle(color: Color(0xFF6B7280)))),
-            ),
-            data: (items) {
-              if (items.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 20, 16, 40),
-                  child: Center(
+          Builder(builder: (context) {
+            // Show spinner only while the primary (transactions) stream is loading.
+            // Bills stream loads independently; asyncBills.value ?? [] already handles
+            // the not-yet-loaded / error case so the UI is never permanently blocked.
+            if (asyncTx.isLoading) {
+              return const Padding(
+                padding: EdgeInsets.all(40),
+                child: Center(
+                    child: CircularProgressIndicator(
+                        strokeWidth: 1.5, color: Color(0xFF374151))),
+              );
+            }
+            if (asyncTx.hasError) {
+              return Padding(
+                padding: const EdgeInsets.all(40),
+                child: Center(
+                    child: Text('Error: ${asyncTx.error}',
+                        style: const TextStyle(color: Color(0xFF6B7280)))),
+              );
+            }
+
+            final txItems   = asyncTx.value   ?? [];
+            final billItems = asyncBills.value ?? [];
+            final bothEmpty = txItems.isEmpty && billItems.isEmpty;
+
+            if (bothEmpty) {
+              return const Padding(
+                padding: EdgeInsets.fromLTRB(16, 20, 16, 40),
+                child: Center(
+                  child: Column(
+                    children: [
+                      Icon(Icons.delete_sweep_outlined,
+                          size: 40, color: Color(0xFF1F2937)),
+                      SizedBox(height: 12),
+                      Text(
+                        'Recycle bin is empty',
+                        style: TextStyle(
+                            color: Color(0xFF4B5563),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Deleted entries will appear here for 15 days.',
+                        style: TextStyle(
+                            color: Color(0xFF374151), fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            final showSectionLabels =
+                billItems.isNotEmpty && txItems.isNotEmpty;
+
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.5,
+                  ),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.delete_sweep_outlined,
-                            size: 40, color: Color(0xFF1F2937)),
-                        SizedBox(height: 12),
-                        Text(
-                          'Recycle bin is empty',
-                          style: TextStyle(
-                              color: Color(0xFF4B5563),
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          'Deleted entries will appear here for 15 days.',
-                          style: TextStyle(
-                              color: Color(0xFF374151), fontSize: 13),
-                          textAlign: TextAlign.center,
-                        ),
+
+                        // ── Bills section ───────────────────────────────────
+                        if (billItems.isNotEmpty) ...[
+                          if (showSectionLabels)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 4, bottom: 8),
+                              child: Text(
+                                'BILLS',
+                                style: TextStyle(
+                                  color: Color(0xFF4B5563),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                            ),
+                          ...billItems.asMap().entries.map((e) {
+                            final bill = e.value;
+                            return Padding(
+                              padding: EdgeInsets.only(
+                                  bottom: e.key < billItems.length - 1 ? 6 : 0),
+                              child: _DeletedBillItem(
+                                bill: bill,
+                                onTap: () => _showBillActions(bill),
+                              ),
+                            );
+                          }),
+                          if (txItems.isNotEmpty)
+                            const SizedBox(height: 12),
+                        ],
+
+                        // ── Entries section ─────────────────────────────────
+                        if (txItems.isNotEmpty) ...[
+                          if (showSectionLabels)
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 8),
+                              child: Text(
+                                'ENTRIES',
+                                style: TextStyle(
+                                  color: Color(0xFF4B5563),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.2,
+                                ),
+                              ),
+                            ),
+                          ...txItems.asMap().entries.map((e) {
+                            final tx         = e.value;
+                            final isSelected = _selected.contains(tx.transactionId);
+                            return Padding(
+                              padding: EdgeInsets.only(
+                                  bottom: e.key < txItems.length - 1 ? 6 : 0),
+                              child: _DeletedItem(
+                                tx:         tx,
+                                selectMode: _selectMode,
+                                isSelected: isSelected,
+                                onTap: _selectMode
+                                    ? () => _toggleItem(tx.transactionId)
+                                    : () => _showItemActions(tx),
+                              ),
+                            );
+                          }),
+                        ],
                       ],
                     ),
                   ),
-                );
-              }
+                ),
 
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(context).size.height * 0.5,
-                    ),
-                    child: ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                      shrinkWrap: true,
-                      itemCount: items.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 6),
-                      itemBuilder: (_, i) {
-                        final tx = items[i];
-                        final isSelected =
-                            _selected.contains(tx.transactionId);
-                        return _DeletedItem(
-                          tx: tx,
-                          selectMode: _selectMode,
-                          isSelected: isSelected,
-                          onTap: _selectMode
-                              ? () => _toggleItem(tx.transactionId)
-                              : () => _showItemActions(tx),
-                        );
-                      },
-                    ),
+                // ── Bulk action bar (transactions only) ──────────────────
+                if (_selectMode && txItems.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: Row(children: [
+                      Expanded(
+                        child: _BulkButton(
+                          label: 'Restore (${_selected.length})',
+                          icon: Icons.restore_rounded,
+                          color: const Color(0xFF10B981),
+                          disabled: _selected.isEmpty || _busy,
+                          onTap: () => _restoreAll(txItems),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _BulkButton(
+                          label: 'Delete (${_selected.length})',
+                          icon: Icons.delete_forever_rounded,
+                          color: const Color(0xFFef4444),
+                          disabled: _selected.isEmpty || _busy,
+                          onTap: () => _deleteAll(txItems),
+                        ),
+                      ),
+                    ]),
                   ),
-
-                  // ── Bulk action bar ────────────────────────────────────────
-                  if (_selectMode) ...[
-                    const SizedBox(height: 4),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                      child: Row(children: [
-                        Expanded(
-                          child: _BulkButton(
-                            label: 'Restore (${_selected.length})',
-                            icon: Icons.restore_rounded,
-                            color: const Color(0xFF10B981),
-                            disabled: _selected.isEmpty || _busy,
-                            onTap: () => _restoreAll(items),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _BulkButton(
-                            label: 'Delete (${_selected.length})',
-                            icon: Icons.delete_forever_rounded,
-                            color: const Color(0xFFef4444),
-                            disabled: _selected.isEmpty || _busy,
-                            onTap: () => _deleteAll(items),
-                          ),
-                        ),
-                      ]),
-                    ),
-                  ],
                 ],
-              );
-            },
-          ),
+              ],
+            );
+          }),
 
           SizedBox(height: MediaQuery.of(context).padding.bottom + 12),
         ],
@@ -789,6 +892,206 @@ class _BulkButton extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+
+// ─── Individual deleted bill tile ─────────────────────────────────────────────
+
+class _DeletedBillItem extends StatelessWidget {
+  final DeletedBillEntity bill;
+  final VoidCallback onTap;
+
+  const _DeletedBillItem({
+    required this.bill,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt      = NumberFormat('#,##,##0.##');
+    final daysLeft = bill.daysRemaining;
+    final urgent   = daysLeft <= 3;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111318),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF1F2937)),
+        ),
+        child: Row(children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  _MiniTag('BILL'),
+                  const SizedBox(width: 5),
+                  _MiniTag(bill.partyName.toUpperCase()),
+                ]),
+                const SizedBox(height: 5),
+                Text(
+                  '${bill.billNumber}  ·  ${bill.partyName}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFFD1D9E6),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(children: [
+                  Text(
+                    _dateFmt.format(bill.billDate),
+                    style: const TextStyle(
+                        fontSize: 11.5, color: Color(0xFF4B5563)),
+                  ),
+                  const Text('  ·  ',
+                      style: TextStyle(
+                          fontSize: 11.5, color: Color(0xFF374151))),
+                  Text(
+                    daysLeft == 0
+                        ? 'Expires today'
+                        : '\$daysLeft day\${daysLeft == 1 ? "" : "s"} left',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: urgent
+                          ? const Color(0xFFf87171)
+                          : const Color(0xFF4B5563),
+                    ),
+                  ),
+                ]),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            '₹\${fmt.format(bill.billTotal)}',
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              fontFamily: 'monospace',
+              letterSpacing: -0.3,
+              color: Color(0xFFF1F2F5),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+// ─── Bill action sheet ────────────────────────────────────────────────────────
+
+class _BillActionSheet extends StatelessWidget {
+  final DeletedBillEntity bill;
+  final VoidCallback onRestore;
+  final VoidCallback onDelete;
+
+  const _BillActionSheet({
+    required this.bill,
+    required this.onRestore,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = NumberFormat('#,##,##0.##');
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161922),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF1F2937)),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          margin: const EdgeInsets.only(top: 12),
+          width: 32, height: 3,
+          decoration: BoxDecoration(
+            color: const Color(0xFF374151),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        // Bill preview card
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0C0E12),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFF1F2937)),
+            ),
+            child: Row(children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _MiniTag('BILL'),
+                    const SizedBox(height: 6),
+                    Text(
+                      '\${bill.billNumber}  ·  \${bill.partyName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFFD1D9E6),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _dateFmt.format(bill.billDate),
+                      style: const TextStyle(
+                          color: Color(0xFF6B7280), fontSize: 11.5),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '₹\${fmt.format(bill.billTotal)}',
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  fontFamily: 'monospace',
+                  letterSpacing: -0.5,
+                  color: Color(0xFFF1F2F5),
+                ),
+              ),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 8),
+        // Restore
+        _SheetRow(
+          icon: Icons.restore_rounded,
+          label: 'Restore',
+          color: const Color(0xFF10B981),
+          onTap: onRestore,
+        ),
+        Container(
+            height: 1,
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            color: const Color(0xFF1F2937)),
+        // Delete permanently
+        _SheetRow(
+          icon: Icons.delete_forever_rounded,
+          label: 'Delete Permanently',
+          color: const Color(0xFFf87171),
+          onTap: onDelete,
+        ),
+        const SizedBox(height: 8),
+      ]),
     );
   }
 }

@@ -1,10 +1,14 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:synccash/features/transactions/domain/entities/deleted_bill_entity.dart';
 import 'package:synccash/features/transactions/domain/entities/deleted_transaction_entity.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
+import 'package:synccash/features/sales/domain/entities/sale_bill_entity.dart';
 
 class RecycleBinService {
   static final _db = FirebaseFirestore.instance;
+
+  // ── Transaction collections ───────────────────────────────────────────────
 
   static CollectionReference _deleted(String cashbookId) => _db
       .collection('cashbooks')
@@ -15,6 +19,18 @@ class RecycleBinService {
       .collection('cashbooks')
       .doc(cashbookId)
       .collection('transactions');
+
+  // ── Bill collections ──────────────────────────────────────────────────────
+
+  static CollectionReference _deletedBills(String cashbookId) => _db
+      .collection('cashbooks')
+      .doc(cashbookId)
+      .collection('deleted_bills');
+
+  static CollectionReference _activeBills(String cashbookId) => _db
+      .collection('cashbooks')
+      .doc(cashbookId)
+      .collection('sale_bills');
 
   // Returns the cashbook document reference for a given cashbook.
   static DocumentReference _cashbook(String cashbookId) =>
@@ -54,7 +70,7 @@ class RecycleBinService {
     }
   }
 
-  // ── Soft-delete: move from transactions → deleted_transactions ────────────
+  // ── Soft-delete transaction: move from transactions → deleted_transactions ─
 
   static Future<void> softDelete(TransactionEntity tx) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -85,7 +101,7 @@ class RecycleBinService {
     await batch.commit();
   }
 
-  // ── Restore: move from deleted_transactions → transactions ────────────────
+  // ── Restore transaction: move from deleted_transactions → transactions ─────
 
   static Future<void> restore(DeletedTransactionEntity tx) async {
     final batch = _db.batch();
@@ -106,7 +122,7 @@ class RecycleBinService {
     await batch.commit();
   }
 
-  // ── Restore all ───────────────────────────────────────────────────────────
+  // ── Restore all transactions ───────────────────────────────────────────────
 
   static Future<void> restoreAll(List<DeletedTransactionEntity> items) async {
     if (items.isEmpty) return;
@@ -148,7 +164,7 @@ class RecycleBinService {
     await batch.commit();
   }
 
-  // ── Permanent delete (from recycle bin) ───────────────────────────────────
+  // ── Permanent delete transaction (from recycle bin) ───────────────────────
   //
   // NOTE: No cashbook update needed here. The transaction was already
   // excluded from totals when it was soft-deleted. Permanently removing
@@ -158,7 +174,7 @@ class RecycleBinService {
     await _deleted(tx.cashbookId).doc(tx.transactionId).delete();
   }
 
-  // ── Delete all (permanent, from recycle bin) ──────────────────────────────
+  // ── Delete all transactions (permanent, from recycle bin) ─────────────────
   //
   // Same reasoning as permanentDelete — totals were already adjusted on
   // soft-delete, so no cashbook update is required here.
@@ -172,7 +188,7 @@ class RecycleBinService {
     await batch.commit();
   }
 
-  // ── Stream ────────────────────────────────────────────────────────────────
+  // ── Stream transactions ───────────────────────────────────────────────────
 
   static Stream<List<DeletedTransactionEntity>> stream(String cashbookId) {
     return _deleted(cashbookId)
@@ -184,13 +200,121 @@ class RecycleBinService {
             .toList());
   }
 
-  // ── Cleanup expired items (call on recycle bin open) ─────────────────────
+  // ── Cleanup expired transactions (call on recycle bin open) ───────────────
 
   static Future<void> cleanupExpired(String cashbookId) async {
     final cutoff = Timestamp.fromDate(
       DateTime.now().subtract(const Duration(days: 15)),
     );
     final expired = await _deleted(cashbookId)
+        .where('deletedAt', isLessThan: cutoff)
+        .get();
+
+    if (expired.docs.isEmpty) return;
+    final batch = _db.batch();
+    for (final doc in expired.docs) {
+      batch.delete(doc.reference);
+    }
+    await batch.commit();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  //  Bill soft-delete / restore / permanent-delete
+  //
+  //  Bills live in sale_bills; deleted copies go to deleted_bills.
+  //  Bills do NOT affect cashbook totalIncome / totalExpense / totalBalance,
+  //  so no cashbook document update is needed for any bill operation.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Soft-delete bill: move from sale_bills → deleted_bills ────────────────
+
+  static Future<void> softDeleteBill(
+      SaleBillEntity bill, String cashbookId) async {
+    final uid   = FirebaseAuth.instance.currentUser?.uid;
+    final batch = _db.batch();
+
+    // 1. Write to bill recycle bin
+    batch.set(_deletedBills(cashbookId).doc(bill.saleBillId), {
+      'cashbookId':        cashbookId,
+      'partyName':         bill.partyName,
+      'billNumber':        bill.billNumber,
+      'billTotal':         bill.billTotal,
+      'billDate':          Timestamp.fromDate(bill.billDate),
+      if (bill.billNote != null) 'billNote': bill.billNote,
+      'billStatus':        bill.billStatus,
+      'billCreatedBy':     bill.billCreatedBy,
+      'billCreatedByName': bill.billCreatedByName,
+      'billCreatedAt':     Timestamp.fromDate(bill.billCreatedAt),
+      'deletedAt':         FieldValue.serverTimestamp(),
+      'deletedBy':         uid,
+    });
+
+    // 2. Remove from active sale_bills
+    batch.delete(_activeBills(cashbookId).doc(bill.saleBillId));
+
+    await batch.commit();
+  }
+
+  // ── Restore bill: move from deleted_bills → sale_bills ────────────────────
+
+  static Future<void> restoreBill(DeletedBillEntity bill) async {
+    final batch = _db.batch();
+
+    // 1. Put back into active sale_bills
+    batch.set(
+      _activeBills(bill.cashbookId).doc(bill.billId),
+      bill.toRestoreMap(),
+    );
+
+    // 2. Remove from bill recycle bin
+    batch.delete(_deletedBills(bill.cashbookId).doc(bill.billId));
+
+    await batch.commit();
+  }
+
+  // ── Permanent delete bill (from bill recycle bin) ─────────────────────────
+
+  static Future<void> permanentDeleteBill(DeletedBillEntity bill) async {
+    await _deletedBills(bill.cashbookId).doc(bill.billId).delete();
+  }
+
+  // ── Delete all bills (permanent, from bill recycle bin) ───────────────────
+
+  static Future<void> deleteAllBills(List<DeletedBillEntity> items) async {
+    if (items.isEmpty) return;
+    final batch = _db.batch();
+    for (final bill in items) {
+      batch.delete(_deletedBills(bill.cashbookId).doc(bill.billId));
+    }
+    await batch.commit();
+  }
+
+  // ── Stream deleted bills ──────────────────────────────────────────────────
+  // NOTE: No Firestore orderBy here. FieldValue.serverTimestamp() documents
+  // are excluded from ordered Firestore queries while their timestamp is still
+  // pending (not yet confirmed by the server). Sorting in Dart ensures newly
+  // deleted bills appear immediately without waiting for server confirmation.
+
+  static Stream<List<DeletedBillEntity>> streamBills(String cashbookId) {
+    return _deletedBills(cashbookId)
+        .snapshots()
+        .map((snap) {
+          final list = snap.docs
+              .map((d) => DeletedBillEntity.fromFirestore(d))
+              .where((bill) => !bill.isExpired)
+              .toList()
+            ..sort((a, b) => b.deletedAt.compareTo(a.deletedAt));
+          return list;
+        });
+  }
+
+  // ── Cleanup expired bills (call on recycle bin open) ─────────────────────
+
+  static Future<void> cleanupExpiredBills(String cashbookId) async {
+    final cutoff = Timestamp.fromDate(
+      DateTime.now().subtract(const Duration(days: 15)),
+    );
+    final expired = await _deletedBills(cashbookId)
         .where('deletedAt', isLessThan: cutoff)
         .get();
 

@@ -162,13 +162,16 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
   }
 
   double get _received {
-    // Linked payments (explicitly tied to this bill) count in full.
-    // Unlinked/description-matched payments are capped at the bill's
-    // remaining balance so that excess cash (e.g. party overpayment or
-    // amounts that belong to OB) never inflates this bill's received total.
-    final linked = _transactions
+    // Linked payments (explicitly tied to this bill) count in full,
+    // BUT when the party has only 1 bill any overflow from a linked
+    // payment is routed to OB in party_detail_screen — so we cap
+    // linked at billTotal to avoid showing the bill as over-received.
+    final linkedRaw = _transactions
         .where((t) => t.isLinked)
         .fold<double>(0.0, (s, t) => s + t.amount);
+    final linked = widget.billCount == 1
+        ? linkedRaw.clamp(0.0, widget.bill.billTotal)
+        : linkedRaw;
     final unlinked = _transactions
         .where((t) => !t.isLinked)
         .fold<double>(0.0, (s, t) => s + t.amount);

@@ -17,6 +17,7 @@ import 'package:synccash/features/transactions/presentation/providers/transactio
 import 'package:synccash/features/transactions/presentation/screens/add_transaction_screen.dart';
 import 'package:synccash/features/transactions/presentation/widgets/transaction_list_item.dart';
 import 'package:synccash/features/dashboard/presentation/screens/bank_dashboard_screen.dart';
+import 'package:synccash/features/dashboard/presentation/screens/cb_dashboard_screen.dart';
 
 // ── UPI theme colours ─────────────────────────────────────────────────────────
 const _kUpiPrimary    = Color(0xFFA78BFA);  // purple 400
@@ -271,6 +272,41 @@ class _UpiHeader extends ConsumerWidget {
                     'Bank',
                     style: TextStyle(
                       color: Color(0xFF34D399),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // ── "CB" pill — taps to CB dashboard ──────────────────────────
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const CbDashboardScreen()),
+              );
+            },
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1200),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF3D2800)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.book_rounded, size: 14, color: Color(0xFFFBBF24)),
+                  SizedBox(width: 6),
+                  Text(
+                    'CB',
+                    style: TextStyle(
+                      color: Color(0xFFFBBF24),
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       letterSpacing: -0.2,

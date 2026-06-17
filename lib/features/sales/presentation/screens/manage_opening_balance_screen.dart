@@ -9,31 +9,32 @@ import 'package:synccash/features/auth/presentation/providers/auth_provider.dart
 import '../providers/party_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Design tokens — Golden Ledger aesthetic
+//  Design tokens — SkyLedger modern light palette
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _T {
-  static const bg      = Color(0xFF090A0C);
-  static const surface = Color(0xFF101318);
-  static const card    = Color(0xFF141820);
-  static const card2   = Color(0xFF181D26);
-  static const line    = Color(0xFF1C2230);
-  static const line2   = Color(0xFF242C3A);
-  static const muted   = Color(0xFF445060);
-  static const muted2  = Color(0xFF6A7888);
-  static const gold    = Color(0xFFC4903A);
-  static const gold2   = Color(0xFFE2B870);
-  static const accent  = Color(0xFF4A70D0);
-  static const accent2 = Color(0xFF7AA0F0);
-  static const text    = Color(0xFFDCE8F4);
-  static const text2   = Color(0xFF8AACCC);
-  static const green   = Color(0xFF28C898);
-  static const red     = Color(0xFFE04A62);
-  static const amber   = Color(0xFFEAA030);
+  static const bg       = Color(0xFFF0F4FF);
+  static const surface  = Color(0xFFFFFFFF);
+  static const card     = Color(0xFFFFFFFF);
+  static const card2    = Color(0xFFF8FAFF);
+  static const line     = Color(0xFFE5E7EB);
+  static const line2    = Color(0xFFD1D5DB);
+  static const muted    = Color(0xFF9CA3AF);
+  static const muted2   = Color(0xFF6B7280);
+  static const gold     = Color(0xFFF59E0B);
+  static const gold2    = Color(0xFFD97706);
+  static const accent   = Color(0xFF4F46E5);
+  static const accent2  = Color(0xFF818CF8);
+  static const text     = Color(0xFF111827);
+  static const text2    = Color(0xFF374151);
+  static const green    = Color(0xFF10B981);
+  static const red      = Color(0xFFEF4444);
+  static const amber    = Color(0xFFF59E0B);
+  static const indigo   = Color(0xFF6366F1);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Animated background — balance scale painter
+//  Animated background — floating soft orbs
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _AnimatedBackground extends StatefulWidget {
@@ -53,7 +54,7 @@ class _AnimatedBackgroundState extends State<_AnimatedBackground>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 8),
+      duration: const Duration(seconds: 10),
     )..repeat(reverse: true);
   }
 
@@ -67,23 +68,14 @@ class _AnimatedBackgroundState extends State<_AnimatedBackground>
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        Container(color: const Color(0xFFF4F5F7)),
-        // Scale animation — lower portion of screen
+        Container(color: _T.bg),
         Positioned.fill(
           child: AnimatedBuilder(
             animation: _ctrl,
             builder: (_, __) => RepaintBoundary(
               child: CustomPaint(
-                painter: _BalanceScalePainter(t: _ctrl.value),
+                painter: _OrbPainter(t: _ctrl.value),
               ),
-            ),
-          ),
-        ),
-        // Ledger line grid overlay — static
-        Positioned.fill(
-          child: RepaintBoundary(
-            child: CustomPaint(
-              painter: _LedgerGridPainter(),
             ),
           ),
         ),
@@ -93,157 +85,47 @@ class _AnimatedBackgroundState extends State<_AnimatedBackground>
   }
 }
 
-/// Draws a gently oscillating balance scale with floating coins.
-/// Thematically tied to "opening balance" — the art of balancing the books.
-class _BalanceScalePainter extends CustomPainter {
-  final double t; // 0..1 from animation
-  const _BalanceScalePainter({required this.t});
+class _OrbPainter extends CustomPainter {
+  final double t;
+  const _OrbPainter({required this.t});
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Rocking angle: ±5° sine wave
-    final angle = math.sin(t * math.pi) * 0.09;
+    final ease = (math.sin(t * math.pi) * 0.5 + 0.5);
 
-    final cx     = size.width * 0.72;
-    final poleTop = size.height * 0.28;
-    final poleBot = size.height * 0.82;
-    final beamY  = poleTop + 20;
-    final beamLen = math.min(size.width * 0.28, 110.0);
-
-    final basePaint = Paint()
-      ..color = _T.gold.withValues(alpha: 0.06)
-      ..strokeWidth = 1.4
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final chainPaint = Paint()
-      ..color = _T.gold.withValues(alpha: 0.04)
-      ..strokeWidth = 0.8
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final fillPaint = Paint()
-      ..color = _T.gold.withValues(alpha: 0.03)
-      ..style = PaintingStyle.fill;
-
-    // Vertical pole
-    canvas.drawLine(
-      Offset(cx, poleTop),
-      Offset(cx, poleBot),
-      basePaint,
-    );
-
-    // Base
-    canvas.drawLine(
-      Offset(cx - 24, poleBot),
-      Offset(cx + 24, poleBot),
-      basePaint..strokeWidth = 1.8,
-    );
-    canvas.drawLine(
-      Offset(cx - 16, poleBot + 6),
-      Offset(cx + 16, poleBot + 6),
-      basePaint..strokeWidth = 1.2,
-    );
-
-    // Pivot cap
-    canvas.drawCircle(Offset(cx, beamY), 4, basePaint..strokeWidth = 1.2);
-
-    // Beam ends (tilted by angle)
-    final dx = beamLen * math.cos(angle);
-    final dy = beamLen * math.sin(angle);
-    final lx = cx - dx;
-    final ly = beamY - dy;
-    final rx = cx + dx;
-    final ry = beamY + dy;
-
-    canvas.drawLine(Offset(lx, ly), Offset(rx, ry), basePaint..strokeWidth = 1.4);
-
-    // Chain + pan (left)
-    const chainLen = 44.0;
-    const panR     = 22.0;
-
-    final lChainBot = Offset(lx, ly + chainLen);
-    canvas.drawLine(Offset(lx, ly), lChainBot, chainPaint);
-    canvas.drawCircle(lChainBot, panR, fillPaint);
-    canvas.drawCircle(lChainBot, panR, chainPaint..strokeWidth = 0.8);
-
-    // Coins in left pan
-    _drawCoin(canvas, Offset(lx - 7, ly + chainLen - 4), 6, 0.05);
-    _drawCoin(canvas, Offset(lx + 5, ly + chainLen - 2), 5, 0.04);
-
-    // Chain + pan (right)
-    final rChainBot = Offset(rx, ry + chainLen);
-    canvas.drawLine(Offset(rx, ry), rChainBot, chainPaint);
-    canvas.drawCircle(rChainBot, panR, fillPaint);
-    canvas.drawCircle(rChainBot, panR, chainPaint);
-
-    // Coins in right pan
-    _drawCoin(canvas, Offset(rx - 5, ry + chainLen - 3), 7, 0.05);
-
-    // Floating coin particles rising
-    final coinPositions = [
-      Offset(cx - beamLen * 0.6, poleBot - 30 - t * 60),
-      Offset(cx + beamLen * 0.3, poleBot - 50 - t * 40),
-      Offset(cx - beamLen * 0.1, poleBot - 15 - t * 80),
-    ];
-    for (final pos in coinPositions) {
-      if (pos.dy > poleTop) {
-        final opacity = ((poleBot - pos.dy) / (poleBot - poleTop)).clamp(0.0, 1.0);
-        _drawCoin(canvas, pos, 5, 0.035 * opacity);
-      }
+    void drawOrb(Offset center, double radius, Color color, double alpha) {
+      final paint = Paint()
+        ..shader = RadialGradient(
+          colors: [
+            color.withValues(alpha: alpha),
+            color.withValues(alpha: 0),
+          ],
+        ).createShader(Rect.fromCircle(center: center, radius: radius));
+      canvas.drawCircle(center, radius, paint);
     }
 
-    // ₹ glyph near scale center (very faint)
-    final tp = TextPainter(
-      text: TextSpan(
-        text: '₹',
-        style: TextStyle(
-          color: _T.gold.withValues(alpha: 0.04),
-          fontSize: 60,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, Offset(cx - 18, beamY + 20));
-  }
-
-  void _drawCoin(Canvas canvas, Offset center, double r, double alpha) {
-    final fill = Paint()
-      ..color = _T.gold.withValues(alpha: alpha)
-      ..style = PaintingStyle.fill;
-    final stroke = Paint()
-      ..color = _T.gold.withValues(alpha: alpha * 1.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.6;
-    canvas.drawCircle(center, r, fill);
-    canvas.drawCircle(center, r, stroke);
+    drawOrb(
+      Offset(size.width * 0.15 + ease * 20, size.height * 0.12 + ease * 10),
+      size.width * 0.55,
+      _T.accent2,
+      0.09,
+    );
+    drawOrb(
+      Offset(size.width * 0.85 - ease * 15, size.height * 0.72 - ease * 12),
+      size.width * 0.50,
+      _T.indigo,
+      0.07,
+    );
+    drawOrb(
+      Offset(size.width * 0.50 + ease * 8, size.height * 0.40),
+      size.width * 0.35,
+      _T.green,
+      0.04,
+    );
   }
 
   @override
-  bool shouldRepaint(covariant _BalanceScalePainter old) => old.t != t;
-}
-
-/// Static faint horizontal ledger lines — like accounting paper.
-class _LedgerGridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = _T.line.withValues(alpha: 0.25)
-      ..strokeWidth = 0.5;
-    const spacing = 40.0;
-    for (double y = spacing; y < size.height; y += spacing) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-    // Left margin line
-    final margin = Paint()
-      ..color = _T.gold.withValues(alpha: 0.04)
-      ..strokeWidth = 1.2;
-    canvas.drawLine(const Offset(28, 0), Offset(28, size.height), margin);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter _) => false;
+  bool shouldRepaint(covariant _OrbPainter old) => old.t != t;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -393,7 +275,7 @@ class _ManageOpeningBalanceScreenState
 
             // ── Search ────────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: _SearchField(
                 controller: _searchCtrl,
                 hint: 'Search clients…',
@@ -424,20 +306,20 @@ class _ManageOpeningBalanceScreenState
                     );
                   }
 
-                  return ListView.separated(
-                    padding:
-                        const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                  return ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
                     itemCount: filtered.length,
-                    separatorBuilder: (_, __) =>
-                        Container(height: 1, color: _T.line),
-                    itemBuilder: (_, i) => _PartyTile(
-                      party:    filtered[i],
-                      index:    i,
-                      onTap:    () => _openEdit(filtered[i]),
-                      onEdit:   () => _openEdit(filtered[i]),
-                      onDelete: filtered[i].entity != null
-                          ? () => _confirmDelete(filtered[i])
-                          : null,
+                    itemBuilder: (_, i) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _PartyTile(
+                        party:    filtered[i],
+                        index:    i,
+                        onTap:    () => _openEdit(filtered[i]),
+                        onEdit:   () => _openEdit(filtered[i]),
+                        onDelete: filtered[i].entity != null
+                            ? () => _confirmDelete(filtered[i])
+                            : null,
+                      ),
                     ),
                   );
                 },
@@ -455,28 +337,42 @@ class _ManageOpeningBalanceScreenState
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: _T.card2,
+        backgroundColor: _T.surface,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: _T.line2)),
-        title: const Text('Remove Client?',
-            style: TextStyle(
-                color: _T.text,
-                fontWeight: FontWeight.w700,
-                fontSize: 16)),
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: _T.line)),
+        title: Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: _T.red.withValues(alpha: 0.10),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_outline_rounded,
+                  color: _T.red, size: 18),
+            ),
+            const SizedBox(width: 10),
+            const Text('Remove Client?',
+                style: TextStyle(
+                    color: _T.text,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16)),
+          ],
+        ),
         content: Text(
           'This will remove the opening balance record for '
           '"${party.name}". Bills and transactions are not affected.',
           style: const TextStyle(
-              color: _T.muted2, fontSize: 13, height: 1.5),
+              color: _T.muted2, fontSize: 13, height: 1.6),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel',
-                style: TextStyle(color: _T.muted2)),
+                style: TextStyle(color: _T.muted2, fontWeight: FontWeight.w600)),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
               final cashbookId = ref.read(currentCashbookIdProvider);
@@ -501,9 +397,15 @@ class _ManageOpeningBalanceScreenState
                 }
               }
             },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _T.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+              elevation: 0,
+            ),
             child: const Text('Remove',
-                style: TextStyle(
-                    color: _T.red, fontWeight: FontWeight.w700)),
+                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
@@ -520,7 +422,7 @@ class _MergedParty {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Header — Ledger title bar
+//  Header
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
@@ -531,13 +433,17 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final top = MediaQuery.of(context).padding.top;
     return Container(
-      padding: EdgeInsets.fromLTRB(20, top + 14, 20, 16),
+      padding: EdgeInsets.fromLTRB(16, top + 12, 16, 14),
       decoration: BoxDecoration(
-        color: _T.bg.withValues(alpha: 0.95),
-        border: Border(
-          bottom: BorderSide(
-              color: _T.gold.withValues(alpha: 0.12), width: 1),
-        ),
+        color: _T.surface.withValues(alpha: 0.96),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
+        boxShadow: [
+          BoxShadow(
+            color: _T.accent.withValues(alpha: 0.07),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -545,52 +451,38 @@ class _Header extends StatelessWidget {
           GestureDetector(
             onTap: () => Navigator.of(context).pop(),
             child: Container(
-              width: 36, height: 36,
+              width: 38, height: 38,
               decoration: BoxDecoration(
-                color: _T.line,
-                borderRadius: BorderRadius.circular(8),
+                color: _T.bg,
+                shape: BoxShape.circle,
                 border: Border.all(color: _T.line2),
               ),
               child: const Icon(Icons.arrow_back_ios_rounded,
-                  color: _T.muted2, size: 14),
+                  color: _T.text2, size: 15),
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
 
           // Title
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                RichText(
-                  text: const TextSpan(
-                    children: [
-                      TextSpan(
-                        text: 'OPENING ',
-                        style: TextStyle(
-                          color: _T.gold2,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.4,
-                        ),
-                      ),
-                      TextSpan(
-                        text: 'BALANCE',
-                        style: TextStyle(
-                          color: _T.text,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.4,
-                        ),
-                      ),
-                    ],
+                const Text(
+                  'Opening Balance',
+                  style: TextStyle(
+                    color: _T.text,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
                   ),
                 ),
-                const SizedBox(height: 2),
-                const Text('Ledger  ·  Client balances',
-                    style: TextStyle(
-                        color: _T.muted, fontSize: 10,
-                        letterSpacing: 0.2)),
+                const SizedBox(height: 1),
+                const Text(
+                  'Manage client ledger balances',
+                  style: TextStyle(
+                      color: _T.muted, fontSize: 11, letterSpacing: 0.1),
+                ),
               ],
             ),
           ),
@@ -599,24 +491,24 @@ class _Header extends StatelessWidget {
           GestureDetector(
             onTap: onAdd,
             child: Container(
-              width: 36, height: 36,
+              width: 38, height: 38,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xFFD4A040), Color(0xFFA07020)],
+                  colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
                 ),
-                borderRadius: BorderRadius.circular(8),
+                shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: _T.gold.withValues(alpha: 0.28),
+                    color: _T.accent.withValues(alpha: 0.35),
                     blurRadius: 10,
                     offset: const Offset(0, 3),
                   ),
                 ],
               ),
               child: const Icon(Icons.person_add_alt_1_rounded,
-                  color: Colors.white, size: 16),
+                  color: Colors.white, size: 17),
             ),
           ),
         ],
@@ -626,7 +518,7 @@ class _Header extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Summary strip — ledger totals row
+//  Summary strip
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SummaryStrip extends StatelessWidget {
@@ -641,86 +533,111 @@ class _SummaryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      decoration: BoxDecoration(
-        color: _T.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _T.gold.withValues(alpha: 0.14)),
-      ),
-      child: IntrinsicHeight(
-        child: Row(
-          children: [
-            _SummaryCell(
-              label: 'CLIENTS',
-              value: '$clientCount',
-              color: _T.text2,
-            ),
-            VerticalDivider(
-                width: 1, color: _T.line2, indent: 10, endIndent: 10),
-            _SummaryCell(
-              label: 'WITH BALANCE',
-              value: '$withOB',
-              color: _T.green,
-            ),
-            VerticalDivider(
-                width: 1, color: _T.line2, indent: 10, endIndent: 10),
-            _SummaryCell(
-              label: 'TOTAL OB',
-              value: '₹${_fmtNum(totalOB)}',
-              color: _T.gold2,
-              isLast: true,
-            ),
-          ],
-        ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Row(
+        children: [
+          _StatCard(
+            icon: Icons.people_alt_rounded,
+            iconColor: _T.accent,
+            iconBg: _T.accent.withValues(alpha: 0.10),
+            label: 'Clients',
+            value: '$clientCount',
+            valueColor: _T.text,
+          ),
+          const SizedBox(width: 10),
+          _StatCard(
+            icon: Icons.check_circle_rounded,
+            iconColor: _T.green,
+            iconBg: _T.green.withValues(alpha: 0.10),
+            label: 'With Balance',
+            value: '$withOB',
+            valueColor: _T.green,
+          ),
+          const SizedBox(width: 10),
+          _StatCard(
+            icon: Icons.account_balance_wallet_rounded,
+            iconColor: _T.gold2,
+            iconBg: _T.gold2.withValues(alpha: 0.10),
+            label: 'Total OB',
+            value: '₹${_fmtNum(totalOB)}',
+            valueColor: _T.gold2,
+          ),
+        ],
       ),
     );
   }
 }
 
-class _SummaryCell extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color  color;
-  final bool   isLast;
-  const _SummaryCell({
+class _StatCard extends StatelessWidget {
+  final IconData icon;
+  final Color    iconColor;
+  final Color    iconBg;
+  final String   label;
+  final String   value;
+  final Color    valueColor;
+  const _StatCard({
+    required this.icon,
+    required this.iconColor,
+    required this.iconBg,
     required this.label,
     required this.value,
-    required this.color,
-    this.isLast = false,
+    required this.valueColor,
   });
 
   @override
   Widget build(BuildContext context) => Expanded(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 10),
-          child: Column(
-            children: [
-              Text(
-                label,
-                style: const TextStyle(
-                    color: _T.muted,
-                    fontSize: 8,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.2),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                value,
-                style: TextStyle(
-                    color: color,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3),
-              ),
-            ],
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+      decoration: BoxDecoration(
+        color: _T.surface,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
           ),
-        ),
-      );
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 30, height: 30,
+            decoration: BoxDecoration(
+              color: iconBg,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: iconColor, size: 15),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(
+              color: _T.muted,
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Party tile — ledger entry row style
+//  Party tile — modern card style
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PartyTile extends StatelessWidget {
@@ -749,197 +666,207 @@ class _PartyTile extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        color: index.isEven
-            ? const Color(0xFFE8EAF0)
-            : const Color(0xFFF4F5F7),
-        child: IntrinsicHeight(
+        decoration: BoxDecoration(
+          color: _T.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Left balance indicator stripe
-              Container(
-                width: 3,
-                color: hasOB
-                    ? _T.gold.withValues(alpha: 0.55)
-                    : _T.line.withValues(alpha: 0.4),
-              ),
+              // Avatar
+              _CircleAvatar(name: party.name, size: 44),
+              const SizedBox(width: 12),
 
-              // Index number (ledger row number)
-              Container(
-                width: 32,
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                color: _T.line.withValues(alpha: 0.2),
-                child: Text(
-                  '${index + 1}',
-                  style: TextStyle(
-                      color: const Color(0xFFBCC2CC),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600),
-                ),
-              ),
-
-              Container(
-                width: 1,
-                color: _T.line.withValues(alpha: 0.5),
-              ),
-
-              // Content
+              // Info
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
-                  child: Row(
-                    children: [
-                      // Info
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(party.name,
-                                style: const TextStyle(
-                                    color: Color(0xFF1F2937),
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 13,
-                                    letterSpacing: -0.1)),
-
-                            if (place.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              Row(children: [
-                                const Icon(Icons.location_on_rounded,
-                                    color: _T.muted, size: 10),
-                                const SizedBox(width: 2),
-                                Text(place,
-                                    style: const TextStyle(
-                                        color: Color(0xFF6B7280), fontSize: 10)),
-                              ]),
-                            ] else if (desc.isNotEmpty) ...[
-                              const SizedBox(height: 3),
-                              Text(desc,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      color: Color(0xFF6B7280), fontSize: 10)),
-                            ],
-
-                            if (!hasSaved) ...[
-                              const SizedBox(height: 5),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: _T.gold.withValues(alpha: 0.06),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                      color: _T.gold.withValues(alpha: 0.14)),
-                                ),
-                                child: const Text('Tap to set balance',
-                                    style: TextStyle(
-                                        color: _T.gold,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w600)),
-                              ),
-                            ],
-                          ],
-                        ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      party.name,
+                      style: const TextStyle(
+                        color: _T.text,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        letterSpacing: -0.2,
                       ),
-
-                      // Amount (CR / DR style)
-                      if (hasSaved) ...[
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            if (hasOB) ...[
-                              Text(
-                                '₹${_fmtNum(ob)}',
-                                style: const TextStyle(
-                                    color: _T.gold2,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 14,
-                                    letterSpacing: -0.3),
-                              ),
-                              const SizedBox(height: 1),
-                              const Text('DR',
-                                  style: TextStyle(
-                                      color: _T.gold,
-                                      fontSize: 8,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 0.6)),
-                            ] else ...[
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 7, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: _T.muted.withValues(alpha: 0.07),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                      color: _T.line2),
-                                ),
-                                child: const Text('NIL',
-                                    style: TextStyle(
-                                        color: _T.muted2,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                        letterSpacing: 0.5)),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                      // Three-dot menu
-                      PopupMenuButton<String>(
-                        padding: EdgeInsets.zero,
-                        icon: const Icon(Icons.more_vert_rounded,
-                            color: _T.muted2, size: 20),
-                        iconSize: 20,
-                        color: _T.card2,
-                        elevation: 8,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          side: const BorderSide(color: _T.line2),
-                        ),
-                        onSelected: (v) {
-                          HapticFeedback.selectionClick();
-                          if (v == 'edit') onEdit();
-                          if (v == 'delete' && onDelete != null) onDelete!();
-                        },
-                        itemBuilder: (_) => [
-                          PopupMenuItem<String>(
-                            value: 'edit',
-                            height: 42,
-                            child: Row(children: [
-                              const Icon(Icons.edit_rounded,
-                                  color: _T.accent2, size: 15),
-                              const SizedBox(width: 10),
-                              const Text('Edit',
-                                  style: TextStyle(
-                                      color: _T.accent2,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600)),
-                            ]),
-                          ),
-                          if (onDelete != null)
-                            PopupMenuItem<String>(
-                              value: 'delete',
-                              height: 42,
-                              child: Row(children: [
-                                const Icon(Icons.delete_outline_rounded,
-                                    color: _T.red, size: 15),
-                                const SizedBox(width: 10),
-                                const Text('Delete',
-                                    style: TextStyle(
-                                        color: _T.red,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600)),
-                              ]),
-                            ),
+                    ),
+                    if (place.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on_rounded,
+                              color: _T.muted, size: 11),
+                          const SizedBox(width: 2),
+                          Text(place,
+                              style: const TextStyle(
+                                  color: _T.muted2, fontSize: 11)),
                         ],
                       ),
+                    ] else if (desc.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        desc,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: _T.muted2, fontSize: 11),
+                      ),
                     ],
-                  ),
+                    if (!hasSaved) ...[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _T.amber.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: _T.amber.withValues(alpha: 0.25)),
+                        ),
+                        child: const Text(
+                          'Tap to set balance',
+                          style: TextStyle(
+                            color: _T.gold2,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
+              ),
+
+              // Amount / NIL badge
+              if (hasSaved) ...[
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (hasOB) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: _T.green.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: _T.green.withValues(alpha: 0.20)),
+                        ),
+                        child: Text(
+                          '₹${_fmtNum(ob)}',
+                          style: const TextStyle(
+                            color: _T.green,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      const Text('DR',
+                          style: TextStyle(
+                            color: _T.muted,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.8,
+                          )),
+                    ] else ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _T.line,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text('NIL',
+                            style: TextStyle(
+                              color: _T.muted2,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.5,
+                            )),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(width: 4),
+              ],
+
+              // Three-dot menu
+              PopupMenuButton<String>(
+                padding: EdgeInsets.zero,
+                icon: Icon(Icons.more_vert_rounded,
+                    color: _T.muted2.withValues(alpha: 0.7), size: 20),
+                iconSize: 20,
+                color: _T.surface,
+                elevation: 8,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: const BorderSide(color: _T.line),
+                ),
+                onSelected: (v) {
+                  HapticFeedback.selectionClick();
+                  if (v == 'edit') onEdit();
+                  if (v == 'delete' && onDelete != null) onDelete!();
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem<String>(
+                    value: 'edit',
+                    height: 44,
+                    child: Row(children: [
+                      Container(
+                        width: 28, height: 28,
+                        decoration: BoxDecoration(
+                          color: _T.accent.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(7),
+                        ),
+                        child: const Icon(Icons.edit_rounded,
+                            color: _T.accent, size: 14),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text('Edit',
+                          style: TextStyle(
+                            color: _T.text,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          )),
+                    ]),
+                  ),
+                  if (onDelete != null)
+                    PopupMenuItem<String>(
+                      value: 'delete',
+                      height: 44,
+                      child: Row(children: [
+                        Container(
+                          width: 28, height: 28,
+                          decoration: BoxDecoration(
+                            color: _T.red.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(7),
+                          ),
+                          child: const Icon(Icons.delete_outline_rounded,
+                              color: _T.red, size: 14),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text('Delete',
+                            style: TextStyle(
+                              color: _T.red,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            )),
+                      ]),
+                    ),
+                ],
               ),
             ],
           ),
@@ -996,15 +923,16 @@ class _LoadingSpinner extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            width: 28, height: 28,
+            width: 32, height: 32,
             child: CircularProgressIndicator(
-              color: _T.gold.withValues(alpha: 0.6),
-              strokeWidth: 1.5,
+              color: _T.accent.withValues(alpha: 0.7),
+              strokeWidth: 2.5,
+              backgroundColor: _T.accent.withValues(alpha: 0.12),
             ),
           ),
-          const SizedBox(height: 12),
-          const Text('Loading ledger…',
-              style: TextStyle(color: _T.muted, fontSize: 11)),
+          const SizedBox(height: 14),
+          const Text('Loading clients…',
+              style: TextStyle(color: _T.muted, fontSize: 12)),
         ],
       );
 }
@@ -1017,10 +945,25 @@ class _ErrorMsg extends StatelessWidget {
   Widget build(BuildContext context) => Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text('Error: $message',
-              style: const TextStyle(
-                  color: _T.red, fontSize: 13),
-              textAlign: TextAlign.center),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56, height: 56,
+                decoration: BoxDecoration(
+                  color: _T.red.withValues(alpha: 0.08),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.error_outline_rounded,
+                    color: _T.red, size: 26),
+              ),
+              const SizedBox(height: 12),
+              Text('Error: $message',
+                  style: const TextStyle(
+                      color: _T.red, fontSize: 13),
+                  textAlign: TextAlign.center),
+            ],
+          ),
         ),
       );
 }
@@ -1043,59 +986,64 @@ class _EmptyState extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 70, height: 70,
+                width: 80, height: 80,
                 decoration: BoxDecoration(
-                  color: _T.gold.withValues(alpha: 0.06),
+                  color: _T.accent.withValues(alpha: 0.07),
                   shape: BoxShape.circle,
-                  border: Border.all(
-                      color: _T.gold.withValues(alpha: 0.12)),
                 ),
                 child: Icon(
                   hasSearch
                       ? Icons.search_off_rounded
                       : Icons.balance_rounded,
-                  color: _T.gold.withValues(alpha: 0.40),
-                  size: 30,
+                  color: _T.accent.withValues(alpha: 0.45),
+                  size: 34,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
               Text(
                 hasSearch
                     ? 'No clients match "$query"'
-                    : 'Ledger is empty',
+                    : 'No clients yet',
                 style: const TextStyle(
                     color: _T.text,
                     fontWeight: FontWeight.w700,
-                    fontSize: 15),
+                    fontSize: 16),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Text(
                 hasSearch
                     ? 'Try a different search term'
-                    : 'Add a client to start tracking\nopening balances',
+                    : 'Add your first client to start\ntracking opening balances',
                 style: const TextStyle(
-                    color: _T.muted2, fontSize: 12, height: 1.5),
+                    color: _T.muted2, fontSize: 13, height: 1.6),
                 textAlign: TextAlign.center,
               ),
               if (!hasSearch) ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: 24),
                 GestureDetector(
                   onTap: onAdd,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 10),
+                        horizontal: 24, vertical: 12),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFFD4A040), Color(0xFFA07020)],
+                        colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
                       ),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _T.accent.withValues(alpha: 0.28),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
                     child: const Text('Add Client',
                         style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w700,
-                            fontSize: 13)),
+                            fontSize: 14)),
                   ),
                 ),
               ],
@@ -1115,33 +1063,46 @@ class _SearchField extends StatelessWidget {
   const _SearchField({required this.controller, required this.hint});
 
   @override
-  Widget build(BuildContext context) => TextField(
-        controller: controller,
-        style: const TextStyle(color: _T.text, fontSize: 13),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: const TextStyle(color: _T.muted, fontSize: 13),
-          prefixIcon: const Icon(Icons.search_rounded,
-              color: _T.muted, size: 16),
-          suffixIcon: controller.text.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.close_rounded,
-                      color: _T.muted, size: 15),
-                  onPressed: controller.clear,
-                )
-              : null,
-          filled: true,
-          fillColor: _T.surface,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: _T.line2),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide:
-                const BorderSide(color: _T.gold, width: 1.2),
+  Widget build(BuildContext context) => Container(
+        decoration: BoxDecoration(
+          color: _T.surface,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: TextField(
+          controller: controller,
+          style: const TextStyle(color: _T.text, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: const TextStyle(color: _T.muted, fontSize: 13),
+            prefixIcon: const Icon(Icons.search_rounded,
+                color: _T.muted, size: 18),
+            suffixIcon: controller.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: _T.muted, size: 16),
+                    onPressed: controller.clear,
+                  )
+                : null,
+            filled: true,
+            fillColor: Colors.transparent,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide:
+                  const BorderSide(color: _T.accent, width: 1.5),
+            ),
           ),
         ),
       );
@@ -1239,10 +1200,10 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
     final e      = widget.party.entity;
     return Container(
       decoration: const BoxDecoration(
-        color: _T.card2,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        color: _T.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      padding: EdgeInsets.fromLTRB(20, 14, 20, 24 + bottom),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottom),
       child: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -1250,10 +1211,11 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Drag handle
               Center(
                 child: Container(
-                  width: 36, height: 4,
-                  margin: const EdgeInsets.only(bottom: 22),
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
                   decoration: BoxDecoration(
                     color: _T.line2,
                     borderRadius: BorderRadius.circular(2),
@@ -1261,9 +1223,11 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                 ),
               ),
 
-              // Party name
+              // Header row
               Row(
                 children: [
+                  _CircleAvatar(name: widget.party.name, size: 48),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1279,17 +1243,15 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: _T.gold.withValues(alpha: 0.07),
-                            borderRadius: BorderRadius.circular(5),
-                            border: Border.all(
-                                color: _T.gold.withValues(alpha: 0.14)),
+                            color: _T.accent.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
                             e != null
                                 ? 'Edit Opening Balance'
                                 : 'Set Opening Balance',
                             style: const TextStyle(
-                                color: _T.gold2,
+                                color: _T.accent,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600),
                           ),
@@ -1305,34 +1267,41 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
+                      horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
-                    color: _T.gold.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(10),
+                    color: _T.green.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                        color: _T.gold.withValues(alpha: 0.12)),
+                        color: _T.green.withValues(alpha: 0.18)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(
-                          Icons.account_balance_wallet_outlined,
-                          color: _T.gold, size: 13),
-                      const SizedBox(width: 8),
+                      Container(
+                        width: 30, height: 30,
+                        decoration: BoxDecoration(
+                          color: _T.green.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                            Icons.account_balance_wallet_outlined,
+                            color: _T.green, size: 14),
+                      ),
+                      const SizedBox(width: 10),
                       const Text('Current Balance',
                           style: TextStyle(
-                              color: _T.muted2, fontSize: 11)),
+                              color: _T.muted2, fontSize: 12)),
                       const Spacer(),
                       Text('₹${_fmtNum(e.openingBalance)}',
                           style: const TextStyle(
-                              color: _T.gold2,
+                              color: _T.green,
                               fontWeight: FontWeight.w800,
-                              fontSize: 14)),
+                              fontSize: 15)),
                     ],
                   ),
                 ),
               ],
 
-              const SizedBox(height: 18),
+              const SizedBox(height: 20),
 
               TextFormField(
                 controller: _obCtrl,
@@ -1375,7 +1344,7 @@ class _EditOBSheetState extends ConsumerState<_EditOBSheet> {
                     hint: 'e.g. Wholesale dealer',
                     icon: Icons.notes_rounded),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 24),
 
               _SaveButton(
                 label:      'Save Changes',
@@ -1467,10 +1436,10 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Container(
       decoration: const BoxDecoration(
-        color: _T.card2,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        color: _T.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      padding: EdgeInsets.fromLTRB(20, 14, 20, 24 + bottom),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 24 + bottom),
       child: Form(
         key: _formKey,
         child: SingleChildScrollView(
@@ -1478,10 +1447,11 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Drag handle
               Center(
                 child: Container(
-                  width: 36, height: 4,
-                  margin: const EdgeInsets.only(bottom: 22),
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
                   decoration: BoxDecoration(
                     color: _T.line2,
                     borderRadius: BorderRadius.circular(2),
@@ -1489,27 +1459,28 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                 ),
               ),
 
+              // Header row
               Row(
                 children: [
                   Container(
-                    width: 44, height: 44,
+                    width: 48, height: 48,
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
-                        colors: [Color(0xFFD4A040), Color(0xFFA07020)],
+                        colors: [Color(0xFF6366F1), Color(0xFF4F46E5)],
                       ),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
-                          color: _T.gold.withValues(alpha: 0.25),
+                          color: _T.accent.withValues(alpha: 0.28),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),
                       ],
                     ),
                     child: const Icon(Icons.person_add_alt_1_rounded,
-                        color: Colors.white, size: 20),
+                        color: Colors.white, size: 22),
                   ),
                   const SizedBox(width: 14),
                   const Column(
@@ -1519,15 +1490,16 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                           style: TextStyle(
                               color: _T.text,
                               fontWeight: FontWeight.w800,
-                              fontSize: 17)),
+                              fontSize: 18,
+                              letterSpacing: -0.3)),
                       Text('Add with opening balance',
                           style: TextStyle(
-                              color: _T.muted, fontSize: 11)),
+                              color: _T.muted, fontSize: 12)),
                     ],
                   ),
                 ],
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 24),
 
               TextFormField(
                 controller: _nameCtrl,
@@ -1581,7 +1553,7 @@ class _NewPartySheetState extends ConsumerState<_NewPartySheet> {
                     hint: 'e.g. Wholesale dealer',
                     icon: Icons.notes_rounded),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 24),
 
               _SaveButton(
                 label:      'Add Client',
@@ -1612,7 +1584,7 @@ class _SaveButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-        height: 50,
+        height: 52,
         child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: submitting
@@ -1620,19 +1592,19 @@ class _SaveButton extends StatelessWidget {
                 : const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xFFD4A040), Color(0xFF9A6A18)],
+                    colors: [Color(0xFF6366F1), Color(0xFF4338CA)],
                   ),
             color: submitting
-                ? _T.gold.withValues(alpha: 0.20)
+                ? _T.accent.withValues(alpha: 0.15)
                 : null,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             boxShadow: submitting
                 ? null
                 : [
                     BoxShadow(
-                      color: _T.gold.withValues(alpha: 0.28),
-                      blurRadius: 14,
-                      offset: const Offset(0, 4),
+                      color: _T.accent.withValues(alpha: 0.30),
+                      blurRadius: 16,
+                      offset: const Offset(0, 5),
                     ),
                   ],
           ),
@@ -1643,19 +1615,19 @@ class _SaveButton extends StatelessWidget {
               shadowColor: Colors.transparent,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(14)),
               elevation: 0,
             ),
             child: submitting
                 ? const SizedBox(
-                    width: 20, height: 20,
+                    width: 22, height: 22,
                     child: CircularProgressIndicator(
                         strokeWidth: 2.5,
                         color: Colors.white))
                 : Text(label,
                     style: const TextStyle(
                         fontWeight: FontWeight.w700,
-                        fontSize: 14,
+                        fontSize: 15,
                         letterSpacing: 0.2)),
           ),
         ),
@@ -1674,24 +1646,24 @@ class _FAB extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          width: 52, height: 52,
+          width: 56, height: 56,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Color(0xFFD4A040), Color(0xFF9A6A18)],
+              colors: [Color(0xFF6366F1), Color(0xFF4338CA)],
             ),
             shape: BoxShape.circle,
             boxShadow: [
               BoxShadow(
-                color: _T.gold.withValues(alpha: 0.35),
-                blurRadius: 16,
-                offset: const Offset(0, 5),
+                color: _T.accent.withValues(alpha: 0.40),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
           child: const Icon(Icons.add_rounded,
-              color: Colors.white, size: 24),
+              color: Colors.white, size: 26),
         ),
       );
 }
@@ -1713,13 +1685,14 @@ String _fmtNum(double v) {
 
 SnackBar _snackBar(String msg, {required bool success}) => SnackBar(
       content: Text(msg,
-          style: const TextStyle(color: Colors.white, fontSize: 13)),
+          style: const TextStyle(color: Colors.white, fontSize: 13,
+              fontWeight: FontWeight.w600)),
       backgroundColor: success
-          ? _T.green.withValues(alpha: 0.9)
-          : _T.red.withValues(alpha: 0.9),
+          ? _T.green.withValues(alpha: 0.95)
+          : _T.red.withValues(alpha: 0.95),
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10)),
+          borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
     );
 
@@ -1731,31 +1704,31 @@ InputDecoration _fieldDec(
       labelStyle: const TextStyle(color: _T.muted, fontSize: 12),
       hintStyle: const TextStyle(color: _T.muted, fontSize: 12),
       prefixIcon:
-          icon != null ? Icon(icon, color: _T.muted, size: 16) : null,
+          icon != null ? Icon(icon, color: _T.muted, size: 17) : null,
       filled: true,
-      fillColor: _T.card,
+      fillColor: _T.bg,
       contentPadding:
-          const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: _T.line2),
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _T.line),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: _T.gold, width: 1.2),
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _T.accent, width: 1.5),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: _T.red),
       ),
       focusedErrorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: _T.red, width: 1.5),
       ),
     );
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Circle avatar — muted ledger palette
+//  Circle avatar — coloured initials
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CircleAvatar extends StatelessWidget {
@@ -1786,13 +1759,20 @@ class _CircleAvatar extends StatelessWidget {
         ),
         shape: BoxShape.circle,
         border: Border.all(
-            color: colors[0].withValues(alpha: 0.4), width: 1),
+            color: colors[0].withValues(alpha: 0.4), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: colors[0].withValues(alpha: 0.25),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Center(
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : '?',
           style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.9),
+              color: Colors.white.withValues(alpha: 0.95),
               fontWeight: FontWeight.w700,
               fontSize: size * 0.36),
         ),

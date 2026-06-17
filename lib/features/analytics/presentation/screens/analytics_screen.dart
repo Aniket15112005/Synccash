@@ -103,7 +103,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
                   child: asyncData.when(
                     loading: () => const Center(
                         child: CircularProgressIndicator(color: _retail, strokeWidth: 1.5)),
-                    error: (e, _) => Center(child: Text('Error', style: TextStyle(color: _textSec))),
+                    error: (e, _) => const Center(child: Text('Error', style: TextStyle(color: _textSec))),
                     data: (data) => FadeTransition(
                       opacity: _entryCtrl,
                       child: _buildBody(context, data, activeFilter),
@@ -139,7 +139,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
     if (data.totalCount == 0) {
       return Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.bar_chart_rounded, color: _cardBdr, size: 56),
+          const Icon(Icons.bar_chart_rounded, color: _cardBdr, size: 56),
           const SizedBox(height: 14),
           Text('No entries for ${filter.label}',
               style: const TextStyle(color: _textSec, fontSize: 15)),
@@ -499,7 +499,7 @@ class _InsightCard extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [color.withOpacity(0.08), Colors.transparent],
+            colors: [color.withValues(alpha: 0.08), Colors.transparent],
             stops: const [0.0, 0.4],
           ),
         ),
@@ -510,7 +510,7 @@ class _InsightCard extends StatelessWidget {
               Container(
                 width: 28, height: 28,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.15),
+                  color: color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(icon, color: color, size: 15),
@@ -589,8 +589,8 @@ class _DayOfWeekChart extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.bottomCenter, end: Alignment.topCenter,
             colors: isPeak
-                ? [_expCol.withOpacity(0.7), _expCol]
-                : [_retail.withOpacity(0.3), _retail.withOpacity(0.7)],
+                ? [_expCol.withValues(alpha: 0.7), _expCol]
+                : [_retail.withValues(alpha: 0.3), _retail.withValues(alpha: 0.7)],
           ),
         ),
       ]);
@@ -692,7 +692,7 @@ class _RatioGauge extends StatelessWidget {
                 curve: Curves.easeOut,
                 builder: (_, v, __) => Container(
                   height: 36,
-                  color: _incCol.withOpacity(0.6 + 0.4 * v),
+                  color: _incCol.withValues(alpha: 0.6 + 0.4 * v),
                   alignment: Alignment.center,
                   child: incPct > 15 ? Text('${incPct.toStringAsFixed(0)}%',
                       style: const TextStyle(color: Colors.white,
@@ -708,7 +708,7 @@ class _RatioGauge extends StatelessWidget {
                 curve: Curves.easeOut,
                 builder: (_, v, __) => Container(
                   height: 36,
-                  color: _expCol.withOpacity(0.6 + 0.4 * v),
+                  color: _expCol.withValues(alpha: 0.6 + 0.4 * v),
                   alignment: Alignment.center,
                   child: expPct > 15 ? Text('${expPct.toStringAsFixed(0)}%',
                       style: const TextStyle(color: Colors.white,
@@ -848,8 +848,10 @@ class _RetailWholesalePie extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sorted = data.sortedCategories;
-    if (sorted.isEmpty) return const Padding(padding: EdgeInsets.all(32),
-        child: Center(child: Text('No data', style: TextStyle(color: _textSec))));
+    if (sorted.isEmpty) {
+      return const Padding(padding: EdgeInsets.all(32),
+          child: Center(child: Text('No data', style: TextStyle(color: _textSec))));
+    }
     final total = sorted.fold<double>(0, (s, e) => s + e.value);
     final sections = sorted.asMap().entries.map((e) {
       final i = e.key; final cat = e.value.key; final amt = e.value.value;
@@ -937,8 +939,10 @@ class _CreatorChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final creators = data.creators;
-    if (creators.isEmpty) return const Padding(padding: EdgeInsets.all(32),
-        child: Center(child: Text('No data', style: TextStyle(color: _textSec))));
+    if (creators.isEmpty) {
+      return const Padding(padding: EdgeInsets.all(32),
+          child: Center(child: Text('No data', style: TextStyle(color: _textSec))));
+    }
     final cc = [_c1, _c2, _c3];
     double maxY = 0;
     for (final c in creators) {
@@ -1046,8 +1050,10 @@ class _MonthlyChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final months = data.sortedMonths;
-    if (months.isEmpty) return const Padding(padding: EdgeInsets.all(32),
-        child: Center(child: Text('No data', style: TextStyle(color: _textSec))));
+    if (months.isEmpty) {
+      return const Padding(padding: EdgeInsets.all(32),
+          child: Center(child: Text('No data', style: TextStyle(color: _textSec))));
+    }
     double maxY = 0;
     for (final m in months) {
       final inc = data.monthlyIncome[m]  ?? 0;
@@ -1157,8 +1163,10 @@ class _CategoryBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sorted = data.sortedCategories;
-    if (sorted.isEmpty) return const Padding(padding: EdgeInsets.all(32),
-        child: Center(child: Text('No data', style: TextStyle(color: _textSec))));
+    if (sorted.isEmpty) {
+      return const Padding(padding: EdgeInsets.all(32),
+          child: Center(child: Text('No data', style: TextStyle(color: _textSec))));
+    }
     final total = sorted.fold<double>(0, (s, e) => s + e.value);
 
     return Padding(
@@ -1229,10 +1237,10 @@ class _SummaryReport extends StatelessWidget {
           border: Border.all(color: _cardBdr)),
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Icon(Icons.summarize_rounded, color: _textSec, size: 18),
-          const SizedBox(width: 8),
-          const Text('Summary Report', style: TextStyle(
+        const Row(children: [
+          Icon(Icons.summarize_rounded, color: _textSec, size: 18),
+          SizedBox(width: 8),
+          Text('Summary Report', style: TextStyle(
               color: _textPri, fontWeight: FontWeight.w600, fontSize: 15)),
         ]),
         const SizedBox(height: 16),
@@ -1272,7 +1280,7 @@ class _R extends StatelessWidget {
     padding: const EdgeInsets.only(bottom: 12),
     child: Row(children: [
       Container(width: 30, height: 30,
-        decoration: BoxDecoration(color: color.withOpacity(0.12),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(8)),
         child: Icon(icon, color: color, size: 16)),
       const SizedBox(width: 10),
@@ -1355,7 +1363,7 @@ class _BurnRateForecastState extends State<_BurnRateForecast> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [accent.withOpacity(0.08), Colors.transparent],
+          colors: [accent.withValues(alpha: 0.08), Colors.transparent],
         ),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1366,17 +1374,17 @@ class _BurnRateForecastState extends State<_BurnRateForecast> {
             Container(
               width: 32, height: 32,
               decoration: BoxDecoration(
-                color: accent.withOpacity(0.15),
+                color: accent.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(9),
               ),
               child: Icon(Icons.local_fire_department_rounded, color: accent, size: 17),
             ),
             const SizedBox(width: 10),
-            Expanded(
+            const Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Burn Rate Forecast',
+                Text('Burn Rate Forecast',
                     style: TextStyle(color: _textPri, fontWeight: FontWeight.w600, fontSize: 15)),
-                const Text('How long will your balance last?',
+                Text('How long will your balance last?',
                     style: TextStyle(color: _textSec, fontSize: 12)),
               ]),
             ),
@@ -1434,7 +1442,7 @@ class _BurnRateForecastState extends State<_BurnRateForecast> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10, left: 6),
                   child: Text('days', style: TextStyle(
-                      color: accent.withOpacity(0.65),
+                      color: accent.withValues(alpha: 0.65),
                       fontSize: 20,
                       fontWeight: FontWeight.w600)),
                 ),
@@ -1489,7 +1497,7 @@ class _BurnRateForecastState extends State<_BurnRateForecast> {
                       child: Center(
                         child: Container(
                           width: 1,
-                          color: _cardBg.withOpacity(0.6),
+                          color: _cardBg.withValues(alpha: 0.6),
                         ),
                       ),
                     );
@@ -1498,14 +1506,14 @@ class _BurnRateForecastState extends State<_BurnRateForecast> {
               ),
             ),
             const SizedBox(height: 5),
-            Row(children: [
-              const Text('0d', style: TextStyle(color: _textSec, fontSize: 10)),
-              const Spacer(),
-              const Text('30d', style: TextStyle(color: _textSec, fontSize: 10)),
-              const Spacer(),
-              const Text('60d', style: TextStyle(color: _textSec, fontSize: 10)),
-              const Spacer(),
-              const Text('90d+', style: TextStyle(color: _textSec, fontSize: 10)),
+            const Row(children: [
+              Text('0d', style: TextStyle(color: _textSec, fontSize: 10)),
+              Spacer(),
+              Text('30d', style: TextStyle(color: _textSec, fontSize: 10)),
+              Spacer(),
+              Text('60d', style: TextStyle(color: _textSec, fontSize: 10)),
+              Spacer(),
+              Text('90d+', style: TextStyle(color: _textSec, fontSize: 10)),
             ]),
 
             const SizedBox(height: 18),
@@ -1554,9 +1562,9 @@ class _BurnTile extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
-      color: color.withOpacity(0.07),
+      color: color.withValues(alpha: 0.07),
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: color.withOpacity(0.18)),
+      border: Border.all(color: color.withValues(alpha: 0.18)),
     ),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Icon(icon, color: color, size: 13),
@@ -1659,12 +1667,12 @@ class _RecurringDetectorState extends State<_RecurringDetector> {
   // ── Detection: group by normalised description (first 3 words) ────────────
   List<_RecurringItem> _byDescription() {
     final txs = widget.data.transactions
-        .where((tx) => tx.description != null && tx.description!.trim().isNotEmpty)
+        .where((tx) => tx.description.trim().isNotEmpty)
         .toList();
 
     final groups = <String, List<TransactionEntity>>{};
     for (final tx in txs) {
-      final raw   = tx.description!.trim();
+      final raw   = tx.description.trim();
       final words = raw.split(RegExp(r'\s+')).take(3).join(' ').toLowerCase();
       if (words.isEmpty) continue;
       groups.putIfAbsent(words, () => []).add(tx);
@@ -1683,7 +1691,7 @@ class _RecurringDetectorState extends State<_RecurringDetector> {
       final expList = list.where((tx) => tx.type != 'income').toList();
 
       // Display label = full description of first transaction (capitalised)
-      final raw = list.first.description!.trim();
+      final raw = list.first.description.trim();
       final displayLabel = raw.length > 32 ? '${raw.substring(0, 30)}…' : raw;
       final catLabel = list.map((tx) => tx.category).toSet().join(', ');
 
@@ -1738,17 +1746,17 @@ class _RecurringDetectorState extends State<_RecurringDetector> {
             Container(
               width: 32, height: 32,
               decoration: BoxDecoration(
-                color: _c1.withOpacity(0.15),
+                color: _c1.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(9),
               ),
               child: const Icon(Icons.repeat_rounded, color: _c1, size: 17),
             ),
             const SizedBox(width: 10),
-            Expanded(
+            const Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Recurring Patterns',
+                Text('Recurring Patterns',
                     style: TextStyle(color: _textPri, fontWeight: FontWeight.w600, fontSize: 15)),
-                const Text('Transactions repeating across months',
+                Text('Transactions repeating across months',
                     style: TextStyle(color: _textSec, fontSize: 12)),
               ]),
             ),
@@ -1815,7 +1823,7 @@ class _RecurringDetectorState extends State<_RecurringDetector> {
                   if (item.detectedBy == 'category') {
                     return tx.category == item.label && tx.type != 'income';
                   } else {
-                    final raw = tx.description?.trim() ?? '';
+                    final raw = tx.description.trim();
                     final key = raw.split(RegExp(r'\s+')).take(3).join(' ').toLowerCase();
                     final itemKey = item.label.toLowerCase().split(RegExp(r'\s+')).take(3).join(' ');
                     return key == itemKey && tx.type != 'income';
@@ -1845,7 +1853,7 @@ class _RecurringDetectorState extends State<_RecurringDetector> {
                     if (item.detectedBy == 'category') {
                       return tx.category == item.label && tx.type == 'income';
                     } else {
-                      final raw = tx.description?.trim() ?? '';
+                      final raw = tx.description.trim();
                       final key = raw.split(RegExp(r'\s+')).take(3).join(' ').toLowerCase();
                       final itemKey = item.label.toLowerCase().split(RegExp(r'\s+')).take(3).join(' ');
                       return key == itemKey && tx.type == 'income';
@@ -1917,7 +1925,7 @@ class _RecurringSectionHeader extends StatelessWidget {
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.12),
+          color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text('$count', style: TextStyle(
@@ -1947,16 +1955,16 @@ class _RecurringRow extends StatelessWidget {
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: item.color.withOpacity(0.05),
+          color: item.color.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: item.color.withOpacity(0.18)),
+          border: Border.all(color: item.color.withValues(alpha: 0.18)),
         ),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           // Icon
           Container(
             width: 36, height: 36,
             decoration: BoxDecoration(
-              color: item.color.withOpacity(0.12),
+              color: item.color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(Icons.repeat_rounded, color: item.color, size: 17),
@@ -1979,7 +1987,7 @@ class _RecurringRow extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
-                    color: item.color.withOpacity(0.15),
+                    color: item.color.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -2012,7 +2020,7 @@ class _RecurringRow extends StatelessWidget {
                 ]),
                 const Spacer(),
                 // Tap hint
-                Icon(Icons.chevron_right_rounded, color: item.color.withOpacity(0.5), size: 18),
+                Icon(Icons.chevron_right_rounded, color: item.color.withValues(alpha: 0.5), size: 18),
               ]),
 
               const SizedBox(height: 8),
@@ -2091,7 +2099,7 @@ class _DrillDownSheet extends StatelessWidget {
               Container(
                 width: 36, height: 36,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.14),
+                  color: color.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(Icons.receipt_long_rounded, color: color, size: 18),
@@ -2148,7 +2156,7 @@ class _DrillDownSheet extends StatelessWidget {
                   Container(
                     width: 36, height: 36,
                     decoration: BoxDecoration(
-                      color: txCol.withOpacity(0.12),
+                      color: txCol.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(
@@ -2166,10 +2174,9 @@ class _DrillDownSheet extends StatelessWidget {
                           color: Colors.white,
                           fontSize: 13,
                           fontWeight: FontWeight.w600)),
-                      if (tx.description != null &&
-                          tx.description!.isNotEmpty) ...[
+                      if (tx.description.isNotEmpty) ...[
                         const SizedBox(height: 1),
-                        Text(tx.description!,
+                        Text(tx.description,
                             style: const TextStyle(
                                 color: _textSec, fontSize: 11),
                             maxLines: 1,

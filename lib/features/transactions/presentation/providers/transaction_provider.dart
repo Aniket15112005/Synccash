@@ -342,3 +342,66 @@ final filteredUpiTransactionsProvider =
     );
   },
 );
+// ── CB (Cash) category providers ──────────────────────────────────────────────
+
+class CbTypeFilterNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+  void setFilter(String? v) => state = v;
+}
+final cbTypeFilterProvider =
+    NotifierProvider<CbTypeFilterNotifier, String?>(CbTypeFilterNotifier.new);
+
+class CbDateFilterNotifier extends Notifier<TransactionDateFilter?> {
+  @override
+  TransactionDateFilter? build() => null;
+  void setFilter(TransactionDateFilter? v) => state = v;
+}
+final cbDateFilterProvider =
+    NotifierProvider<CbDateFilterNotifier, TransactionDateFilter?>(CbDateFilterNotifier.new);
+
+class CbAmountFilterNotifier extends Notifier<BankAmountFilter?> {
+  @override
+  BankAmountFilter? build() => null;
+  void setFilter(BankAmountFilter? v) => state = v;
+}
+final cbAmountFilterProvider =
+    NotifierProvider<CbAmountFilterNotifier, BankAmountFilter?>(CbAmountFilterNotifier.new);
+
+class CbDescFilterNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+  void setFilter(String? v) => state = v;
+}
+final cbDescFilterProvider =
+    NotifierProvider<CbDescFilterNotifier, String?>(CbDescFilterNotifier.new);
+
+final cbTransactionsStreamProvider =
+    StreamProvider.family<List<TransactionEntity>, String>(
+  (ref, cashbookId) {
+    final repo = ref.read(transactionRepositoryProvider);
+    return repo.getTransactionsStream(cashbookId, limit: 0).map(
+      (txs) => txs.where((tx) => tx.category.toLowerCase() == 'cash').toList(),
+    );
+  },
+);
+
+final filteredCbTransactionsProvider =
+    Provider.family<AsyncValue<List<TransactionEntity>>, String>(
+  (ref, cashbookId) {
+    final async        = ref.watch(cbTransactionsStreamProvider(cashbookId));
+    final typeFilter   = ref.watch(cbTypeFilterProvider);
+    final dateFilter   = ref.watch(cbDateFilterProvider);
+    final amountFilter = ref.watch(cbAmountFilterProvider);
+    final descFilter   = ref.watch(cbDescFilterProvider);
+    return async.whenData(
+      (data) => _applyBankFilters(
+        data,
+        typeFilter:   typeFilter,
+        dateFilter:   dateFilter,
+        amountFilter: amountFilter,
+        descFilter:   descFilter,
+      ),
+    );
+  },
+);

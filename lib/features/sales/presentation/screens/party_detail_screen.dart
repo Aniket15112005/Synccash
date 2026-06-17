@@ -81,7 +81,7 @@ List<_GroupedPayment> _groupPayments(List<_PaymentRecord> payments) {
 //  All Bills Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
-class AllBillsScreen extends ConsumerWidget {
+class AllBillsScreen extends ConsumerStatefulWidget {
   final String               partyName;
   final List<SaleBillEntity> bills;
   final Map<String, double>  received;
@@ -93,9 +93,14 @@ class AllBillsScreen extends ConsumerWidget {
     required this.received,
   });
 
+  @override
+  ConsumerState<AllBillsScreen> createState() => _AllBillsScreenState();
+}
+
+class _AllBillsScreenState extends ConsumerState<AllBillsScreen> {
+  String _searchQuery = '';
+
   Future<void> _delete(
-    BuildContext context,
-    WidgetRef ref,
     SaleBillEntity bill,
     String? cashbookId,
   ) async {
@@ -115,13 +120,11 @@ class AllBillsScreen extends ConsumerWidget {
           .read(saleBillActionsProvider.notifier)
           .deleteBill(cashbookId: cashbookId, billId: bill.saleBillId);
     } catch (e) {
-      if (context.mounted) _snack(context, 'Failed: $e', ok: false);
+      if (mounted) _snack(context, 'Failed: $e', ok: false);
     }
   }
 
   void _edit(
-    BuildContext context,
-    WidgetRef ref,
     SaleBillEntity bill,
     String? cashbookId,
   ) {
@@ -136,19 +139,45 @@ class AllBillsScreen extends ConsumerWidget {
     );
   }
 
+  void _showSearchSheet() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _BillSearchSheet(
+        initialQuery: _searchQuery,
+        onChanged: (q) {
+          if (mounted) setState(() => _searchQuery = q.trim().toLowerCase());
+        },
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final cashbookId = ref.watch(currentCashbookIdProvider);
     final fmt     = NumberFormat('#,##,##0.##');
     final dateFmt = DateFormat('dd MMM yy');
-    final sorted  = List<SaleBillEntity>.from(bills)
+    final sorted  = List<SaleBillEntity>.from(widget.bills)
       ..sort((a, b) => b.billCreatedAt.compareTo(a.billCreatedAt));
+
+    final filtered = _searchQuery.isEmpty
+        ? sorted
+        : sorted.where((b) {
+            final q = _searchQuery;
+            return b.billNumber.toLowerCase().contains(q) ||
+                dateFmt.format(b.billDate).toLowerCase().contains(q) ||
+                dateFmt.format(b.billCreatedAt).toLowerCase().contains(q) ||
+                fmt.format(b.billTotal).contains(q) ||
+                b.billTotal.toStringAsFixed(0).contains(q);
+          }).toList();
 
     double totalBilled   = 0;
     double totalReceived = 0;
     for (final b in sorted) {
       totalBilled   += b.billTotal;
-      totalReceived += received[b.saleBillId] ?? 0.0;
+      totalReceived += widget.received[b.saleBillId] ?? 0.0;
     }
     final due = (totalBilled - totalReceived).clamp(0.0, double.infinity);
 
@@ -169,17 +198,40 @@ class AllBillsScreen extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(partyName,
+                Text(widget.partyName,
                     style: const TextStyle(
                         color: _T.text,
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         letterSpacing: -0.2)),
-                Text('${bills.length} bills',
-                    style: const TextStyle(
-                        color: _T.muted2, fontSize: 10)),
+                Text(
+                  _searchQuery.isEmpty
+                      ? '${widget.bills.length} bills'
+                      : '${filtered.length} of ${widget.bills.length} bills',
+                  style: const TextStyle(color: _T.muted2, fontSize: 10),
+                ),
               ],
             ),
+            actions: [
+              IconButton(
+                icon: Icon(
+                  _searchQuery.isEmpty
+                      ? Icons.search_rounded
+                      : Icons.search_off_rounded,
+                  color: _searchQuery.isEmpty ? _T.muted2 : _T.accent2,
+                  size: 20,
+                ),
+                onPressed: () {
+                  if (_searchQuery.isNotEmpty) {
+                    setState(() => _searchQuery = '');
+                  } else {
+                    _showSearchSheet();
+                  }
+                },
+                tooltip: _searchQuery.isEmpty ? 'Search' : 'Clear search',
+              ),
+              const SizedBox(width: 4),
+            ],
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(1),
               child: Container(height: 1, color: _T.line),
@@ -204,18 +256,22 @@ class AllBillsScreen extends ConsumerWidget {
           ),
 
           // ── Bills ────────────────────────────────────────────────────────
-          sorted.isEmpty
-              ? const SliverFillRemaining(
+          filtered.isEmpty
+              ? SliverFillRemaining(
                   child: Center(
-                    child: Text('No bills',
-                        style: TextStyle(color: _T.muted2, fontSize: 13)),
+                    child: Text(
+                      _searchQuery.isEmpty
+                          ? 'No bills'
+                          : 'No bills match "$_searchQuery"',
+                      style: const TextStyle(color: _T.muted2, fontSize: 13),
+                    ),
                   ),
                 )
               : SliverList.builder(
-                  itemCount: sorted.length,
+                  itemCount: filtered.length,
                   itemBuilder: (ctx, i) {
-                    final bill = sorted[i];
-                    final rec  = received[bill.saleBillId] ?? 0.0;
+                    final bill = filtered[i];
+                    final rec  = widget.received[bill.saleBillId] ?? 0.0;
                     final rem  =
                         (bill.billTotal - rec).clamp(0.0, double.infinity);
                     return RepaintBoundary(
@@ -230,10 +286,10 @@ class AllBillsScreen extends ConsumerWidget {
                           Navigator.push(
                               ctx,
                               _route(BillDetailScreen(
-                                  bill: bill, billCount: bills.length)));
+                                  bill: bill, billCount: widget.bills.length)));
                         },
-                        onEdit:   () => _edit(ctx, ref, bill, cashbookId),
-                        onDelete: () => _delete(ctx, ref, bill, cashbookId),
+                        onEdit:   () => _edit(bill, cashbookId),
+                        onDelete: () => _delete(bill, cashbookId),
                       ),
                     );
                   },
@@ -282,6 +338,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
   // Amount paid toward opening balance via isObPayment=true transactions.
   // Tracked separately so it never leaks into bill received calculations.
   double                     _obPaid   = 0.0;
+  String                     _searchQuery = '';
 
   @override
   void initState() {
@@ -377,8 +434,11 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         .snapshots()
         .listen((doc) {
       if (!mounted) return;
-      setState(
-          () => _party = doc.exists ? PartyEntity.fromDoc(doc) : null);
+      setState(() {
+        _party = doc.exists ? PartyEntity.fromDoc(doc) : null;
+        // Recompute because OB value affects FIFO distribution.
+        _recomputeReceived();
+      });
     }, onError: (_) {});
   }
 
@@ -409,7 +469,25 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
       if (linkedId != null && linkedId.isNotEmpty) {
         // Only count this payment if the bill belongs to THIS party.
         if (billIds.contains(linkedId)) {
-          map[linkedId] = (map[linkedId] ?? 0.0) + amount;
+          // ── Single-bill overflow-to-OB rule ────────────────────────────
+          // When the party has exactly 1 bill, cap the linked payment at
+          // the bill's remaining balance and automatically route any
+          // overflow to the opening balance (if OB is still outstanding).
+          if (_bills.length == 1) {
+            final alreadyRcvd = map[linkedId] ?? 0.0;
+            final billRemain  =
+                (_bills.first.billTotal - alreadyRcvd).clamp(0.0, double.infinity);
+            final toBill      = amount > billRemain ? billRemain : amount;
+            final overflow    = amount - toBill;
+            map[linkedId]     = alreadyRcvd + toBill;
+            if (overflow > 0) {
+              final ob          = _party?.openingBalance ?? 0.0;
+              final remainingOb = (ob - obPaid).clamp(0.0, double.infinity);
+              obPaid += overflow > remainingOb ? remainingOb : overflow;
+            }
+          } else {
+            map[linkedId] = (map[linkedId] ?? 0.0) + amount;
+          }
           payments.add(_PaymentRecord(
               linkedBillId: linkedId, amount: amount, createdAt: createdAt));
         }
@@ -431,19 +509,14 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     }
 
     // ── FIFO distribution of old-style unlinked payments ─────────────────────
-    // Rule: fill unpaid OB first; any overflow goes to bills oldest→newest.
+    // Rule: fill bills oldest→newest first; any overflow then goes to OB.
     if (totalOldUnlinked > 0) {
       payments.addAll(oldUnlinkedRecs);
 
-      final ob          = (_party?.openingBalance ?? 0.0);
-      final remainingOb = (ob - obPaid).clamp(0.0, double.infinity);
-      final toOb        = totalOldUnlinked > remainingOb
-                              ? remainingOb
-                              : totalOldUnlinked;
-      obPaid           += toOb;
-      var overflow      = totalOldUnlinked - toOb;
+      var overflow = totalOldUnlinked;
 
-      if (overflow > 0 && _bills.isNotEmpty) {
+      // Step 1: Apply to bills oldest→newest.
+      if (_bills.isNotEmpty) {
         final sortedBills = List<SaleBillEntity>.from(_bills)
           ..sort((a, b) => a.billDate.compareTo(b.billDate));
         for (final bill in sortedBills) {
@@ -458,6 +531,14 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
           }
           overflow -= toThisBill;
         }
+      }
+
+      // Step 2: Apply remaining overflow to opening balance.
+      if (overflow > 0) {
+        final ob          = (_party?.openingBalance ?? 0.0);
+        final remainingOb = (ob - obPaid).clamp(0.0, double.infinity);
+        final toOb        = overflow > remainingOb ? remainingOb : overflow;
+        obPaid           += toOb;
       }
     }
 
@@ -581,6 +662,22 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         partyName: widget.partyName,
         payments:  _payments,
         bills:     _bills,
+      ),
+    );
+  }
+
+
+  void _showSearchSheet() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _BillSearchSheet(
+        initialQuery: _searchQuery,
+        onChanged: (q) {
+          if (mounted) setState(() => _searchQuery = q.trim().toLowerCase());
+        },
       ),
     );
   }
@@ -1580,8 +1677,20 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     final dateFmt = DateFormat('dd MMM yy');
     final ob      = _party?.openingBalance ?? 0.0;
     final closingBalance = ob + _totalBilled - _totalAllReceived;
-    final recent  = _bills.take(_kPage).toList();
-    final hasMore = _bills.length > _kPage;
+    final filteredBills = _searchQuery.isEmpty
+        ? _bills
+        : _bills.where((b) {
+            final q = _searchQuery;
+            return b.billNumber.toLowerCase().contains(q) ||
+                dateFmt.format(b.billDate).toLowerCase().contains(q) ||
+                dateFmt.format(b.billCreatedAt).toLowerCase().contains(q) ||
+                fmt.format(b.billTotal).contains(q) ||
+                b.billTotal.toStringAsFixed(0).contains(q);
+          }).toList();
+    final recent  = _searchQuery.isEmpty
+        ? filteredBills.take(_kPage).toList()
+        : filteredBills;
+    final hasMore = _searchQuery.isEmpty && _bills.length > _kPage;
 
     return Scaffold(
       backgroundColor: _T.bg,
@@ -1594,9 +1703,11 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
           SliverPersistentHeader(
             pinned: true,
             delegate: _HeroDelegate(
-              partyName: widget.partyName,
-              onShare:   _bills.isNotEmpty ? _showShareOptions : null,
-              hasBills:  _bills.isNotEmpty,
+              partyName:    widget.partyName,
+              onShare:      _bills.isNotEmpty ? _showShareOptions : null,
+              onSearch:     _showSearchSheet,
+              hasBills:     _bills.isNotEmpty,
+              searchActive: _searchQuery.isNotEmpty,
             ),
           ),
 
@@ -1635,7 +1746,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
           SliverToBoxAdapter(
             child: _SectionHeader(
               label: 'BILLS',
-              count: _bills.length,
+              count: filteredBills.length,
               trailing: hasMore
                   ? GestureDetector(
                       onTap: () {
@@ -1660,7 +1771,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
           ),
 
           // ── Bill rows ────────────────────────────────────────────────────
-          _bills.isEmpty
+          filteredBills.isEmpty
               ? SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.all(20),
@@ -1730,13 +1841,17 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _HeroDelegate extends SliverPersistentHeaderDelegate {
-  final String       partyName;
+  final String        partyName;
   final VoidCallback? onShare;
+  final VoidCallback? onSearch;
   final bool          hasBills;
+  final bool          searchActive;
   const _HeroDelegate({
     required this.partyName,
     this.onShare,
+    this.onSearch,
     this.hasBills = false,
+    this.searchActive = false,
   });
 
   @override
@@ -1768,6 +1883,17 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
                     icon: const Icon(Icons.arrow_back_ios_rounded,
                         color: _T.text2, size: 17),
                     onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      searchActive
+                          ? Icons.search_off_rounded
+                          : Icons.search_rounded,
+                      color: searchActive ? _T.accent2 : _T.muted2,
+                      size: 20,
+                    ),
+                    onPressed: onSearch,
+                    tooltip: searchActive ? 'Clear search' : 'Search',
                   ),
                   Expanded(
                     child: Text(
@@ -1801,14 +1927,30 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Back button + share icon row
+                  // Back button + action icons row
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_ios_rounded,
-                            color: _T.text2, size: 17),
-                        onPressed: () => Navigator.of(context).pop(),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back_ios_rounded,
+                                color: _T.text2, size: 17),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              searchActive
+                                  ? Icons.search_off_rounded
+                                  : Icons.search_rounded,
+                              color: searchActive ? _T.accent2 : _T.muted2,
+                              size: 20,
+                            ),
+                            onPressed: onSearch,
+                            tooltip: searchActive ? 'Clear search' : 'Search',
+                          ),
+                        ],
                       ),
                       if (hasBills && onShare != null)
                         IconButton(
@@ -1890,7 +2032,9 @@ class _HeroDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(covariant _HeroDelegate old) =>
-      old.partyName != partyName;
+      old.partyName != partyName ||
+      old.searchActive != searchActive ||
+      old.onSearch != onSearch;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3749,6 +3893,124 @@ Color _partyColor(String name) {
   return name.isNotEmpty
       ? colors[name.codeUnitAt(0) % colors.length]
       : colors[0];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Bill Search Sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BillSearchSheet extends StatefulWidget {
+  final String               initialQuery;
+  final ValueChanged<String> onChanged;
+  const _BillSearchSheet({
+    required this.initialQuery,
+    required this.onChanged,
+  });
+
+  @override
+  State<_BillSearchSheet> createState() => _BillSearchSheetState();
+}
+
+class _BillSearchSheetState extends State<_BillSearchSheet> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initialQuery);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: _T.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.only(
+        left: 20, right: 20, top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 28,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: _T.line2,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Text('Search Bills',
+              style: TextStyle(
+                  color: _T.text,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          const Text(
+            'Filter by bill number, date (e.g. 12 Jun 25), or amount',
+            style: TextStyle(color: _T.muted2, fontSize: 11),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => Navigator.pop(context),
+            style: const TextStyle(color: _T.text, fontSize: 14),
+            cursorColor: _T.accent2,
+            decoration: InputDecoration(
+              hintText: 'Type to filter bills...',
+              hintStyle: const TextStyle(color: _T.muted, fontSize: 13),
+              prefixIcon: const Icon(Icons.search_rounded,
+                  color: _T.muted2, size: 18),
+              suffixIcon: _ctrl.text.isNotEmpty
+                  ? GestureDetector(
+                      onTap: () {
+                        _ctrl.clear();
+                        widget.onChanged('');
+                        setState(() {});
+                      },
+                      child: const Icon(Icons.close_rounded,
+                          color: _T.muted2, size: 16),
+                    )
+                  : null,
+              filled: true,
+              fillColor: _T.panel,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: _T.line2),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: _T.line2),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: _T.accent, width: 1.5),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 12),
+            ),
+            onChanged: (v) {
+              widget.onChanged(v);
+              setState(() {});
+            },
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -141,7 +141,7 @@ class _MainSheet extends StatelessWidget {
             trailing: const _ChevronIcon(),
           ).animate().fadeIn(delay: 140.ms, duration: 220.ms).slideX(
               begin: 0.04, end: 0, curve: Curves.easeOut),
-          // ─── Sales tile (NEW) ───────────────────────────────────────
+          // ─── Sales tile ─────────────────────────────────────────────
           const SizedBox(height: 8),
           _SettingsTile(
             icon: Icons.receipt_long_rounded,
@@ -372,35 +372,86 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
       final cashbookId = ref.read(currentCashbookIdProvider);
       if (cashbookId == null) throw Exception('No active cashbook.');
 
-      
-      var imported = 0;
-       
+      final db = FirebaseFirestore.instance;
 
-final db = FirebaseFirestore.instance;
-for (final tx in backup.transactions) {
-  await db
-      .collection('cashbooks')
-      .doc(cashbookId)
-      .collection('transactions')
-      .doc(tx.transactionId)
-      .set({
-    'cashbookId':   cashbookId,
-    'createdBy':    tx.createdBy,
-    'creatorName':  tx.creatorName,
-    'createdAt':    Timestamp.fromDate(tx.createdAt),
-    'amount':       tx.amount,
-    'type':         tx.type,
-    'category':     tx.category,
-    'description':  tx.description,
-    'isImport':     true,   // ← tells Cloud Function to stay silent
-  });
-  imported++;
-}
+      // ── 1. Restore transactions ──────────────────────────────────────
+      var txImported = 0;
+      for (final tx in backup.transactions) {
+        await db
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .collection('transactions')
+            .doc(tx.transactionId)
+            .set({
+          'transactionId': tx.transactionId,
+          'cashbookId':    cashbookId,
+          'createdBy':     tx.createdBy,
+          'creatorName':   tx.creatorName,
+          'createdAt':     Timestamp.fromDate(tx.createdAt),
+          'amount':        tx.amount,
+          'type':          tx.type,
+          'category':      tx.category,
+          'description':   tx.description,
+          'isImport':      true,
+        });
+        txImported++;
+      }
+
+      // ── 2. Restore sale bills ────────────────────────────────────────
+      var billsImported = 0;
+      for (final bill in backup.saleBills) {
+        if (bill.saleBillId.isEmpty) continue;
+        await db
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .collection('sale_bills')
+            .doc(bill.saleBillId)
+            .set({
+          'saleBillId':        bill.saleBillId,
+          'partyName':         bill.partyName,
+          'billNumber':        bill.billNumber,
+          'billTotal':         bill.billTotal,
+          'billDate':          Timestamp.fromDate(bill.billDate),
+          'billNote':          bill.billNote,
+          'billCreatedAt':     Timestamp.fromDate(bill.billCreatedAt),
+          'billCreatedBy':     bill.billCreatedBy,
+          'billCreatedByName': bill.billCreatedByName,
+          'billStatus':        bill.billStatus,
+          'isImport':          true,
+        });
+        billsImported++;
+      }
+
+      // ── 3. Restore parties (merge so existing newer data is kept) ────
+      var partiesImported = 0;
+      for (final party in backup.parties) {
+        if (party.partyId.isEmpty) continue;
+        await db
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .collection('parties')
+            .doc(party.partyId)
+            .set({
+          'partyName':      party.partyName,
+          'openingBalance': party.openingBalance,
+          'description':    party.description,
+          'place':          party.place,
+          'updatedAt':      FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        partiesImported++;
+      }
 
       if (mounted) {
         Navigator.pop(context);
+        final parts = <String>[
+          '$txImported transaction${txImported == 1 ? '' : 's'}',
+          if (billsImported > 0)
+            '$billsImported bill${billsImported == 1 ? '' : 's'}',
+          if (partiesImported > 0)
+            '$partiesImported part${partiesImported == 1 ? 'y' : 'ies'}',
+        ];
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('✓ Imported $imported transactions successfully.'),
+          content: Text('✓ Imported ${parts.join(', ')} successfully.'),
           backgroundColor: AppColors.income,
           behavior: SnackBarBehavior.floating,
           shape:
@@ -436,12 +487,12 @@ for (final tx in backup.transactions) {
             backgroundColor: const Color(0xFF161922),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20)),
-            title: const Text('Import Transactions',
+            title: const Text('Import Backup',
                 style: TextStyle(
                     color: Color(0xFFE5E7EB), fontWeight: FontWeight.w700)),
             content: const Text(
-              'This will ADD the transactions from the backup file to your current cashbook. '
-              'Existing transactions will not be removed.',
+              'This will ADD transactions, sale bills, and parties from the backup '
+              'file to your current cashbook. Existing data will not be removed.',
               style: TextStyle(color: Color(0xFF9CA3AF), height: 1.5),
             ),
             actions: [
@@ -483,9 +534,11 @@ for (final tx in backup.transactions) {
                 _previewRow('From cashbook', backup.cashbookName),
                 _previewRow('Backed up', fmt.format(backup.exportedAt)),
                 _previewRow('Transactions', '${backup.transactions.length}'),
+                _previewRow('Sale bills', '${backup.saleBills.length}'),
+                _previewRow('Parties', '${backup.parties.length}'),
                 const SizedBox(height: 12),
                 const Text(
-                  'These transactions will be added to your current cashbook.',
+                  'All data above will be added to your current cashbook.',
                   style: TextStyle(
                       color: Color(0xFF6B7280), fontSize: 12, height: 1.5),
                 ),
@@ -542,8 +595,8 @@ for (final tx in backup.transactions) {
           const _InfoBanner(
             icon: Icons.warning_amber_rounded,
             text:
-                'Import adds transactions from a .synccash backup file to your current cashbook. '
-                'Existing data is NOT deleted.',
+                'Import adds transactions, sale bills, and parties from a .synccash '
+                'backup file to your current cashbook. Existing data is NOT deleted.',
             color: Color(0xFFF59E0B),
           ),
           const SizedBox(height: 20),
@@ -618,6 +671,7 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
       final cashbook = ref.read(cashbookStreamProvider).asData?.value;
       if (cashbook == null) throw Exception('Could not load cashbook data.');
 
+      // ── Transactions (with date + type filters) ──────────────────────
       final allTx =
           ref.read(allTransactionsStreamProvider(cashbookId)).asData?.value ?? [];
       final startDate = _filter.startDate;
@@ -626,19 +680,67 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
           : allTx.where((tx) => !tx.createdAt.isBefore(startDate)).toList();
       final transactions = _typeFilter.apply(dateFiltered);
 
+      // ── Sale bills (always full — date filter doesn't apply to bills) ─
+      final db = FirebaseFirestore.instance;
+      final billsSnap = await db
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('sale_bills')
+          .get();
+      final saleBills = billsSnap.docs.map((doc) {
+        final d = doc.data();
+        return SaleBillBackup(
+          saleBillId:        d['saleBillId']        as String?  ?? doc.id,
+          partyName:         d['partyName']          as String?  ?? '',
+          billNumber:        d['billNumber']          as String?  ?? '',
+          billTotal:         (d['billTotal']  as num?)?.toDouble() ?? 0.0,
+          billDate:          (d['billDate']   as Timestamp?)?.toDate() ??
+                             DateTime.now(),
+          billNote:          d['billNote']            as String?,
+          billCreatedAt:     (d['billCreatedAt'] as Timestamp?)?.toDate() ??
+                             DateTime.now(),
+          billCreatedBy:     d['billCreatedBy']      as String?  ?? '',
+          billCreatedByName: d['billCreatedByName']  as String?  ?? '',
+          billStatus:        d['billStatus']          as String?  ?? 'pending',
+        );
+      }).toList();
+
+      // ── Parties (always full) ─────────────────────────────────────────
+      final partiesSnap = await db
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('parties')
+          .get();
+      final parties = partiesSnap.docs.map((doc) {
+        final d = doc.data();
+        return PartyBackup(
+          partyId:        doc.id,
+          partyName:      d['partyName']      as String? ?? '',
+          openingBalance: (d['openingBalance'] as num?)?.toDouble() ?? 0.0,
+          description:    d['description']    as String? ?? '',
+          place:          d['place']          as String? ?? '',
+        );
+      }).toList();
+
       await BackupService.createBackup(
-        context: context,
-        cashbook: cashbook,
+        context:      context,
+        cashbook:     cashbook,
         transactions: transactions,
+        saleBills:    saleBills,
+        parties:      parties,
       );
 
-      // Record the backup time so the frequency scheduler resets.
       await BackupFrequencyService.recordBackup();
 
       if (mounted) {
+        final parts = <String>[
+          '${transactions.length} transaction${transactions.length == 1 ? '' : 's'}',
+          '${saleBills.length} bill${saleBills.length == 1 ? '' : 's'}',
+          '${parties.length} part${parties.length == 1 ? 'y' : 'ies'}',
+        ];
         final msg = auto
-            ? 'Auto-backup created — ${transactions.length} transactions saved.'
-            : 'Backup created — ${transactions.length} transactions saved.';
+            ? 'Auto-backup created — ${parts.join(', ')} saved.'
+            : 'Backup created — ${parts.join(', ')} saved.';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(msg),
           backgroundColor: AppColors.income,
@@ -685,8 +787,8 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
           const _InfoBanner(
             icon: Icons.shield_outlined,
             text:
-                'Creates a .synccash backup file of your transactions. '
-                'Use the date range to back up a specific period.',
+                'Creates a .synccash backup of your transactions, sale bills, and '
+                'party opening balances. Use the date range to filter transactions only.',
             color: Color(0xFF10B981),
           ),
           const SizedBox(height: 20),
@@ -711,7 +813,18 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
             label: 'Transactions to back up',
             value: '$count',
           ).animate().fadeIn(delay: 60.ms, duration: 220.ms),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
+          if (cashbookId != null) ...[
+            _SaleBillsStatTile(cashbookId: cashbookId)
+                .animate()
+                .fadeIn(delay: 80.ms, duration: 220.ms),
+            const SizedBox(height: 8),
+            _PartiesStatTile(cashbookId: cashbookId)
+                .animate()
+                .fadeIn(delay: 100.ms, duration: 220.ms),
+            const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 8),
           const _SectionLabel('ACTION'),
           const SizedBox(height: 8),
           _ActionTileButton(
@@ -721,7 +834,7 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
             subtitle: 'Saves a .synccash file — open share sheet to save it',
             loading: _busy,
             onTap: _doBackup,
-          ).animate().fadeIn(delay: 100.ms, duration: 220.ms),
+          ).animate().fadeIn(delay: 120.ms, duration: 220.ms),
           const SizedBox(height: 16),
           const _SectionLabel('SCHEDULE'),
           const SizedBox(height: 8),
@@ -737,6 +850,58 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
           const SizedBox(height: 24),
         ],
       ),
+    );
+  }
+}
+
+// ── Live stat tiles for backup page ──────────────────────────────────────────
+
+class _SaleBillsStatTile extends StatelessWidget {
+  final String cashbookId;
+  const _SaleBillsStatTile({required this.cashbookId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('sale_bills')
+          .snapshots()
+          .map((s) => s.size),
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        return _StatTile(
+          icon: Icons.receipt_rounded,
+          label: 'Sale bills (always full backup)',
+          value: '$count',
+        );
+      },
+    );
+  }
+}
+
+class _PartiesStatTile extends StatelessWidget {
+  final String cashbookId;
+  const _PartiesStatTile({required this.cashbookId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('parties')
+          .snapshots()
+          .map((s) => s.size),
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        return _StatTile(
+          icon: Icons.people_rounded,
+          label: 'Parties / opening balances (always full backup)',
+          value: '$count',
+        );
+      },
     );
   }
 }
@@ -1358,14 +1523,12 @@ enum _DataFilter {
     }
   }
 
-  /// Returns the earliest [DateTime] to include, or null for no restriction.
   DateTime? get startDate {
     final now = DateTime.now();
     switch (this) {
       case _DataFilter.today:
         return DateTime(now.year, now.month, now.day);
       case _DataFilter.week:
-        // Start of the current Monday
         return DateTime(now.year, now.month, now.day - (now.weekday - 1));
       case _DataFilter.month:
         return DateTime(now.year, now.month, 1);
@@ -1431,7 +1594,7 @@ class _FilterChips extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Type filter (Income / Expense / Retail / Wholesale) — shared by Backup & Export
+//  Type filter — shared by Backup & Export
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum _TypeFilter {

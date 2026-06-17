@@ -546,7 +546,9 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
         ? 'Retail'
         : raw.toLowerCase() == 'upi'
             ? 'UPI'
-            : raw[0].toUpperCase() + raw.substring(1).toLowerCase();
+            : raw.toLowerCase() == 'cb'
+                ? 'CB'
+                : raw[0].toUpperCase() + raw.substring(1).toLowerCase();
 
     // ADDED: rebuild when description changes so BillNoDropdownField updates
     _descCtrl.addListener(_onDescChanged);
@@ -923,7 +925,7 @@ class _SheetCategoryToggle extends StatelessWidget {
         border: Border.all(color: const Color(0xFF1F2937)),
       ),
       child: Row(
-        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI'].map((cat) {
+        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI', if (showBank) 'CB'].map((cat) {
           final active = selected == cat;
           return Expanded(
             child: GestureDetector(
