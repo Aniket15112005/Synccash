@@ -235,7 +235,10 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
                     bills:     grouped[names[i]]!,
                     onTap: () => Navigator.of(context).push(
                       _slideRoute(
-                          PartyDetailScreen(partyName: dispName[names[i]]!)),
+                          PartyDetailScreen(
+                            partyName:    dispName[names[i]]!,
+                            initialBills: grouped[names[i]]!,
+                          )),
                     ),
                   ),
                 ),

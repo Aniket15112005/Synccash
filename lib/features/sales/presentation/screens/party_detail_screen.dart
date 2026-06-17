@@ -229,8 +229,13 @@ class AllBillsScreen extends ConsumerWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class PartyDetailScreen extends ConsumerStatefulWidget {
-  final String partyName;
-  const PartyDetailScreen({super.key, required this.partyName});
+  final String               partyName;
+  final List<SaleBillEntity> initialBills;
+  const PartyDetailScreen({
+    super.key,
+    required this.partyName,
+    this.initialBills = const [],
+  });
 
   @override
   ConsumerState<PartyDetailScreen> createState() => _PartyDetailState();
@@ -253,6 +258,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _bills = List<SaleBillEntity>.from(widget.initialBills);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       // Delay past the route-transition duration (260 ms forward / 220 ms reverse)
