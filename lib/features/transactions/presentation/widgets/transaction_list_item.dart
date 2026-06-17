@@ -544,7 +544,9 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
     final raw = widget.transaction.category;
     _category = raw.isEmpty
         ? 'Retail'
-        : raw[0].toUpperCase() + raw.substring(1).toLowerCase();
+        : raw.toLowerCase() == 'upi'
+            ? 'UPI'
+            : raw[0].toUpperCase() + raw.substring(1).toLowerCase();
 
     // ADDED: rebuild when description changes so BillNoDropdownField updates
     _descCtrl.addListener(_onDescChanged);
@@ -746,6 +748,7 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
             const SizedBox(height: 8),
             _SheetCategoryToggle(
               selected: _category,
+              showBank: kIsWeb || defaultTargetPlatform != TargetPlatform.android,
               onSwitch: (cat) => setState(() {
                 _category = cat;
                 // ADDED: clear bill when switching away from Wholesale
@@ -905,9 +908,10 @@ class _SheetLabel extends StatelessWidget {
 
 class _SheetCategoryToggle extends StatelessWidget {
   const _SheetCategoryToggle(
-      {required this.selected, required this.onSwitch});
+      {required this.selected, required this.onSwitch, this.showBank = true});
   final String selected;
   final void Function(String) onSwitch;
+  final bool showBank;
 
   @override
   Widget build(BuildContext context) {
@@ -919,7 +923,7 @@ class _SheetCategoryToggle extends StatelessWidget {
         border: Border.all(color: const Color(0xFF1F2937)),
       ),
       child: Row(
-        children: ['Retail', 'Wholesale'].map((cat) {
+        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI'].map((cat) {
           final active = selected == cat;
           return Expanded(
             child: GestureDetector(

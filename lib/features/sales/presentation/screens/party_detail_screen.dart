@@ -48,10 +48,15 @@ class _PaymentRecord {
   final String?  linkedBillId;
   final double   amount;
   final DateTime createdAt;
+  /// True for transactions explicitly stamped with isObPayment=true in
+  /// Firestore (written by recordObPaymentWithOverflow). False for all
+  /// bill-linked payments and old-style description-matched unlinked payments.
+  final bool     isOb;
   const _PaymentRecord({
     required this.linkedBillId,
     required this.amount,
     required this.createdAt,
+    this.isOb = false,
   });
 }
 
@@ -274,6 +279,9 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
   // Raw income-tx snapshots so we can recompute _received/_payments
   // whenever _bills changes (the two streams fire independently).
   List<Map<String, dynamic>> _rawTxs   = [];
+  // Amount paid toward opening balance via isObPayment=true transactions.
+  // Tracked separately so it never leaks into bill received calculations.
+  double                     _obPaid   = 0.0;
 
   @override
   void initState() {
@@ -385,12 +393,15 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
 
     final map      = <String, double>{};
     final payments = <_PaymentRecord>[];
+    double obPaid  = 0.0;
 
     for (final raw in _rawTxs) {
-      final linkedId  = raw['linkedSaleBillId'] as String?;
-      final amount    = (raw['amount'] as num?)?.toDouble() ?? 0.0;
-      final desc      = (raw['description'] as String? ?? '').toLowerCase();
-      final createdAt = (raw['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final linkedId    = raw['linkedSaleBillId'] as String?;
+      final amount      = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+      final desc        = (raw['description'] as String? ?? '').toLowerCase();
+      final createdAt   = (raw['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final isObPayment = raw['isObPayment'] as bool? ?? false;
+      final obPartyName = (raw['obPartyName'] as String? ?? '').toLowerCase().trim();
 
       if (linkedId != null && linkedId.isNotEmpty) {
         // Only count this payment if the bill belongs to THIS party.
@@ -399,7 +410,18 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
           payments.add(_PaymentRecord(
               linkedBillId: linkedId, amount: amount, createdAt: createdAt));
         }
+      } else if (isObPayment &&
+          (obPartyName == partyLow ||
+           (obPartyName.isEmpty && desc.contains(partyLow)))) {
+        // Explicitly flagged OB payment — track in _obPaid, NOT in _unlinked.
+        // This prevents the amount from leaking into _recForBill() for
+        // single-bill parties and incorrectly marking bills as paid/complete.
+        obPaid += amount;
+        payments.add(_PaymentRecord(
+            linkedBillId: null, amount: amount, createdAt: createdAt, isOb: true));
       } else if (desc.contains(partyLow)) {
+        // Old-style description-matched unlinked payment (pre-isObPayment era).
+        // For single-bill parties these still count toward the bill (unchanged).
         map['_unlinked'] = (map['_unlinked'] ?? 0.0) + amount;
         payments.add(_PaymentRecord(
             linkedBillId: null, amount: amount, createdAt: createdAt));
@@ -408,6 +430,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
 
     _received = map;
     _payments = payments;
+    _obPaid   = obPaid;
   }
 
   @override
@@ -430,7 +453,8 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
   // Always includes unlinked (OB / description-matched) payments — used for closing balance
   double get _totalAllReceived =>
       _bills.fold(0.0, (s, b) => s + (_received[b.saleBillId] ?? 0.0))
-      + (_received['_unlinked'] ?? 0.0);
+      + (_received['_unlinked'] ?? 0.0)
+      + _obPaid;  // new-style isObPayment=true transactions
   double get _totalDue =>
       (_totalBilled - _totalReceived).clamp(0.0, double.infinity);
   double get _pct =>
@@ -1569,7 +1593,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
             SliverToBoxAdapter(
               child: _OBRow(
                 ob:       ob,
-                obPaid:   _received['_unlinked'] ?? 0.0,
+                obPaid:   (_received['_unlinked'] ?? 0.0) + _obPaid,
                 fmt:      fmt,
                 onDelete: _deleteOB,
               ),

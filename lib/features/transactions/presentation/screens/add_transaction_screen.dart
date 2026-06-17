@@ -2,6 +2,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -298,6 +299,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.existingTransaction != null;
+    final bool showBank = kIsWeb || defaultTargetPlatform != TargetPlatform.android;
 
     return Scaffold(
       backgroundColor: _C.bg,
@@ -338,7 +340,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                           const SizedBox(height: 24),
                           const _FieldLabel('Category'),
                           const SizedBox(height: 8),
-                          if (widget.categoryLocked)
+                          if (widget.categoryLocked && !isEditing)
                             Builder(builder: (context) {
                               final isUpi = _category == 'UPI';
                               return Container(
@@ -384,7 +386,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               ).animate().fadeIn(delay: 160.ms, duration: 280.ms);
                             })
                           else
-                            _CategoryToggle(selected: _category, onSwitch: _switchCategory)
+                            _CategoryToggle(selected: _category, onSwitch: _switchCategory, showBank: showBank)
                                 .animate()
                                 .fadeIn(delay: 160.ms, duration: 280.ms)
                                 .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
@@ -836,7 +838,8 @@ class _AmountFieldState extends State<_AmountField> {
 class _CategoryToggle extends StatelessWidget {
   final String selected;
   final void Function(String) onSwitch;
-  const _CategoryToggle({required this.selected, required this.onSwitch});
+  final bool showBank;
+  const _CategoryToggle({required this.selected, required this.onSwitch, this.showBank = true});
 
   @override
   Widget build(BuildContext context) {
@@ -848,7 +851,7 @@ class _CategoryToggle extends StatelessWidget {
         border: Border.all(color: _C.border),
       ),
       child: Row(
-        children: ['Retail', 'Wholesale', 'Bank', 'UPI'].map((cat) {
+        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI'].map((cat) {
           final active = selected == cat;
           return Expanded(
             child: GestureDetector(
