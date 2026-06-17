@@ -1614,7 +1614,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     // ════════════════════════════════════════════════════════════════════════
     drawRow('TOTAL AMOUNT', '₹${fmt.format(totalAmount)}', curY);
     curY += rowH;
-    drawRow('AMOUNT PAID', '₹\${fmt.format(amountPaid)}', curY,
+    drawRow('AMOUNT PAID', '₹${fmt.format(amountPaid)}', curY,
         valueColor: const Color(0xFF4ADE80));
     curY += rowH;
     drawRow(
@@ -3724,7 +3724,7 @@ class _TransactionPickerSheet extends StatelessWidget {
                               fontWeight: FontWeight.w800,
                               letterSpacing: 1.4)),
                       Text(
-                          '${grouped.length} payment\${grouped.length != 1 ? "s" : ""}',
+                          '${grouped.length} payment${grouped.length != 1 ? "s" : ""}',
                           style: const TextStyle(
                               color: _T.muted2, fontSize: 11)),
                     ],

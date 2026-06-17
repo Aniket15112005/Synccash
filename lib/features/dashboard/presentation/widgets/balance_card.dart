@@ -11,6 +11,9 @@ class BalanceCard extends StatefulWidget {
   final double? incomeOverride;
   final double? expenseOverride;
   final double? balanceOverride;
+  // Optional label shown centred at the top of the card (e.g. 'CASH').
+  // When null the old "● LIVE" text appears in that space instead.
+  final String? categoryLabel;
 
   const BalanceCard({
     super.key,
@@ -18,6 +21,7 @@ class BalanceCard extends StatefulWidget {
     this.incomeOverride,
     this.expenseOverride,
     this.balanceOverride,
+    this.categoryLabel,
   });
   @override
   State<BalanceCard> createState() => _BalanceCardState();
@@ -116,23 +120,32 @@ class _BalanceCardState extends State<BalanceCard>
                 mainAxisSize: MainAxisSize.min,
                 children: [
 
+                  // ── Header row: pulse dot | centred label | invite badge ──
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Row(
-                        children: [
-                          _PulseDot(color: AppColors.income),
-                          SizedBox(width: 7),
-                          Text(
-                            'LIVE',
-                            style: TextStyle(
-                              color: Colors.white38,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.6,
-                            ),
-                          ),
-                        ],
+                      const _PulseDot(color: AppColors.income),
+                      Expanded(
+                        child: Center(
+                          child: widget.categoryLabel != null
+                              ? Text(
+                                  widget.categoryLabel!,
+                                  style: const TextStyle(
+                                    color: Color(0xFF60A5FA),
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 2.5,
+                                  ),
+                                )
+                              : const Text(
+                                  'LIVE',
+                                  style: TextStyle(
+                                    color: Colors.white38,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 1.6,
+                                  ),
+                                ),
+                        ),
                       ),
                       _InviteCodeBadge(code: cashbook.inviteCode),
                     ],

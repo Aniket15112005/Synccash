@@ -249,7 +249,41 @@ class _GreetingHeader extends ConsumerWidget {
               ],
             ),
           ),
-                   if (kIsWeb || (!kIsWeb && Platform.isIOS)) ...[
+          // ── UPI pill — visible to ALL users (Android + iOS/PWA) ─────────
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const UpiDashboardScreen()),
+              );
+            },
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A0E35),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF3D1D8A)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.account_balance_wallet_rounded,
+                      size: 14, color: Color(0xFFA78BFA)),
+                  SizedBox(width: 6),
+                  Text('UPI',
+                      style: TextStyle(
+                          color: Color(0xFFA78BFA),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.2)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // ── Bank + CB pills — iOS/PWA only ────────────────────────────
+          if (kIsWeb || (!kIsWeb && Platform.isIOS)) ...[
             GestureDetector(
               onTap: () {
                 HapticFeedback.selectionClick();
@@ -271,39 +305,6 @@ class _GreetingHeader extends ConsumerWidget {
                     Icon(Icons.account_balance_rounded, size: 14, color: Color(0xFF34D399)),
                     SizedBox(width: 6),
                     Text('Bank', style: TextStyle(color: Color(0xFF34D399), fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: -0.2)),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            // ── UPI pill ─────────────────────────────────────────────────
-            GestureDetector(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const UpiDashboardScreen()),
-                );
-              },
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A0E35),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF3D1D8A)),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.account_balance_wallet_rounded,
-                        size: 14, color: Color(0xFFA78BFA)),
-                    SizedBox(width: 6),
-                    Text('UPI',
-                        style: TextStyle(
-                            color: Color(0xFFA78BFA),
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: -0.2)),
                   ],
                 ),
               ),
@@ -429,6 +430,7 @@ class _BalanceCardSection extends ConsumerWidget {
               incomeOverride:  adjIncome,
               expenseOverride: adjExpense,
               balanceOverride: adjBalance,
+              categoryLabel:   'RETAIL',
             ),
           ),
         );

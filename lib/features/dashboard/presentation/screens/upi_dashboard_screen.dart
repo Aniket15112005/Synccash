@@ -471,18 +471,21 @@ class _UpiBalanceCardState extends State<_UpiBalanceCard> {
                 children: [
                   // ── Header row ────────────────────────────────────────
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Row(children: [
-                        _UpiPulseDot(),
-                        SizedBox(width: 7),
-                        Text('UPI',
+                      const _UpiPulseDot(),
+                      const Expanded(
+                        child: Center(
+                          child: Text(
+                            'UPI',
                             style: TextStyle(
-                                color: _kUpiPrimary,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.6)),
-                      ]),
+                              color: _kUpiPrimary,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 2.5,
+                            ),
+                          ),
+                        ),
+                      ),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),

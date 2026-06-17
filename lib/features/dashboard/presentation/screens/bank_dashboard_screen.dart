@@ -462,24 +462,26 @@ class _BankBalanceCardState extends State<_BankBalanceCard> {
                 children: [
                   // ── Header row ────────────────────────────────────────
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Row(children: [
-                        _BankPulseDot(),
-                        SizedBox(width: 7),
-                        Text('BANK',
+                      const _BankPulseDot(),
+                      const Expanded(
+                        child: Center(
+                          child: Text(
+                            'BANK',
                             style: TextStyle(
-                                color: Color(0xFF34D399),
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.6)),
-                      ]),
+                              color: Color(0xFF34D399),
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 2.5,
+                            ),
+                          ),
+                        ),
+                      ),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color:
-                              const Color(0xFF34D399).withValues(alpha: 0.10),
+                          color: const Color(0xFF34D399).withValues(alpha: 0.10),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                               color: const Color(0xFF34D399)

@@ -471,18 +471,21 @@ class _CbBalanceCardState extends State<_CbBalanceCard> {
                 children: [
                   // ── Header row ────────────────────────────────────────
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Row(children: [
-                        _CbPulseDot(),
-                        SizedBox(width: 7),
-                        Text('CB',
+                      const _CbPulseDot(),
+                      const Expanded(
+                        child: Center(
+                          child: Text(
+                            'CASH-BANK',
                             style: TextStyle(
-                                color: _kCbPrimary,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.6)),
-                      ]),
+                              color: _kCbPrimary,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 2.5,
+                            ),
+                          ),
+                        ),
+                      ),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),
