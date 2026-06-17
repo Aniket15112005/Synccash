@@ -22,6 +22,7 @@ import 'package:flutter/foundation.dart';
 import 'package:synccash/features/settings/presentation/screens/widgets/recycle_bin_sheet.dart';
 import 'package:synccash/features/sales/presentation/sales_routes.dart';
 import 'package:synccash/features/sales/presentation/screens/sales_screen.dart';
+import 'package:synccash/features/sales/presentation/screens/billport_screen.dart';
 
 class SettingsSheet extends ConsumerStatefulWidget {
   const SettingsSheet({super.key});
@@ -158,7 +159,24 @@ class _MainSheet extends StatelessWidget {
             trailing: const _ChevronIcon(),
           ).animate().fadeIn(delay: 175.ms, duration: 220.ms).slideX(
               begin: 0.04, end: 0, curve: Curves.easeOut),
-          // ─── end Sales tile ─────────────────────────────────────────
+          // ─── Billport tile ──────────────────────────────────────────
+          const SizedBox(height: 8),
+          _SettingsTile(
+            icon: Icons.import_export_rounded,
+            iconColor: const Color(0xFFF59E0B),
+            title: 'Billport',
+            subtitle: 'Export bills of selected parties to PDF or Excel',
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                salesRoute(const BillportScreen()),
+              );
+            },
+            trailing: const _ChevronIcon(),
+          ).animate().fadeIn(delay: 210.ms, duration: 220.ms).slideX(
+              begin: 0.04, end: 0, curve: Curves.easeOut),
+          // ─── end Billport tile ──────────────────────────────────────
           if (kIsWeb) ...[
             const SizedBox(height: 8),
             _SettingsTile(
@@ -168,7 +186,7 @@ class _MainSheet extends StatelessWidget {
               subtitle: 'Restore or permanently remove deleted entries',
               onTap: () => onNavigate(_SettingsPage.recycleBin),
               trailing: const _ChevronIcon(),
-            ).animate().fadeIn(delay: 180.ms, duration: 220.ms).slideX(
+            ).animate().fadeIn(delay: 245.ms, duration: 220.ms).slideX(
                 begin: 0.04, end: 0, curve: Curves.easeOut),
             const SizedBox(height: 8),
             _SettingsTile(
@@ -186,7 +204,7 @@ class _MainSheet extends StatelessWidget {
                 );
               },
               trailing: const _ChevronIcon(),
-            ).animate().fadeIn(delay: 220.ms, duration: 220.ms).slideX(
+            ).animate().fadeIn(delay: 280.ms, duration: 220.ms).slideX(
                 begin: 0.04, end: 0, curve: Curves.easeOut),
           ],
           const SizedBox(height: 24),

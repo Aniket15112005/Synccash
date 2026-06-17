@@ -691,7 +691,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     HapticFeedback.mediumImpact();
 
     // ── TO UPDATE YOUR COMPANY NAME: change the string below ─────────────────
-    const companyName = 'Neelkant Garments';
+    const companyName = 'NEELKANTH GARMENTS';
     // ─────────────────────────────────────────────────────────────────────────
 
     final fmt     = NumberFormat('#,##,##0.##');
@@ -1441,7 +1441,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     if (!mounted) return;
     HapticFeedback.mediumImpact();
 
-    const companyName = 'Neelkant Garments';
+    const companyName = 'NEELKANTH GARMENTS';
     final fmt     = NumberFormat('#,##,##0.##');
     final dateFmt = DateFormat('dd MMM yyyy, hh:mm a');
 
@@ -1463,6 +1463,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     final payDate     = dateFmt.format(payment.createdAt);
 
     // ── Canvas layout constants ────────────────────────────────────────────
+    const double scale    = 3.0;   // 3× resolution — crisp on high-DPI screens
     const double cW       = 900;
     const double padH     = 48.0;   // horizontal padding
     const double headerH  = 110.0;
@@ -1487,6 +1488,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
 
     final recorder = ui.PictureRecorder();
     final canvas   = Canvas(recorder);
+    canvas.scale(scale, scale);            // scale up before any drawing
 
     // ── Overall background (app-matching dark) ─────────────────────────────
     canvas.drawRect(
@@ -1506,7 +1508,8 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
       Paint()
         ..color = const Color(0xFF2C2D32)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
+        ..strokeWidth = 1
+        ..isAntiAlias = true,
     );
 
     // ── Helper: paragraph ─────────────────────────────────────────────────
@@ -1528,7 +1531,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         ..pushStyle(ui.TextStyle(
           color:      color,
           fontSize:   fontSize,
-          fontWeight: bold ? ui.FontWeight.w700 : ui.FontWeight.w400,
+          fontWeight: ui.FontWeight.w700,
         ))
         ..addText(text);
       final para = pb.build()..layout(ui.ParagraphConstraints(width: maxWidth));
@@ -1552,9 +1555,9 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     const double innerW     = cW - cardMargin * 2 - padH * 2;
 
     void drawRow(String label, String value, double y,
-        {Color valueColor = const Color(0xFFF1F2F5)}) {
+        {Color valueColor = const Color(0xFFFFFFFF)}) {
       drawPara(label, innerLeft, y + 16,
-          fontSize: 11, color: const Color(0xFF565860));
+          fontSize: 11, color: const Color(0xFFFFFFFF));
       drawPara(value, innerLeft, y + 16,
           fontSize: 15,
           color: valueColor,
@@ -1582,7 +1585,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
       innerLeft,
       hBase + 34,
       fontSize: 11,
-      color: const Color(0xFF565860),
+      color: const Color(0xFFFFFFFF),
       align: ui.TextAlign.center,
       maxWidth: innerW,
     );
@@ -1611,16 +1614,14 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     // ════════════════════════════════════════════════════════════════════════
     drawRow('TOTAL AMOUNT', '₹${fmt.format(totalAmount)}', curY);
     curY += rowH;
-    drawRow('AMOUNT PAID', '₹${fmt.format(amountPaid)}', curY,
+    drawRow('AMOUNT PAID', '₹\${fmt.format(amountPaid)}', curY,
         valueColor: const Color(0xFF4ADE80));
     curY += rowH;
     drawRow(
       'BALANCE DUE',
       balance > 0 ? '₹${fmt.format(balance)}' : 'Settled',
       curY,
-      valueColor: balance > 0
-          ? const Color(0xFFFBBF24)
-          : const Color(0xFF4ADE80),
+      valueColor: const Color(0xFFFBBF24),
     );
     curY += rowH;
 
@@ -1644,7 +1645,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
 
     // ── Render to PNG ──────────────────────────────────────────────────────
     final picture  = recorder.endRecording();
-    final uiImage  = await picture.toImage(cW.toInt(), cH.toInt());
+    final uiImage  = await picture.toImage((cW * scale).toInt(), (cH * scale).toInt());
     final byteData = await uiImage.toByteData(format: ui.ImageByteFormat.png);
     if (byteData == null || !mounted) return;
     final bytes = byteData.buffer.asUint8List();
@@ -3723,7 +3724,7 @@ class _TransactionPickerSheet extends StatelessWidget {
                               fontWeight: FontWeight.w800,
                               letterSpacing: 1.4)),
                       Text(
-                          '\${grouped.length} payment\${grouped.length != 1 ? "s" : ""}',
+                          '${grouped.length} payment\${grouped.length != 1 ? "s" : ""}',
                           style: const TextStyle(
                               color: _T.muted2, fontSize: 11)),
                     ],

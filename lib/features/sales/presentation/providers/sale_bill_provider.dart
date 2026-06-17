@@ -6,6 +6,7 @@ import 'package:synccash/features/transactions/data/services/recycle_bin_service
 import '../../data/models/sale_bill_model.dart';
 import '../../data/repositories/sale_bill_repository_impl.dart';
 import '../../domain/entities/sale_bill_entity.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 // ── internal repo provider ───────────────────────────────────────────────────
 
@@ -215,24 +216,57 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
     });
   }
 
-  /// Soft-deletes a sale bill: moves it to the recycle bin (deleted_bills
-  /// collection) where it stays for 15 days before permanent removal.
+  /// Soft-deletes a sale bill: copies it to deleted_bills (recycle bin)
+  /// then removes it from sale_bills. Errors are re-thrown so the caller
+  /// can show the actual failure message instead of swallowing it.
   Future<void> deleteBill({
     required String cashbookId,
     required String billId,
   }) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      final doc = await FirebaseFirestore.instance
+    try {
+      final db        = FirebaseFirestore.instance;
+      final activeRef = db
           .collection('cashbooks')
           .doc(cashbookId)
           .collection('sale_bills')
-          .doc(billId)
-          .get();
-      if (!doc.exists) return;
-      final bill = SaleBillModel.fromFirestore(doc);
-      await RecycleBinService.softDeleteBill(bill, cashbookId);
-    });
+          .doc(billId);
+
+      final snap = await activeRef.get();
+      if (!snap.exists) {
+        state = const AsyncData(null);
+        return;
+      }
+
+      final data = Map<String, dynamic>.from(
+          snap.data() as Map<String, dynamic>);
+      final uid  = FirebaseAuth.instance.currentUser?.uid;
+
+      // Step 1: copy to recycle bin (best-effort — never blocks the deletion)
+      try {
+        await db
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .collection('deleted_bills')
+            .doc(billId)
+            .set({
+          ...data,
+          'cashbookId': cashbookId,
+          'deletedAt':  FieldValue.serverTimestamp(),
+          'deletedBy':  uid,
+        });
+      } catch (_) {
+        // Recycle bin write failed — continue to delete anyway
+      }
+
+      // Step 2: delete from active sale_bills (throws on Firestore errors)
+      await activeRef.delete();
+
+      state = const AsyncData(null);
+    } catch (e, st) {
+      state = AsyncError(e, st);
+      rethrow; // propagate so _deleteBill's catch shows the real error
+    }
   }
 
   /// Updates editable fields on a sale bill.

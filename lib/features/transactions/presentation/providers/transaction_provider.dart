@@ -342,7 +342,8 @@ final filteredUpiTransactionsProvider =
     );
   },
 );
-// ── CB (Cash) category providers ──────────────────────────────────────────────
+
+// ── CB (Cash Book) category providers ─────────────────────────────────────────
 
 class CbTypeFilterNotifier extends Notifier<String?> {
   @override
@@ -381,7 +382,7 @@ final cbTransactionsStreamProvider =
   (ref, cashbookId) {
     final repo = ref.read(transactionRepositoryProvider);
     return repo.getTransactionsStream(cashbookId, limit: 0).map(
-      (txs) => txs.where((tx) => tx.category.toLowerCase() == 'cash').toList(),
+      (txs) => txs.where((tx) => tx.category.toLowerCase() == 'cb').toList(),
     );
   },
 );
@@ -403,5 +404,37 @@ final filteredCbTransactionsProvider =
         descFilter:   descFilter,
       ),
     );
+  },
+);
+
+// ── Normal dashboard summary (excludes bank & UPI) ─────────────────────────────
+
+class DashboardSummary {
+  final double totalIncome;
+  final double totalExpense;
+  const DashboardSummary({required this.totalIncome, required this.totalExpense});
+  double get balance => totalIncome - totalExpense;
+}
+
+/// Use this provider for the NORMAL dashboard balance card.
+/// It excludes bank and UPI transactions so those categories only affect
+/// their own dashboards and balance cards, not the cashbook balance card.
+final normalDashboardSummaryProvider =
+    Provider.family<AsyncValue<DashboardSummary>, String>(
+  (ref, cashbookId) {
+    final async = ref.watch(allTransactionsStreamProvider(cashbookId));
+    return async.whenData((txs) {
+      final filtered = txs.where((tx) {
+        final cat = tx.category.toLowerCase();
+        return cat != 'bank' && cat != 'upi';
+      });
+      double income  = 0;
+      double expense = 0;
+      for (final tx in filtered) {
+        if (tx.type == 'income')  income  += tx.amount;
+        if (tx.type == 'expense') expense += tx.amount;
+      }
+      return DashboardSummary(totalIncome: income, totalExpense: expense);
+    });
   },
 );

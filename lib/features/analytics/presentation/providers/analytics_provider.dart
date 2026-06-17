@@ -224,12 +224,17 @@ final analyticsDataProvider =
 
         return asyncTxs.whenData((txs) {
       final start = filter.startDate;
-      final nonBank = txs
-          .where((tx) => tx.category.toLowerCase() != 'bank')
+      // Only Retail and Wholesale transactions are used in analytics.
+      // Bank, UPI, and CB categories are intentionally excluded.
+      final retailWholesale = txs
+          .where((tx) {
+            final cat = tx.category.toLowerCase();
+            return cat == 'retail' || cat == 'wholesale';
+          })
           .toList();
       final filtered = start == null
-          ? nonBank
-          : nonBank.where((tx) => !tx.createdAt.isBefore(start)).toList();
+          ? retailWholesale
+          : retailWholesale.where((tx) => !tx.createdAt.isBefore(start)).toList();
       return AnalyticsData.from(filtered);
     });
   },

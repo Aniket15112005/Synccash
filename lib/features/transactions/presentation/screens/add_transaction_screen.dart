@@ -155,10 +155,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   void _switchCategory(String cat) {
     if (_category == cat) return;
     HapticFeedback.selectionClick();
-    // ADDED: clear selected bill when switching away from Wholesale
+    // ADDED: clear selected bill when switching away from Wholesale, Bank, or UPI
     setState(() {
       _category = cat;
-      if (cat != 'Wholesale') { _selectedBill = null; _isObPayment = false; }
+      if (cat != 'Wholesale' && cat != 'Bank' && cat != 'UPI') { _selectedBill = null; _isObPayment = false; }
     });
   }
 
@@ -238,7 +238,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         // cleared the bill selection — the repository handles the Firestore
         // FieldValue.delete() for null so the old link is properly removed).
         await ref.read(transactionRepositoryProvider).updateTransaction(tx);
-      } else if (_category == 'Bank' || _category == 'UPI' || _category == 'CB') {
+      } else if (_category == 'CB') {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
       } else if (_type == 'income' && _selectedBill != null) {
         await ref.read(saleBillActionsProvider.notifier).recordPaymentWithOverflow(
@@ -263,6 +263,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdByName: tx.creatorName,
           createdAt:     tx.createdAt,
         );
+      } else if (_category == 'Bank' || _category == 'UPI') {
+        // Bank/UPI income with no bill/OB selected — plain addTransaction
+        await ref.read(transactionRepositoryProvider).addTransaction(tx);
       } else if (_type == 'income') {
         await ref.read(saleBillActionsProvider.notifier).recordObPaymentWithOverflow(
           cashbookId:    tx.cashbookId,
@@ -387,10 +390,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               .animate()
                               .fadeIn(delay: 210.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
-                          // ADDED: Bill dropdown — only visible for Wholesale income entries.
+                          // ADDED: Bill dropdown — visible for Wholesale AND Bank income entries.
                           // On edit open, shows a loading indicator while the existing bill
                           // is being fetched; once loaded _selectedBill is pre-selected.
-                          if (_category == 'Wholesale') ...[
+                          if (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI') ...[
                             if (_loadingBill)
                               Padding(
                                 padding: const EdgeInsets.only(top: 12),

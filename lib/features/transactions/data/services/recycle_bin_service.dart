@@ -290,22 +290,15 @@ class RecycleBinService {
   }
 
   // ── Stream deleted bills ──────────────────────────────────────────────────
-  // NOTE: No Firestore orderBy here. FieldValue.serverTimestamp() documents
-  // are excluded from ordered Firestore queries while their timestamp is still
-  // pending (not yet confirmed by the server). Sorting in Dart ensures newly
-  // deleted bills appear immediately without waiting for server confirmation.
 
   static Stream<List<DeletedBillEntity>> streamBills(String cashbookId) {
     return _deletedBills(cashbookId)
+        .orderBy('deletedAt', descending: true)
         .snapshots()
-        .map((snap) {
-          final list = snap.docs
-              .map((d) => DeletedBillEntity.fromFirestore(d))
-              .where((bill) => !bill.isExpired)
-              .toList()
-            ..sort((a, b) => b.deletedAt.compareTo(a.deletedAt));
-          return list;
-        });
+        .map((snap) => snap.docs
+            .map((d) => DeletedBillEntity.fromFirestore(d))
+            .where((bill) => !bill.isExpired)
+            .toList());
   }
 
   // ── Cleanup expired bills (call on recycle bin open) ─────────────────────
