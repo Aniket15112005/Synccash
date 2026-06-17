@@ -15,6 +15,10 @@ import 'package:synccash/features/transactions/presentation/widgets/transaction_
 import 'package:synccash/features/dashboard/presentation/widgets/balance_card.dart';
 import 'package:synccash/features/dashboard/presentation/widgets/synccash_filter_sheet.dart';
 import 'package:synccash/features/settings/presentation/screens/settings_screen.dart';
+import 'package:synccash/features/dashboard/presentation/screens/bank_dashboard_screen.dart';
+import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -217,31 +221,60 @@ class _GreetingHeader extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                _greeting(),
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _greeting(),
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                firstName,
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.6,
+                const SizedBox(height: 3),
+                Text(
+                  firstName,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.6,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
+                   if (kIsWeb || (!kIsWeb && Platform.isIOS)) ...[
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const BankDashboardScreen()),
+                );
+              },
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0E2A1F),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF1B4D35)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.account_balance_rounded, size: 14, color: Color(0xFF34D399)),
+                    SizedBox(width: 6),
+                    Text('Bank', style: TextStyle(color: Color(0xFF34D399), fontSize: 13, fontWeight: FontWeight.w600, letterSpacing: -0.2)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
           Row(
             children: [
               GestureDetector(
@@ -294,11 +327,35 @@ class _BalanceCardSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cashbookAsync = ref.watch(cashbookStreamProvider);
+    final cashbookId    = ref.watch(currentCashbookIdProvider);
+    final bankAsync     = cashbookId != null
+        ? ref.watch(bankTransactionsStreamProvider(cashbookId))
+        : const AsyncValue<List<TransactionEntity>>.data([]);
+
     return cashbookAsync.when(
-      data: (cashbook) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-        child: RepaintBoundary(child: BalanceCard(cashbook: cashbook)),
-      ),
+      data: (cashbook) {
+            final bankTxs     = bankAsync.asData?.value ?? [];
+        final bankIncome  = bankTxs
+            .where((t) => t.type == 'income')
+            .fold(0.0, (s, t) => s + t.amount);
+        final bankExpense = bankTxs
+            .where((t) => t.type == 'expense')
+            .fold(0.0, (s, t) => s + t.amount);
+        final adjIncome  = cashbook.totalIncome  - bankIncome;
+        final adjExpense = cashbook.totalExpense - bankExpense;
+        final adjBalance = adjIncome - adjExpense;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: RepaintBoundary(
+            child: BalanceCard(
+              cashbook:        cashbook,
+              incomeOverride:  adjIncome,
+              expenseOverride: adjExpense,
+              balanceOverride: adjBalance,
+            ),
+          ),
+        );
+      },
       loading: () => const Padding(
         padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
         child: _BalanceCardSkeleton(),

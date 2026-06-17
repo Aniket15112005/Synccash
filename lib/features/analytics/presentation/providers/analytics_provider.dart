@@ -222,11 +222,14 @@ final analyticsDataProvider =
     final asyncTxs = ref.watch(allTransactionsForAnalyticsProvider(cashbookId));
     final filter   = ref.watch(analyticsFilterProvider);
 
-    return asyncTxs.whenData((txs) {
+        return asyncTxs.whenData((txs) {
       final start = filter.startDate;
+      final nonBank = txs
+          .where((tx) => tx.category.toLowerCase() != 'bank')
+          .toList();
       final filtered = start == null
-          ? txs
-          : txs.where((tx) => !tx.createdAt.isBefore(start)).toList();
+          ? nonBank
+          : nonBank.where((tx) => !tx.createdAt.isBefore(start)).toList();
       return AnalyticsData.from(filtered);
     });
   },

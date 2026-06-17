@@ -28,7 +28,14 @@ class _C {
 
 class AddTransactionScreen extends ConsumerStatefulWidget {
   final TransactionEntity? existingTransaction;
-  const AddTransactionScreen({super.key, this.existingTransaction});
+  final String?            initialCategory;
+  final bool               categoryLocked;
+  const AddTransactionScreen({
+    super.key,
+    this.existingTransaction,
+    this.initialCategory,
+    this.categoryLocked = false,
+  });
 
   @override
   ConsumerState<AddTransactionScreen> createState() =>
@@ -73,6 +80,8 @@ void initState() {
     _selectedDate  = tx.createdAt;
     _amountCtrl.text = tx.amount.toStringAsFixed(0);
     _descCtrl.text   = tx.description;
+  } else if (widget.initialCategory != null) {
+    _category = widget.initialCategory!;
   }
 
   // ADDED: rebuild when description changes so BillNoDropdownField updates
@@ -183,6 +192,8 @@ void initState() {
 
       if (existing != null) {
         await ref.read(transactionRepositoryProvider).updateTransaction(tx);
+      } else if (_category == 'Bank') {
+        await ref.read(transactionRepositoryProvider).addTransaction(tx);
       } else if (_type == 'income' && _selectedBill != null) {
         // Overflow-aware: excess beyond the selected bill flows to OB then other bills
         await ref.read(saleBillActionsProvider.notifier).recordPaymentWithOverflow(
@@ -278,12 +289,41 @@ void initState() {
                               .fadeIn(delay: 110.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 24),
-                          const _FieldLabel('Category'),
+                           const _FieldLabel('Category'),
                           const SizedBox(height: 8),
-                          _CategoryToggle(selected: _category, onSwitch: _switchCategory)
-                              .animate()
-                              .fadeIn(delay: 160.ms, duration: 280.ms)
-                              .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                          if (widget.categoryLocked)
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0E2A1F),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                    color: const Color(0xFF1B4D35)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.account_balance_rounded,
+                                      size: 14, color: Color(0xFF34D399)),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Bank',
+                                    style: TextStyle(
+                                      color: Color(0xFF34D399),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ).animate().fadeIn(delay: 160.ms, duration: 280.ms)
+                          else
+                            _CategoryToggle(selected: _category, onSwitch: _switchCategory)
+                                .animate()
+                                .fadeIn(delay: 160.ms, duration: 280.ms)
+                                .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 24),
                           const _FieldLabel('Description'),
                           const SizedBox(height: 8),
@@ -711,7 +751,7 @@ class _CategoryToggle extends StatelessWidget {
         border: Border.all(color: _C.border),
       ),
       child: Row(
-        children: ['Retail', 'Wholesale'].map((cat) {
+        children: ['Retail', 'Wholesale', 'Bank'].map((cat) {
           final active = selected == cat;
           return Expanded(
             child: GestureDetector(

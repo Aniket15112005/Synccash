@@ -142,7 +142,7 @@ final filteredTransactionsProvider =
 
     return asyncTransactions.whenData(
       (data) => _applyTransactionFilters(
-        data,
+        data.where((tx) => tx.category.toLowerCase() != 'bank').toList(),
         activeCategory: activeCategory,
         activeName: activeName,
         activeDate: activeDate,
@@ -175,11 +175,105 @@ final allFilteredTransactionsProvider =
 
     return asyncTransactions.whenData(
       (data) => _applyTransactionFilters(
-        data,
+        data.where((tx) => tx.category.toLowerCase() != 'bank').toList(),
         activeCategory:    activeCategory,
         activeName:        activeName,
         activeDate:        activeDate,
         activeDescription: activeDescription,
+      ),
+    );
+  },
+);
+
+// ── Bank category providers ────────────────────────────────────────────────────
+
+class BankAmountFilter {
+  final double? minAmount;
+  final double? maxAmount;
+  const BankAmountFilter({this.minAmount, this.maxAmount});
+}
+
+class BankTypeFilterNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+  void setFilter(String? v) => state = v;
+}
+final bankTypeFilterProvider =
+    NotifierProvider<BankTypeFilterNotifier, String?>(BankTypeFilterNotifier.new);
+
+class BankDateFilterNotifier extends Notifier<TransactionDateFilter?> {
+  @override
+  TransactionDateFilter? build() => null;
+  void setFilter(TransactionDateFilter? v) => state = v;
+}
+final bankDateFilterProvider =
+    NotifierProvider<BankDateFilterNotifier, TransactionDateFilter?>(BankDateFilterNotifier.new);
+
+class BankAmountFilterNotifier extends Notifier<BankAmountFilter?> {
+  @override
+  BankAmountFilter? build() => null;
+  void setFilter(BankAmountFilter? v) => state = v;
+}
+final bankAmountFilterProvider =
+    NotifierProvider<BankAmountFilterNotifier, BankAmountFilter?>(BankAmountFilterNotifier.new);
+
+class BankDescFilterNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+  void setFilter(String? v) => state = v;
+}
+final bankDescFilterProvider =
+    NotifierProvider<BankDescFilterNotifier, String?>(BankDescFilterNotifier.new);
+
+final bankTransactionsStreamProvider =
+    StreamProvider.family<List<TransactionEntity>, String>(
+  (ref, cashbookId) {
+    final repo = ref.read(transactionRepositoryProvider);
+    return repo.getTransactionsStream(cashbookId, limit: 0).map(
+      (txs) => txs.where((tx) => tx.category.toLowerCase() == 'bank').toList(),
+    );
+  },
+);
+
+List<TransactionEntity> _applyBankFilters(
+  List<TransactionEntity> data, {
+  String? typeFilter,
+  TransactionDateFilter? dateFilter,
+  BankAmountFilter? amountFilter,
+  String? descFilter,
+}) {
+  return data.where((tx) {
+    if (typeFilter != null && tx.type.toLowerCase() != typeFilter) return false;
+    if (dateFilter?.startDate != null && tx.createdAt.isBefore(dateFilter!.startDate!)) return false;
+    if (dateFilter?.endDate != null) {
+      final end = DateTime(
+          dateFilter!.endDate!.year, dateFilter.endDate!.month,
+          dateFilter.endDate!.day, 23, 59, 59);
+      if (tx.createdAt.isAfter(end)) return false;
+    }
+    if (amountFilter?.minAmount != null && tx.amount < amountFilter!.minAmount!) return false;
+    if (amountFilter?.maxAmount != null && tx.amount > amountFilter!.maxAmount!) return false;
+    if (descFilter != null && descFilter.isNotEmpty &&
+        !tx.description.toLowerCase().contains(descFilter.toLowerCase())) return false;
+    return true;
+  }).toList();
+}
+
+final filteredBankTransactionsProvider =
+    Provider.family<AsyncValue<List<TransactionEntity>>, String>(
+  (ref, cashbookId) {
+    final async        = ref.watch(bankTransactionsStreamProvider(cashbookId));
+    final typeFilter   = ref.watch(bankTypeFilterProvider);
+    final dateFilter   = ref.watch(bankDateFilterProvider);
+    final amountFilter = ref.watch(bankAmountFilterProvider);
+    final descFilter   = ref.watch(bankDescFilterProvider);
+    return async.whenData(
+      (data) => _applyBankFilters(
+        data,
+        typeFilter:   typeFilter,
+        dateFilter:   dateFilter,
+        amountFilter: amountFilter,
+        descFilter:   descFilter,
       ),
     );
   },

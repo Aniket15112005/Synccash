@@ -19,6 +19,7 @@ class BalanceCard extends StatefulWidget {
     this.expenseOverride,
     this.balanceOverride,
   });
+
   @override
   State<BalanceCard> createState() => _BalanceCardState();
 }
@@ -55,7 +56,7 @@ class _BalanceCardState extends State<BalanceCard>
   }
 
   @override
-    Widget build(BuildContext context) {
+  Widget build(BuildContext context) {
     final cashbook = widget.cashbook;
     final double income  = widget.incomeOverride  ?? cashbook.totalIncome;
     final double expense = widget.expenseOverride ?? cashbook.totalExpense;
@@ -172,8 +173,8 @@ class _BalanceCardState extends State<BalanceCard>
                               ),
                               child: Text(
                                 _hideBalance
-                                  ? '••••••'
-                                  : '₹${CurrencyFormatter.format(balance)}',
+                                    ? '••••••'
+                                    : '₹${CurrencyFormatter.format(balance)}',
                                 key: ValueKey<bool>(_hideBalance),
                                 style: TextStyle(
                                   color: balanceColor,
