@@ -107,7 +107,7 @@ class TransactionListItem extends ConsumerWidget {
             backgroundColor: Colors.transparent,
             builder: (_) => _EditTransactionSheet(
               transaction:  transaction,
-              ref:          ref,
+              
               initialBill:  cachedBill,
             ),
           );
@@ -502,24 +502,22 @@ class _SheetDivider extends StatelessWidget {
 
 // ─── Edit sheet ───────────────────────────────────────────────────────────────
 
-class _EditTransactionSheet extends StatefulWidget {
+class _EditTransactionSheet extends ConsumerStatefulWidget {
   final TransactionEntity transaction;
-  final WidgetRef ref;
   // ADDED: pre-resolved bill from the provider cache — avoids the async
   // Firestore fetch so the dropdown appears instantly when the sheet opens.
   final SaleBillEntity? initialBill;
 
   const _EditTransactionSheet({
     required this.transaction,
-    required this.ref,
     this.initialBill,
   });
 
   @override
-  State<_EditTransactionSheet> createState() => _EditTransactionSheetState();
+  ConsumerState<_EditTransactionSheet> createState() => _EditTransactionSheetState();
 }
 
-class _EditTransactionSheetState extends State<_EditTransactionSheet> {
+class _EditTransactionSheetState extends ConsumerState<_EditTransactionSheet> {
   late final TextEditingController _descCtrl;
   late final TextEditingController _amountCtrl;
   late DateTime _selectedDate;
@@ -665,7 +663,7 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
         // ^ null when user cleared the bill — repo uses FieldValue.delete()
       );
 
-      await widget.ref
+      await ref
           .read(transactionRepositoryProvider)
           .updateTransaction(updated);
 
@@ -778,7 +776,7 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
               onSwitch: (cat) => setState(() {
                 _category = cat;
                 // ADDED: clear bill when switching away from Wholesale
-                if (cat != 'Wholesale') {
+                if (cat != 'Wholesale' && cat != 'UPI' && cat != 'Bank') {
                   _selectedBill = null;
                   _isObPayment  = false;
                 }
@@ -789,7 +787,7 @@ class _EditTransactionSheetState extends State<_EditTransactionSheet> {
             // Shows a spinner while the existing bill is being fetched, then
             // renders the dropdown with the current bill pre-selected so the
             // user can change it or clear it.
-            if (_category == 'Wholesale') ...[
+            if (_category == 'Wholesale' || _category == 'UPI' || _category == 'Bank') ...[
               if (_loadingBill)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),

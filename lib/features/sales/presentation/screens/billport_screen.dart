@@ -733,50 +733,6 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
         build: (ctx) {
           final widgets = <pw.Widget>[];
 
-          // ── Overall summary strip ──────────────────────────────────────────
-          final grandTotalBilled   = data.fold(0.0, (s, p) => s + p.totalBilled);
-          final grandTotalReceived = data.fold(0.0, (s, p) => s + p.totalReceived);
-          final grandBalance       = data.fold(0.0, (s, p) => s + p.totalBalance);
-
-          widgets.add(pw.Container(
-            padding: const pw.EdgeInsets.all(10),
-            decoration: pw.BoxDecoration(
-              color: cLightBlue,
-              border: pw.Border.all(color: PdfColor.fromHex('bfdbfe')),
-            ),
-            child: pw.Row(children: [
-              pw.Expanded(child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text('TOTAL ACROSS ${data.length} PART${data.length == 1 ? 'Y' : 'IES'}',
-                      style: pw.TextStyle(
-                          color: cBlue, fontSize: 7, fontWeight: pw.FontWeight.bold)),
-                  pw.SizedBox(height: 3),
-                  pw.Text('${data.fold(0, (s, p) => s + p.bills.length)} bills',
-                      style: pw.TextStyle(color: cGrey, fontSize: 8)),
-                ],
-              )),
-              pw.SizedBox(width: 8),
-              pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
-                pw.Text('Total Billed: Rs. ${fmt.format(grandTotalBilled)}',
-                    style: pw.TextStyle(
-                        color: cBlue, fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                pw.SizedBox(height: 2),
-                pw.Text('Total Received: Rs. ${fmt.format(grandTotalReceived)}',
-                    style: pw.TextStyle(
-                        color: cGreen, fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                pw.SizedBox(height: 2),
-                pw.Text('Balance Due: Rs. ${fmt.format(grandBalance)}',
-                    style: pw.TextStyle(
-                        color: grandBalance > 0 ? cRed : cGreen,
-                        fontSize: 9,
-                        fontWeight: pw.FontWeight.bold)),
-              ]),
-            ]),
-          ));
-
-          widgets.add(pw.SizedBox(height: 14));
-
           // ── Per-party sections ─────────────────────────────────────────────
           for (final party in data) {
             // Party header
@@ -831,7 +787,7 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
                   style: pw.TextStyle(color: cGrey, fontSize: 9),
                 ),
               ));
-              widgets.add(pw.SizedBox(height: 14));
+              widgets.add(pw.SizedBox(height: 28));
               continue;
             }
 
@@ -902,7 +858,7 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
                       // Paid column: actual obPaid amount
                       dCell(
                           party.obPaid > 0
-                              ? 'Rs. \${fmt.format(party.obPaid)}'
+                              ? 'Rs. ${fmt.format(party.obPaid)}'
                               : '-',
                           align: pw.TextAlign.right,
                           color: party.obPaid > 0 ? cGreen : cSubGrey,
@@ -915,7 +871,7 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
                             ? dCell('Cleared',
                                 align: pw.TextAlign.right,
                                 color: cGreen, bold: true)
-                            : dCell('Rs. \${fmt.format(obRem)} Due',
+                            : dCell('Rs. ${fmt.format(obRem)} Due',
                                 align: pw.TextAlign.right,
                                 color: cRed, size: 8, bold: true);
                       }(),

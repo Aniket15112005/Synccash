@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -66,7 +67,23 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
   final _searchCtrl = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(_onSearchChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(saleBillSearchProvider.notifier).update('');
+      }
+    });
+  }
+
+  void _onSearchChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    _searchCtrl.removeListener(_onSearchChanged);
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -203,6 +220,10 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
           ),
 
           // ── Content ─────────────────────────────────────────────────────────
+          // ── Summary strip ──────────────────────────────────────────────
+          if (defaultTargetPlatform == TargetPlatform.iOS)
+            const SliverToBoxAdapter(child: _SalesSummaryStrip()),
+
           billsAsync.when(
             data: (bills) {
               if (bills.isEmpty) {
@@ -221,7 +242,7 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
                 grouped.putIfAbsent(key, () => []).add(b);
                 dispName.putIfAbsent(key, () => b.partyName.trim());
               }
-              final names = grouped.keys.toList();
+              final names = grouped.keys.toList()..sort();
 
               return SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 6, 16, 120),
@@ -407,7 +428,7 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
     final totalBill = widget.bills
         .fold<double>(0.0, (s, b) => s + b.billTotal);
     final outstanding =
-        (totalBill - _billReceived).clamp(0.0, double.infinity);
+        (totalBill - _billReceived - _obReceived).clamp(0.0, double.infinity);
     final closingBalance = (_ob + totalBill - _billReceived - _obReceived).clamp(0.0, double.infinity);
     final settled = closingBalance <= 0;
     final partial = (_billReceived + _obReceived) > 0 && !settled;
@@ -1530,6 +1551,242 @@ class _CircleAvatar extends StatelessWidget {
       ),
     );
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  Sales Summary Strip
+//  Key design decisions:
+//    • Caches raw Firestore tx docs in _rawTxs so _computeReceived() can
+//      run synchronously any time bills update (fixes timing race).
+//    • Per-party clamp: max(0, OB+Bills-Received) — matches party cards.
+//    • Received is DERIVED as BillAmt−Closing (always consistent).
+//    • Party doc IDs in Firestore == partyName.trim().toLowerCase().
+// ════════════════════════════════════════════════════════════════════════
+
+class _SalesSummaryStrip extends ConsumerStatefulWidget {
+  const _SalesSummaryStrip();
+  @override
+  ConsumerState<_SalesSummaryStrip> createState() => _SalesSummaryStripState();
+}
+
+class _SalesSummaryStripState extends ConsumerState<_SalesSummaryStrip> {
+  StreamSubscription<QuerySnapshot>? _txSub;
+  StreamSubscription<QuerySnapshot>? _obSub;
+  String? _cashbookId;
+
+  // Bill groupings — rebuilt from allSaleBillsProvider on each build
+  Map<String, Set<String>> _partyBillIds = {}; // partyKey -> {billId,...}
+  Map<String, double>      _partyBillTot = {}; // partyKey -> sum(billTotal)
+
+  // Raw income tx cache — updated by Firestore stream
+  List<Map<String, dynamic>> _rawTxs = [];
+
+  // Per-party received — recomputed whenever bills OR txs change
+  Map<String, double> _partyReceived = {};
+
+  // Per-party OB (Firestore parties collection, doc.id == partyKey)
+  Map<String, double> _partyOB = {};
+
+  void _startStreams(String cashbookId) {
+    _txSub?.cancel();
+    _obSub?.cancel();
+
+    _txSub = FirebaseFirestore.instance
+        .collection('cashbooks')
+        .doc(cashbookId)
+        .collection('transactions')
+        .where('type', isEqualTo: 'income')
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      _rawTxs = snap.docs
+          .map((d) => d.data() as Map<String, dynamic>)
+          .toList();
+      setState(() => _partyReceived = _computeReceived());
+    });
+
+    _obSub = FirebaseFirestore.instance
+        .collection('cashbooks')
+        .doc(cashbookId)
+        .collection('parties')
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      final ob = <String, double>{};
+      for (final d in snap.docs) {
+        ob[d.id] = ((d.data() as Map<String, dynamic>)['openingBalance']
+                as num?)
+            ?.toDouble() ??
+            0.0;
+      }
+      setState(() => _partyOB = ob);
+    });
+  }
+
+  // Compute per-party received from cached raw docs + current bill groupings.
+  // Called synchronously from build (no setState) or from stream (with setState).
+  Map<String, double> _computeReceived() {
+    final rec = <String, double>{};
+    for (final raw in _rawTxs) {
+      final linkedId = raw['linkedSaleBillId'] as String?;
+      final amount   = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+      final desc     = (raw['description'] as String? ?? '').toLowerCase();
+
+      if (linkedId != null && linkedId.isNotEmpty) {
+        // Bill-linked: attribute to the party that owns this bill
+        for (final e in _partyBillIds.entries) {
+          if (e.value.contains(linkedId)) {
+            rec[e.key] = (rec[e.key] ?? 0) + amount;
+            break;
+          }
+        }
+      } else {
+        // Unlinked: same description-match used by each party card
+        for (final key in _partyBillIds.keys) {
+          if (desc.contains(key)) {
+            rec[key] = (rec[key] ?? 0) + amount;
+          }
+        }
+      }
+    }
+    return rec;
+  }
+
+  @override
+  void dispose() {
+    _txSub?.cancel();
+    _obSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cashbookId = ref.watch(currentCashbookIdProvider);
+    final billsAsync = ref.watch(filteredSaleBillsProvider);
+    final bills      = billsAsync.asData?.value ?? [];
+
+    // Start / restart streams when cashbook changes
+    if (cashbookId != null && cashbookId.isNotEmpty &&
+        cashbookId != _cashbookId) {
+      _cashbookId = cashbookId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startStreams(cashbookId);
+      });
+    }
+
+    // Rebuild bill groupings synchronously — always up-to-date for this frame
+    _partyBillIds = {};
+    _partyBillTot = {};
+    for (final b in bills) {
+      final key = b.partyName.trim().toLowerCase();
+      (_partyBillIds[key] ??= {}).add(b.saleBillId);
+      _partyBillTot[key] = (_partyBillTot[key] ?? 0) + b.billTotal;
+    }
+    // Also recompute received with the fresh bill groupings
+    // (no setState — we're already in build; the result is used immediately)
+    _partyReceived = _computeReceived();
+
+    if (bills.isEmpty && billsAsync.isLoading) return const SizedBox.shrink();
+
+    // Sum per-party closing with per-party clamp (matches party card logic)
+    double totalBillAmt = 0;
+    double totalClosing = 0;
+    for (final key in _partyBillIds.keys) {
+      final pBills    = _partyBillTot[key]  ?? 0;
+      final pOB       = _partyOB[key]        ?? 0;
+      final pReceived = _partyReceived[key]   ?? 0;
+      totalBillAmt += pOB + pBills;
+      totalClosing +=
+          (pOB + pBills - pReceived).clamp(0.0, double.infinity);
+    }
+
+    // Derived: keeps the three numbers always consistent
+    final displayReceived =
+        (totalBillAmt - totalClosing).clamp(0.0, double.infinity);
+    final fmt = NumberFormat('#,##,##0.##');
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: _T.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _T.border),
+      ),
+      child: Row(
+        children: [
+          _SummaryCell(
+            label: 'Bill Amt',
+            value: '₹${fmt.format(totalBillAmt)}',
+            color: _T.text,
+          ),
+          _SummaryDivider(),
+          _SummaryCell(
+            label: 'Received',
+            value: '₹${fmt.format(displayReceived)}',
+            color: _T.green,
+          ),
+          _SummaryDivider(),
+          _SummaryCell(
+            label: 'Closing Bal.',
+            value: '₹${fmt.format(totalClosing)}',
+            color: _T.darkOrange,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryCell extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color  color;
+  const _SummaryCell({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: _T.muted,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.3,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    ),
+  );
+}
+
+class _SummaryDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 1,
+    height: 28,
+    margin: const EdgeInsets.symmetric(horizontal: 4),
+    color: _T.border,
+  );
 }
 
 class _SearchBar extends StatelessWidget {

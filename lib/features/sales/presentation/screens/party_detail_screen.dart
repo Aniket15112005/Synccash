@@ -286,7 +286,8 @@ class _AllBillsScreenState extends ConsumerState<AllBillsScreen> {
                           Navigator.push(
                               ctx,
                               _route(BillDetailScreen(
-                                  bill: bill, billCount: widget.bills.length)));
+                                  bill: bill, billCount: widget.bills.length,
+                                  precomputedReceived: widget.received[bill.saleBillId])));
                         },
                         onEdit:   () => _edit(bill, cashbookId),
                         onDelete: () => _delete(bill, cashbookId),
@@ -469,25 +470,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
       if (linkedId != null && linkedId.isNotEmpty) {
         // Only count this payment if the bill belongs to THIS party.
         if (billIds.contains(linkedId)) {
-          // ── Single-bill overflow-to-OB rule ────────────────────────────
-          // When the party has exactly 1 bill, cap the linked payment at
-          // the bill's remaining balance and automatically route any
-          // overflow to the opening balance (if OB is still outstanding).
-          if (_bills.length == 1) {
-            final alreadyRcvd = map[linkedId] ?? 0.0;
-            final billRemain  =
-                (_bills.first.billTotal - alreadyRcvd).clamp(0.0, double.infinity);
-            final toBill      = amount > billRemain ? billRemain : amount;
-            final overflow    = amount - toBill;
-            map[linkedId]     = alreadyRcvd + toBill;
-            if (overflow > 0) {
-              final ob          = _party?.openingBalance ?? 0.0;
-              final remainingOb = (ob - obPaid).clamp(0.0, double.infinity);
-              obPaid += overflow > remainingOb ? remainingOb : overflow;
-            }
-          } else {
-            map[linkedId] = (map[linkedId] ?? 0.0) + amount;
-          }
+          map[linkedId] = (map[linkedId] ?? 0.0) + amount;
           payments.add(_PaymentRecord(
               linkedBillId: linkedId, amount: amount, createdAt: createdAt));
         }
@@ -505,6 +488,45 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         totalOldUnlinked += amount;
         oldUnlinkedRecs.add(_PaymentRecord(
             linkedBillId: null, amount: amount, createdAt: createdAt));
+      }
+    }
+
+    // ── Cap linked bill payments at bill total; route overflow FIFO ──────────
+    // When linked payments to a bill exceed its total (e.g. a large
+    // transaction entered directly), cap it and redistribute overflow
+    // to other pending bills (oldest first) then to opening balance.
+    {
+      final sorted = List<SaleBillEntity>.from(_bills)
+        ..sort((a, b) => a.billCreatedAt.compareTo(b.billCreatedAt));
+      double pool = 0.0;
+
+      // First pass: collect overflow from over-paid bills.
+      for (final b in sorted) {
+        final raw    = map[b.saleBillId] ?? 0.0;
+        final capped = raw.clamp(0.0, b.billTotal);
+        if (raw > capped) {
+          map[b.saleBillId] = capped;
+          pool += raw - capped;
+        }
+      }
+
+      // Second pass: fill remaining capacity in bills (oldest first).
+      if (pool > 0) {
+        for (final b in sorted) {
+          if (pool <= 0) break;
+          final already = map[b.saleBillId] ?? 0.0;
+          final rem     = (b.billTotal - already).clamp(0.0, double.infinity);
+          if (rem <= 0) continue;
+          final toThis  = pool < rem ? pool : rem;
+          map[b.saleBillId] = already + toThis;
+          pool -= toThis;
+        }
+        // Remaining pool flows to opening balance.
+        if (pool > 0) {
+          final ob       = _party?.openingBalance ?? 0.0;
+          final remainOb = (ob - obPaid).clamp(0.0, double.infinity);
+          obPaid        += pool < remainOb ? pool : remainOb;
+        }
       }
     }
 
@@ -1814,7 +1836,8 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
                           Navigator.push(
                             ctx,
                             _route(BillDetailScreen(
-                                bill: bill, billCount: _bills.length)),
+                                bill: bill, billCount: _bills.length,
+                                precomputedReceived: _recForBill(bill))),
                           );
                         },
                         onEdit:   () => _editBill(bill),
