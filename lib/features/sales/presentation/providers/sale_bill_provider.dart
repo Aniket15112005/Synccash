@@ -653,7 +653,6 @@ final allSaleBillsProvider = StreamProvider<List<SaleBillEntity>>((ref) {
       .collection('cashbooks')
       .doc(cashbookId)
       .collection('sale_bills')
-      .orderBy('billCreatedAt', descending: true)
       .snapshots()
       .map((snap) =>
           snap.docs.map(SaleBillModel.fromFirestore).toList());

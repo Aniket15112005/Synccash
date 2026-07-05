@@ -17,6 +17,8 @@ import 'package:synccash/features/sales/presentation/widgets/bill_no_dropdown_fi
 import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
 // ADDED: party provider for description autocomplete
 import 'package:synccash/features/sales/presentation/providers/party_provider.dart';
+// ADDED: dedicated party picker screen (keyboard-safe suggestion flow)
+import 'package:synccash/features/transactions/presentation/screens/party_picker_screen.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:synccash/voice/voice_recorder_service.dart';
@@ -70,8 +72,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   // ADDED: true while fetching the existing linked bill on edit open
   bool _loadingBill = false;
 
-  // ADDED: true once party name is confirmed (selected from list or pre-filled when editing)
+  // ADDED: true once party name is confirmed (selected from picker or pre-filled when editing)
   bool _partyConfirmed = false;
+
+  // Cached party names — refreshed reactively in build() via ref.watch so
+  // the list is always populated when _openPartyPicker or voice is used.
+  List<String> _allPartyNames = [];
 
   // ADDED: voice command state
   final _voiceRecorder = VoiceRecorderService();
@@ -120,8 +126,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       _category = widget.initialCategory!;
     }
 
-    // ADDED: rebuild when description changes so BillNoDropdownField and
-    // party suggestions update
+    // ADDED: rebuild when description changes so BillNoDropdownField updates
     _descCtrl.addListener(_onDescChanged);
   }
 
@@ -155,6 +160,38 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     _selectedBill = null;
     _isObPayment = false;
     setState(() {});
+  }
+
+  // ADDED: opens the dedicated PartyPickerScreen and back-fills the description
+  // field with whatever name the user confirmed there.
+  Future<void> _openPartyPicker() async {
+    final allPartyNames = _allPartyNames;
+
+    final bool canSuggest = _type == 'income' &&
+        (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI');
+
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PartyPickerScreen(
+          initialValue:   _descCtrl.text,
+          allPartyNames:  allPartyNames,
+          canSuggest:     canSuggest,
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      _descCtrl.removeListener(_onDescChanged);
+      _descCtrl.text  = result;
+      _partyConfirmed = result.isNotEmpty;
+      if (result.isEmpty) {
+        _selectedBill = null;
+        _isObPayment  = false;
+      }
+      _descCtrl.addListener(_onDescChanged);
+      setState(() {});
+    }
   }
 
   @override
@@ -221,12 +258,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       // ADDED: build the same "all known party names" set the suggestion
       // list uses, so we can auto-confirm an exact match spoken by voice
       // instead of forcing a manual tap on the suggestion list.
-      final savedParties = ref.read(partiesProvider).asData?.value ?? [];
-      final allBills = ref.read(allSaleBillsProvider).asData?.value ?? [];
-      final allPartyNames = <String>{
-        ...savedParties.map((p) => p.partyName),
-        ...allBills.map((b) => b.partyName.trim()),
-      };
+      final allPartyNames = _allPartyNames.toSet();
 
       // Pre-fill existing form fields with the parsed voice entry — user still
       // reviews and taps the existing Save/Record button, nothing auto-saves.
@@ -251,13 +283,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
             _descCtrl.text = exactMatch; // use the saved casing/spelling
             _partyConfirmed = true;
           } else {
-            _partyConfirmed = false; // shows suggestion list for manual tap
+            _partyConfirmed = false;
           }
           _descCtrl.addListener(_onDescChanged);
         }
-        // ADDED: apply spoken category (Retail/Wholesale/Bank/UPI/CB). Logic
-        // mirrors _switchCategory, inlined here since we're already inside
-        // a setState block (calling _switchCategory would nest a 2nd one).
+        // ADDED: apply spoken category (Retail/Wholesale/Bank/UPI/CB).
         if (parsed.category != null && parsed.category!.trim().isNotEmpty) {
           const validCategories = {'Retail', 'Wholesale', 'Bank', 'UPI', 'CB'};
           final normalized = _normalizeCategory(parsed.category!.trim());
@@ -269,9 +299,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
             }
           }
         }
-        // ADDED: apply spoken date (e.g. "yesterday", "5 July") if Gemini
-        // resolved one; otherwise the field simply stays at its current
-        // default (today, or whatever was already picked).
+        // ADDED: apply spoken date (e.g. "yesterday", "5 July")
         if (parsed.date != null) {
           final d = parsed.date!;
           final now = DateTime.now();
@@ -418,17 +446,6 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdByName: tx.creatorName,
           createdAt:     tx.createdAt,
         );
-      } else if (_type == 'income') {
-        await ref.read(saleBillActionsProvider.notifier).recordObPaymentWithOverflow(
-          cashbookId:    tx.cashbookId,
-          partyName:     _descCtrl.text.trim(),
-          totalAmount:   tx.amount,
-          description:   tx.description,
-          category:      tx.category,
-          createdBy:     tx.createdBy,
-          createdByName: tx.creatorName,
-          createdAt:     tx.createdAt,
-        );
       } else {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
       }
@@ -454,33 +471,17 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isEditing = widget.existingTransaction != null;
-    final bool showBank = kIsWeb || defaultTargetPlatform != TargetPlatform.android;
-
-    // ADDED: merge names from parties collection (opening-balance saved) AND
-    // sale_bills (parties that have bills but no saved opening balance).
-    // This ensures all party names appear in suggestions regardless of whether
-    // an opening balance has been set for them.
-    final savedParties = ref.watch(partiesProvider).asData?.value ?? [];
-    final allBills = ref.watch(allSaleBillsProvider).asData?.value ?? [];
-    final _billPartyNames = allBills.map((b) => b.partyName.trim()).toSet();
-    final _allPartyNames = <String>{
-      ...savedParties.map((p) => p.partyName),
-      ..._billPartyNames,
+    // Watch both providers so _allPartyNames is always current when the
+    // picker opens — ref.read() at tap-time returns empty if not yet loaded.
+    final _watchedParties = ref.watch(partiesProvider).asData?.value ?? [];
+    final _watchedBills   = ref.watch(allSaleBillsProvider).asData?.value ?? [];
+    _allPartyNames = <String>{
+      ..._watchedParties.map((p) => p.partyName),
+      ..._watchedBills.map((b) => b.partyName.trim()),
     }.toList()..sort();
 
-    final bool _canSuggest = _type == 'income' &&
-        (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI');
-
-    final String _descText = _descCtrl.text.trim();
-
-    // Suggestions are List<String> — merged from both sources above.
-    final List<String> _filteredParties = (_canSuggest && _descText.isNotEmpty)
-        ? _allPartyNames
-            .where((name) =>
-                name.toLowerCase().contains(_descText.toLowerCase()))
-            .toList()
-        : [];
+    final isEditing = widget.existingTransaction != null;
+    final bool showBank = kIsWeb || defaultTargetPlatform != TargetPlatform.android;
 
     return Scaffold(
       backgroundColor: _C.bg,
@@ -562,36 +563,19 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                           const SizedBox(height: 24),
                           const _FieldLabel('Description'),
                           const SizedBox(height: 8),
-                          _DescriptionField(controller: _descCtrl)
+
+                          // CHANGED: tapping the description field now opens a
+                          // dedicated full-screen picker where suggestions are
+                          // always visible above the keyboard.
+                          _DescTapField(
+                            value: _descCtrl.text,
+                            onTap: _openPartyPicker,
+                          )
                               .animate()
                               .fadeIn(delay: 210.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
 
-                          // ADDED: party name autocomplete.
-                          // Rendered inline, directly below the description field.
-                          // Disappears automatically when _filteredParties is empty
-                          // (no match or conditions not met) — no extra toggle state.
-                          if (_filteredParties.isNotEmpty && !_partyConfirmed)
-                            _PartySuggestionList(
-                              parties: _filteredParties,
-                              onSelect: (name) {
-                                HapticFeedback.selectionClick();
-                                // Remove listener before programmatic setText so
-                                // _onDescChanged does NOT clear _partyConfirmed.
-                                _descCtrl.removeListener(_onDescChanged);
-                                _partyConfirmed = true;
-                                _descCtrl.text = name;
-                                _descCtrl.selection =
-                                    TextSelection.fromPosition(
-                                  TextPosition(offset: name.length),
-                                );
-                                _descCtrl.addListener(_onDescChanged);
-                                setState(() {});
-                                FocusScope.of(context).unfocus();
-                              },
-                            ),
-
-                          // ADDED: Bill dropdown — only visible once a party name has been confirmed (selected from list or pre-filled when editing).
+                          // ADDED: Bill dropdown — only visible once a party name has been confirmed.
                           if (_type == 'income' && _partyConfirmed && (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI')) ...[
                             if (_loadingBill)
                               Padding(
@@ -640,9 +624,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               .fadeIn(delay: 245.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 20),
-                          // ADDED: voice command mic button — tap to speak an
-                          // entry (English or Hindi), it pre-fills the form
-                          // above; user still reviews and taps Record/Save.
+                          // ADDED: voice command mic button
                           _VoiceMicButton(
                             recording:  _voiceRecording,
                             processing: _voiceProcessing,
@@ -1092,203 +1074,56 @@ class _CategoryToggle extends StatelessWidget {
   }
 }
 
-// ─── Description field ────────────────────────────────────────────────────────
+// ─── Description tap field ─────────────────────────────────────────────────────
+// CHANGED: replaced the inline text field with a tappable display that
+// navigates to PartyPickerScreen. This keeps the suggestion list fully
+// visible regardless of keyboard height.
 
-class _DescriptionField extends StatefulWidget {
-  final TextEditingController controller;
-  const _DescriptionField({required this.controller});
-
-  @override
-  State<_DescriptionField> createState() => _DescriptionFieldState();
-}
-
-class _DescriptionFieldState extends State<_DescriptionField> {
-  final _focus = FocusNode();
-  bool _focused = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _focus.addListener(() => setState(() => _focused = _focus.hasFocus));
-  }
-
-  @override
-  void dispose() {
-    _focus.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOut,
-      decoration: BoxDecoration(
-        color: _C.bg,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: _focused ? const Color(0xFF4B5563) : _C.border,
-          width: _focused ? 1.5 : 1.0,
-        ),
-      ),
-      child: TextFormField(
-        controller: widget.controller,
-        focusNode: _focus,
-        textInputAction: TextInputAction.done,
-        maxLines: 3,
-        cursorColor: _C.textPri,
-        cursorWidth: 1.5,
-        style: const TextStyle(color: _C.textPri, fontSize: 14, height: 1.6),
-        decoration: InputDecoration(
-          hintText: 'What was this for?',
-          hintStyle: const TextStyle(color: _C.textMut, fontSize: 14),
-          prefixIcon: Padding(
-            padding: const EdgeInsets.only(left: 16, right: 8, top: 14),
-            child: Icon(Icons.notes_rounded, size: 17,
-                color: _focused ? _C.textSec : _C.textMut),
-          ),
-          prefixIconConstraints:
-              const BoxConstraints(minWidth: 44, minHeight: 52),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Party suggestion list ────────────────────────────────────────────────────
-// ADDED: smooth scrollable inline list of matching party names shown directly
-// below the description field. Conditions for visibility are evaluated in the
-// parent's build() method — this widget is only mounted when there are matches.
-
-class _PartySuggestionList extends StatelessWidget {
-  final List<String> parties;
-  final void Function(String name) onSelect;
-
-  const _PartySuggestionList({
-    required this.parties,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Each row is 52 px tall. Cap at 5 visible rows then scroll.
-    const double rowHeight = 52.0;
-    const double maxHeight = rowHeight * 5;
-    final double listHeight =
-        (parties.length * rowHeight).clamp(0.0, maxHeight);
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOutCubic,
-      height: listHeight,
-      margin: const EdgeInsets.only(top: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F1115),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF202228)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.40),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(13),
-        child: ListView.separated(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          physics: const BouncingScrollPhysics(),
-          itemCount: parties.length,
-          separatorBuilder: (_, __) => Container(
-            height: 1,
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            color: const Color(0xFF1C1F26),
-          ),
-          itemBuilder: (_, i) => _PartySuggestionTile(
-            partyName: parties[i],
-            onTap: () => onSelect(parties[i]),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PartySuggestionTile extends StatefulWidget {
-  final String partyName;
+class _DescTapField extends StatelessWidget {
+  final String value;
   final VoidCallback onTap;
-
-  const _PartySuggestionTile({
-    required this.partyName,
-    required this.onTap,
-  });
-
-  @override
-  State<_PartySuggestionTile> createState() => _PartySuggestionTileState();
-}
-
-class _PartySuggestionTileState extends State<_PartySuggestionTile> {
-  bool _pressed = false;
+  const _DescTapField({required this.value, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final hasValue = value.trim().isNotEmpty;
     return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) {
-        setState(() => _pressed = false);
-        widget.onTap();
-      },
-      onTapCancel: () => setState(() => _pressed = false),
+      onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 110),
-        curve: Curves.easeOut,
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        color: _pressed ? const Color(0xFF18191E) : Colors.transparent,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: BoxDecoration(
+          color: _C.bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _C.border),
+        ),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Party icon badge
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: const Color(0xFF18191E),
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: const Color(0xFF252830)),
-              ),
-              child: const Icon(
-                Icons.person_outline_rounded,
-                size: 15,
-                color: Color(0xFF6B7280),
-              ),
+            Icon(
+              Icons.notes_rounded,
+              size: 17,
+              color: hasValue ? _C.textSec : _C.textMut,
             ),
             const SizedBox(width: 12),
-            // Party name — medium weight, comfortable read size
             Expanded(
               child: Text(
-                widget.partyName,
-                style: const TextStyle(
-                  color: Color(0xFFD1D9E6),
+                hasValue ? value : 'What was this for?',
+                style: TextStyle(
+                  color: hasValue ? _C.textPri : _C.textMut,
                   fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: -0.1,
+                  height: 1.5,
                 ),
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            // Arrow hint — subtle, shows it's selectable
+            const SizedBox(width: 8),
             const Icon(
-              Icons.north_west_rounded,
-              size: 13,
-              color: Color(0xFF3D4149),
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: _C.textMut,
             ),
           ],
         ),

@@ -18,6 +18,8 @@ import 'package:synccash/features/sales/domain/entities/sale_bill_entity.dart';
 import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
 import 'package:synccash/features/sales/presentation/widgets/bill_no_dropdown_field.dart';
 import 'package:synccash/features/sales/presentation/providers/party_provider.dart';
+// ADDED: dedicated party picker screen (keyboard-safe suggestion flow)
+import 'package:synccash/features/transactions/presentation/screens/party_picker_screen.dart';
 
 final _timeFmt = DateFormat('hh:mm a');
 final _dateFmt = DateFormat('dd MMM yyyy');
@@ -108,7 +110,6 @@ class TransactionListItem extends ConsumerWidget {
             backgroundColor: Colors.transparent,
             builder: (_) => _EditTransactionSheet(
               transaction:  transaction,
-              
               initialBill:  cachedBill,
             ),
           );
@@ -532,7 +533,7 @@ class _EditTransactionSheetState extends ConsumerState<_EditTransactionSheet> {
   // ADDED: income / expense — editable by the user
   late String _type;
 
-  // ADDED: true once party name confirmed (selected from list or pre-filled when editing)
+  // ADDED: true once party name confirmed (selected from picker or pre-filled when editing)
   bool _partyConfirmed = false;
 
   bool _loading = false;
@@ -601,6 +602,43 @@ class _EditTransactionSheetState extends ConsumerState<_EditTransactionSheet> {
       // silently ignore — dropdown will just show unselected
     } finally {
       if (mounted) setState(() => _loadingBill = false);
+    }
+  }
+
+  // ADDED: opens the dedicated PartyPickerScreen and back-fills the description
+  // field with whatever name the user confirmed there.
+  Future<void> _openPartyPicker() async {
+    final savedParties = ref.read(partiesProvider).asData?.value ?? [];
+    final allBills     = ref.read(allSaleBillsProvider).asData?.value ?? [];
+    final allPartyNames = <String>{
+      ...savedParties.map((p) => p.partyName),
+      ...allBills.map((b) => b.partyName.trim()),
+    }.toList()..sort();
+
+    final bool canSuggest = _type == 'income' &&
+        (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI');
+
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PartyPickerScreen(
+          initialValue:  _descCtrl.text,
+          allPartyNames: allPartyNames,
+          canSuggest:    canSuggest,
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      _descCtrl.removeListener(_onDescChanged);
+      _descCtrl.text  = result;
+      _partyConfirmed = result.isNotEmpty;
+      if (result.isEmpty) {
+        _selectedBill = null;
+        _isObPayment  = false;
+      }
+      _descCtrl.addListener(_onDescChanged);
+      setState(() {});
     }
   }
 
@@ -731,25 +769,6 @@ class _EditTransactionSheetState extends ConsumerState<_EditTransactionSheet> {
     final dateLabel =
         _isToday ? 'Today' : DateFormat('dd MMM yyyy').format(_selectedDate);
 
-    // ADDED: merge names from parties collection AND sale_bills so parties
-    // without an opening balance still appear in autocomplete suggestions.
-    final savedParties = ref.watch(partiesProvider).asData?.value ?? [];
-    final allBills = ref.watch(allSaleBillsProvider).asData?.value ?? [];
-    final billPartyNames = allBills.map((b) => b.partyName.trim()).toSet();
-    final allPartyNames = <String>{
-      ...savedParties.map((p) => p.partyName),
-      ...billPartyNames,
-    }.toList()..sort();
-    final bool canSuggest = _type == 'income' &&
-        (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI');
-    final String descText = _descCtrl.text.trim();
-    final List<String> filteredParties = (canSuggest && descText.isNotEmpty)
-        ? allPartyNames
-            .where((name) =>
-                name.toLowerCase().contains(descText.toLowerCase()))
-            .toList()
-        : [];
-
     return Padding(
       padding:
           EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -806,28 +825,12 @@ class _EditTransactionSheetState extends ConsumerState<_EditTransactionSheet> {
             ),
             const SizedBox(height: 12),
 
-            // Description
-            _StyledField(controller: _descCtrl, label: 'Description'),
-
-            // ADDED: party name autocomplete
-            if (filteredParties.isNotEmpty && !_partyConfirmed)
-              _PartySuggestionList(
-                parties: filteredParties,
-                onSelect: (name) {
-                  // Remove listener before programmatic setText so
-                  // _onDescChanged does NOT clear _partyConfirmed.
-                  _descCtrl.removeListener(_onDescChanged);
-                  _partyConfirmed = true;
-                  _descCtrl.text = name;
-                  _descCtrl.selection = TextSelection.fromPosition(
-                    TextPosition(offset: name.length),
-                  );
-                  _descCtrl.addListener(_onDescChanged);
-                  setState(() {});
-                  FocusScope.of(context).unfocus();
-                },
-              ),
-
+            // Description — CHANGED: tapping opens PartyPickerScreen where
+            // the suggestion list is always above the keyboard.
+            _DescTapTile(
+              value: _descCtrl.text,
+              onTap: _openPartyPicker,
+            ),
             const SizedBox(height: 12),
 
             // Category
@@ -847,9 +850,6 @@ class _EditTransactionSheetState extends ConsumerState<_EditTransactionSheet> {
             ),
 
             // ADDED: bill dropdown — visible only for Wholesale transactions.
-            // Shows a spinner while the existing bill is being fetched, then
-            // renders the dropdown with the current bill pre-selected so the
-            // user can change it or clear it.
             if (_type == 'income' && _partyConfirmed && (_category == 'Wholesale' || _category == 'UPI' || _category == 'Bank')) ...[
               if (_loadingBill)
                 Padding(
@@ -1057,7 +1057,6 @@ class _SheetCategoryToggle extends StatelessWidget {
   }
 }
 
-
 // ─── Styled text field ────────────────────────────────────────────────────────
 
 class _StyledField extends StatelessWidget {
@@ -1099,6 +1098,73 @@ class _StyledField extends StatelessWidget {
   }
 }
 
+// ─── Description tap tile (edit sheet) ───────────────────────────────────────
+// CHANGED: replaced the inline text field with a tappable row that navigates
+// to PartyPickerScreen — suggestion list is always above the keyboard there.
+
+class _DescTapTile extends StatelessWidget {
+  final String value;
+  final VoidCallback onTap;
+  const _DescTapTile({required this.value, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasValue = value.trim().isNotEmpty;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0C0E12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF1F2937)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Description',
+                    style: TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    hasValue ? value : 'Tap to enter party name',
+                    style: TextStyle(
+                      color: hasValue
+                          ? const Color(0xFFD1D9E6)
+                          : const Color(0xFF3D4149),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 18,
+              color: Color(0xFF374151),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 // ─── Sheet type toggle (income / expense) ────────────────────────────────────
 
@@ -1195,128 +1261,6 @@ class _SheetTypeChip extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Party suggestion list (for _EditTransactionSheet) ────────────────────────
-
-class _PartySuggestionList extends StatelessWidget {
-  final List<String> parties;
-  final void Function(String name) onSelect;
-
-  const _PartySuggestionList({
-    required this.parties,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    const double rowHeight = 52.0;
-    const double maxHeight = rowHeight * 5;
-    final double listHeight =
-        (parties.length * rowHeight).clamp(0.0, maxHeight);
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeOutCubic,
-      height: listHeight,
-      margin: const EdgeInsets.only(top: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F1115),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF202228)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.40),
-            blurRadius: 20,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(13),
-        child: ListView.separated(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          physics: const BouncingScrollPhysics(),
-          itemCount: parties.length,
-          separatorBuilder: (_, __) => Container(
-            height: 1,
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            color: const Color(0xFF1C1F26),
-          ),
-          itemBuilder: (_, i) => _PartySuggestionTile(
-            partyName: parties[i],
-            onTap: () => onSelect(parties[i]),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PartySuggestionTile extends StatefulWidget {
-  final String partyName;
-  final VoidCallback onTap;
-  const _PartySuggestionTile({required this.partyName, required this.onTap});
-
-  @override
-  State<_PartySuggestionTile> createState() => _PartySuggestionTileState();
-}
-
-class _PartySuggestionTileState extends State<_PartySuggestionTile> {
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: (_) => setState(() => _pressed = true),
-      onTapUp: (_) { setState(() => _pressed = false); widget.onTap(); },
-      onTapCancel: () => setState(() => _pressed = false),
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 110),
-        curve: Curves.easeOut,
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        color: _pressed ? const Color(0xFF18191E) : Colors.transparent,
-        child: Row(
-          children: [
-            Container(
-              width: 32, height: 32,
-              decoration: BoxDecoration(
-                color: const Color(0xFF18191E),
-                borderRadius: BorderRadius.circular(9),
-                border: Border.all(color: const Color(0xFF252830)),
-              ),
-              child: const Icon(
-                Icons.person_outline_rounded,
-                size: 15,
-                color: Color(0xFF6B7280),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                widget.partyName,
-                style: const TextStyle(
-                  color: Color(0xFFD1D9E6),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: -0.1,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const Icon(
-              Icons.north_west_rounded,
-              size: 13,
-              color: Color(0xFF3D4149),
-            ),
-          ],
         ),
       ),
     );
