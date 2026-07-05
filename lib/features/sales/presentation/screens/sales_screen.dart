@@ -12,6 +12,7 @@ import '../../domain/entities/sale_bill_entity.dart';
 import '../providers/sale_bill_provider.dart';
 import 'manage_opening_balance_screen.dart';
 import 'party_detail_screen.dart';
+import '../../../../voice/party_nav_mic_button.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Theme
@@ -95,9 +96,39 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
         builder: (_) => const _AddBillSheet(),
       );
 
+  void _onPartyVoiceMatch(List<SaleBillEntity> allBills, String matchedPartyName) {
+    HapticFeedback.selectionClick();
+    final bills = allBills
+        .where((b) =>
+            b.partyName.trim().toLowerCase() == matchedPartyName.trim().toLowerCase())
+        .toList();
+    Navigator.of(context).push(
+      _slideRoute(
+          PartyDetailScreen(partyName: matchedPartyName, initialBills: bills)),
+    );
+  }
+
+  void _onPartyVoiceNoMatch(String spokenName) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('No party found matching "$spokenName"'),
+      backgroundColor: _T.amber,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final billsAsync = ref.watch(filteredSaleBillsProvider);
+    final allBillsAsync = ref.watch(allSaleBillsProvider);
+    final allBills = allBillsAsync.asData?.value ?? const <SaleBillEntity>[];
+    final partyNames = allBills
+        .map((b) => b.partyName.trim())
+        .where((n) => n.isNotEmpty)
+        .toSet()
+        .toList();
 
     return Scaffold(
       backgroundColor: _T.bg,
@@ -143,6 +174,13 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
                 ),
               ),
               const SizedBox(width: 8),
+              if (PartyNavMicButton.isSupportedPlatform)
+                PartyNavMicButton(
+                  partyNames: partyNames,
+                  onPartyMatched: (matched) =>
+                      _onPartyVoiceMatch(allBills, matched),
+                  onNoMatch: _onPartyVoiceNoMatch,
+                ),
               GestureDetector(
                 onTap: () {
                   HapticFeedback.selectionClick();
