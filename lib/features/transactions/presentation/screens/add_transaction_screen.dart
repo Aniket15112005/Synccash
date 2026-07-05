@@ -15,6 +15,8 @@ import 'package:synccash/features/sales/data/models/sale_bill_model.dart';
 import 'package:synccash/features/sales/domain/entities/sale_bill_entity.dart';
 import 'package:synccash/features/sales/presentation/widgets/bill_no_dropdown_field.dart';
 import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
+// ADDED: party provider for description autocomplete
+import 'package:synccash/features/sales/presentation/providers/party_provider.dart';
 
 class _C {
   static const bg       = Color(0xFF08090B);
@@ -63,6 +65,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   // ADDED: true while fetching the existing linked bill on edit open
   bool _loadingBill = false;
 
+  // ADDED: true once party name is confirmed (selected from list or pre-filled when editing)
+  bool _partyConfirmed = false;
+
   late final AnimationController _btnCtrl;
   late final Animation<double>   _btnScale;
 
@@ -89,7 +94,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     final tx = widget.existingTransaction;
     if (tx != null) {
       _type          = tx.type;
-      _category      = _normalizeCategory(tx.category); // 'retail'→'Retail', 'upi'→'UPI'
+      _category      = _normalizeCategory(tx.category);
       _selectedDate  = tx.createdAt;
       _amountCtrl.text = tx.amount.toStringAsFixed(0);
       _descCtrl.text   = tx.description;
@@ -99,11 +104,14 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       if (tx.linkedSaleBillId != null && tx.linkedSaleBillId!.isNotEmpty) {
         _loadExistingBill(tx.cashbookId, tx.linkedSaleBillId!);
       }
+      // Editing: description is already a confirmed party name
+      _partyConfirmed = tx.description.isNotEmpty;
     } else if (widget.initialCategory != null) {
       _category = widget.initialCategory!;
     }
 
-    // ADDED: rebuild when description changes so BillNoDropdownField updates
+    // ADDED: rebuild when description changes so BillNoDropdownField and
+    // party suggestions update
     _descCtrl.addListener(_onDescChanged);
   }
 
@@ -132,7 +140,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   }
 
   // ADDED
-  void _onDescChanged() => setState(() {});
+  void _onDescChanged() {
+    _partyConfirmed = false;
+    _selectedBill = null;
+    _isObPayment = false;
+    setState(() {});
+  }
 
   @override
   void dispose() {
@@ -149,7 +162,16 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   void _switchType(String type) {
     if (_type == type) return;
     HapticFeedback.selectionClick();
-    setState(() => _type = type);
+    setState(() {
+      _type = type;
+      _partyConfirmed = false;
+      // Clear bill link and OB flag when switching away from income —
+      // bills and OB payments only apply to income entries.
+      if (type != 'income') {
+        _selectedBill = null;
+        _isObPayment  = false;
+      }
+    });
   }
 
   void _switchCategory(String cat) {
@@ -233,10 +255,6 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       );
 
       if (existing != null) {
-        // EDIT path: always call updateTransaction.
-        // linkedSaleBillId is passed from _selectedBill (may be null if user
-        // cleared the bill selection — the repository handles the Firestore
-        // FieldValue.delete() for null so the old link is properly removed).
         await ref.read(transactionRepositoryProvider).updateTransaction(tx);
       } else if (_category == 'CB') {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
@@ -302,6 +320,31 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     final isEditing = widget.existingTransaction != null;
     final bool showBank = kIsWeb || defaultTargetPlatform != TargetPlatform.android;
 
+    // ADDED: merge names from parties collection (opening-balance saved) AND
+    // sale_bills (parties that have bills but no saved opening balance).
+    // This ensures all party names appear in suggestions regardless of whether
+    // an opening balance has been set for them.
+    final savedParties = ref.watch(partiesProvider).asData?.value ?? [];
+    final allBills = ref.watch(allSaleBillsProvider).asData?.value ?? [];
+    final _billPartyNames = allBills.map((b) => b.partyName.trim()).toSet();
+    final _allPartyNames = <String>{
+      ...savedParties.map((p) => p.partyName),
+      ..._billPartyNames,
+    }.toList()..sort();
+
+    final bool _canSuggest = _type == 'income' &&
+        (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI');
+
+    final String _descText = _descCtrl.text.trim();
+
+    // Suggestions are List<String> — merged from both sources above.
+    final List<String> _filteredParties = (_canSuggest && _descText.isNotEmpty)
+        ? _allPartyNames
+            .where((name) =>
+                name.toLowerCase().contains(_descText.toLowerCase()))
+            .toList()
+        : [];
+
     return Scaffold(
       backgroundColor: _C.bg,
       body: Stack(
@@ -310,7 +353,6 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           SafeArea(
             child: Column(
               children: [
-                // CHANGED: pass isEditing so the app bar title updates
                 _AppBar(
                   onBack: () => Navigator.pop(context),
                   isEditing: isEditing,
@@ -387,10 +429,33 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               .animate()
                               .fadeIn(delay: 210.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
-                          // ADDED: Bill dropdown — visible for Wholesale AND Bank income entries.
-                          // On edit open, shows a loading indicator while the existing bill
-                          // is being fetched; once loaded _selectedBill is pre-selected.
-                          if (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI') ...[
+
+                          // ADDED: party name autocomplete.
+                          // Rendered inline, directly below the description field.
+                          // Disappears automatically when _filteredParties is empty
+                          // (no match or conditions not met) — no extra toggle state.
+                          if (_filteredParties.isNotEmpty && !_partyConfirmed)
+                            _PartySuggestionList(
+                              parties: _filteredParties,
+                              onSelect: (name) {
+                                HapticFeedback.selectionClick();
+                                // Remove listener before programmatic setText so
+                                // _onDescChanged does NOT clear _partyConfirmed.
+                                _descCtrl.removeListener(_onDescChanged);
+                                _partyConfirmed = true;
+                                _descCtrl.text = name;
+                                _descCtrl.selection =
+                                    TextSelection.fromPosition(
+                                  TextPosition(offset: name.length),
+                                );
+                                _descCtrl.addListener(_onDescChanged);
+                                setState(() {});
+                                FocusScope.of(context).unfocus();
+                              },
+                            ),
+
+                          // ADDED: Bill dropdown — only visible once a party name has been confirmed (selected from list or pre-filled when editing).
+                          if (_type == 'income' && _partyConfirmed && (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI')) ...[
                             if (_loadingBill)
                               Padding(
                                 padding: const EdgeInsets.only(top: 12),
@@ -579,7 +644,6 @@ class _AmbientGlow extends StatelessWidget {
 
 class _AppBar extends StatelessWidget {
   final VoidCallback onBack;
-  // CHANGED: added isEditing so the title reflects add vs edit mode
   final bool isEditing;
 
   const _AppBar({
@@ -595,7 +659,6 @@ class _AppBar extends StatelessWidget {
         children: [
           _IconBtn(icon: Icons.arrow_back_ios_new_rounded, onTap: onBack),
           const SizedBox(width: 14),
-          // CHANGED: show 'Edit Entry' when editing, 'New Entry' otherwise
           Text(
             isEditing ? 'Edit Entry' : 'New Entry',
             style: const TextStyle(
@@ -947,13 +1010,149 @@ class _DescriptionFieldState extends State<_DescriptionField> {
   }
 }
 
+// ─── Party suggestion list ────────────────────────────────────────────────────
+// ADDED: smooth scrollable inline list of matching party names shown directly
+// below the description field. Conditions for visibility are evaluated in the
+// parent's build() method — this widget is only mounted when there are matches.
+
+class _PartySuggestionList extends StatelessWidget {
+  final List<String> parties;
+  final void Function(String name) onSelect;
+
+  const _PartySuggestionList({
+    required this.parties,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Each row is 52 px tall. Cap at 5 visible rows then scroll.
+    const double rowHeight = 52.0;
+    const double maxHeight = rowHeight * 5;
+    final double listHeight =
+        (parties.length * rowHeight).clamp(0.0, maxHeight);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
+      height: listHeight,
+      margin: const EdgeInsets.only(top: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F1115),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF202228)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.40),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(13),
+        child: ListView.separated(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          physics: const BouncingScrollPhysics(),
+          itemCount: parties.length,
+          separatorBuilder: (_, __) => Container(
+            height: 1,
+            margin: const EdgeInsets.symmetric(horizontal: 14),
+            color: const Color(0xFF1C1F26),
+          ),
+          itemBuilder: (_, i) => _PartySuggestionTile(
+            partyName: parties[i],
+            onTap: () => onSelect(parties[i]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PartySuggestionTile extends StatefulWidget {
+  final String partyName;
+  final VoidCallback onTap;
+
+  const _PartySuggestionTile({
+    required this.partyName,
+    required this.onTap,
+  });
+
+  @override
+  State<_PartySuggestionTile> createState() => _PartySuggestionTileState();
+}
+
+class _PartySuggestionTileState extends State<_PartySuggestionTile> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOut,
+        height: 52,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        color: _pressed ? const Color(0xFF18191E) : Colors.transparent,
+        child: Row(
+          children: [
+            // Party icon badge
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF18191E),
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: const Color(0xFF252830)),
+              ),
+              child: const Icon(
+                Icons.person_outline_rounded,
+                size: 15,
+                color: Color(0xFF6B7280),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Party name — medium weight, comfortable read size
+            Expanded(
+              child: Text(
+                widget.partyName,
+                style: const TextStyle(
+                  color: Color(0xFFD1D9E6),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: -0.1,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            // Arrow hint — subtle, shows it's selectable
+            const Icon(
+              Icons.north_west_rounded,
+              size: 13,
+              color: Color(0xFF3D4149),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Submit button ────────────────────────────────────────────────────────────
 
 class _SubmitButton extends StatelessWidget {
   final String type;
   final Color accent;
   final bool submitting;
-  // CHANGED: added isEditing so the button label reflects save vs record
   final bool isEditing;
   final VoidCallback onTap;
   const _SubmitButton({
@@ -996,7 +1195,6 @@ class _SubmitButton extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        // CHANGED: use edit icon when in edit mode
                         isEditing
                             ? Icons.check_rounded
                             : (type == 'income'
@@ -1007,7 +1205,6 @@ class _SubmitButton extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        // CHANGED: show 'Save Changes' when editing
                         isEditing
                             ? 'Save Changes'
                             : (type == 'income'

@@ -75,9 +75,10 @@ String _fmt(double v) => NumberFormat('#,##,##0', 'en_IN').format(v);
 sealed class _ListItem {}
 
 final class _GroupHeader extends _ListItem {
-  final String dateLabel;
-  final int    count;
-  _GroupHeader({required this.dateLabel, required this.count});
+  final String  dateLabel;
+  final int     count;
+  final double? incomeTotal; // only set when any filter-sheet filter is active
+  _GroupHeader({required this.dateLabel, required this.count, this.incomeTotal});
 }
 
 final class _TxEntry extends _ListItem {
@@ -86,7 +87,10 @@ final class _TxEntry extends _ListItem {
   _TxEntry({required this.transaction, required this.globalIndex});
 }
 
-List<_ListItem> _buildFlatList(List<dynamic> txs) {
+// CHANGED: accepts a plain boolean instead of a specific category string.
+// Income total is shown for the day group whenever ANY filter-sheet filter is
+// active — category, description, creator, or date range.
+List<_ListItem> _buildFlatList(List<dynamic> txs, bool showIncomeTotal) {
   final grouped = <String, List<dynamic>>{};
   for (final tx in txs) {
     final date = (tx.createdAt as DateTime).toLocal();
@@ -94,14 +98,16 @@ List<_ListItem> _buildFlatList(List<dynamic> txs) {
   }
   final flat    = <_ListItem>[];
   var globalIdx = 0;
+
   for (final entry in grouped.entries) {
     final parts = entry.key.split('-');
     final date  = DateTime(
       int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]),
     );
     flat.add(_GroupHeader(
-      dateLabel: _dayLabel(date),
-      count:     entry.value.length,
+      dateLabel:   _dayLabel(date),
+      count:       entry.value.length,
+      incomeTotal: showIncomeTotal ? _sumIncome(entry.value) : null,
     ));
     for (final tx in entry.value) {
       flat.add(_TxEntry(transaction: tx, globalIndex: globalIdx++));
@@ -160,13 +166,14 @@ class _TransactionHistoryScreenState
     super.dispose();
   }
 
-  List<_ListItem> _getFlat(List<dynamic> filtered) {
+  // CHANGED: takes a bool instead of a category string
+  List<_ListItem> _getFlat(List<dynamic> filtered, bool showIncomeTotal) {
     final key = Object.hash(
-        filtered.length, _typeFilter, _searchQuery,
+        filtered.length, _typeFilter, _searchQuery, showIncomeTotal,
         filtered.isEmpty ? 0 : filtered.first.hashCode);
     if (key != _cacheKey) {
       _cacheKey   = key;
-      _cachedFlat = _buildFlatList(filtered);
+      _cachedFlat = _buildFlatList(filtered, showIncomeTotal);
     }
     return _cachedFlat!;
   }
@@ -237,9 +244,23 @@ class _TransactionHistoryScreenState
 
             txAsync.when(
               data: (allTxs) {
+                // Watch all filter-sheet providers to detect whether any is active.
+                final categoryFilter    = ref.watch(selectedCategoryFilterProvider);
+                final nameFilter        = ref.watch(selectedNameFilterProvider);
+                final descFilter        = ref.watch(selectedDescriptionFilterProvider);
+                final dateFilter        = ref.watch(selectedDateFilterProvider);
+
+                // Show the daily income total in the date header whenever the
+                // user has applied at least one filter via the filter sheet.
+                final anyFilterSheetActive =
+                    categoryFilter != null ||
+                    (nameFilter != null && nameFilter.isNotEmpty) ||
+                    (descFilter != null && descFilter.isNotEmpty) ||
+                    dateFilter != null;
+
                 final filtered =
                     _applyFilters(allTxs, _typeFilter, _searchQuery);
-                final flatList = _getFlat(filtered);
+                final flatList = _getFlat(filtered, anyFilterSheetActive);
 
                 return SliverMainAxisGroup(
                   slivers: [
@@ -273,8 +294,9 @@ class _TransactionHistoryScreenState
                             final item = flatList[i];
                             if (item is _GroupHeader) {
                               return _DateSectionHeader(
-                                label: item.dateLabel,
-                                count: item.count,
+                                label:       item.dateLabel,
+                                count:       item.count,
+                                incomeTotal: item.incomeTotal,
                               );
                             }
                             final entry = item as _TxEntry;
@@ -761,12 +783,14 @@ class _TxRow extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DateSectionHeader extends StatelessWidget {
-  final String label;
-  final int    count;
+  final String  label;
+  final int     count;
+  final double? incomeTotal; // non-null when any filter-sheet filter is active
 
   const _DateSectionHeader({
     required this.label,
     required this.count,
+    this.incomeTotal,
   });
 
   @override
@@ -812,6 +836,20 @@ class _DateSectionHeader extends StatelessWidget {
           child: Divider(
               height: 1, thickness: 0.5, color: AppColors.border),
         ),
+        // Shows the day's total income in green whenever any filter-sheet
+        // filter is active (category, description, creator, or date range).
+        // Only income is shown — expense is never displayed here.
+        if (incomeTotal != null) ...[
+          const SizedBox(width: 10),
+          Text(
+            '₹${_fmt(incomeTotal!)}',
+            style: const TextStyle(
+              fontSize:   13,
+              fontWeight: FontWeight.w700,
+              color:      AppColors.income, // green
+            ),
+          ),
+        ],
       ]),
     );
   }
@@ -882,125 +920,15 @@ class _NoResultsState extends StatelessWidget {
                   style: TextStyle(
                     fontSize:   14,
                     fontWeight: FontWeight.w600,
-                    color:      AppColors.textSecondary,
+                    color:      AppColors.textPrimary,
                   ),
                 ),
               ),
             ),
           ],
-        ).animate().fadeIn(delay: 80.ms, duration: 260.ms),
+        ),
       ),
     );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Loading skeleton
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _LoadingState extends StatelessWidget {
-  const _LoadingState();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            height: 42,
-            decoration: BoxDecoration(
-              color:        AppColors.surface,
-              borderRadius: BorderRadius.circular(12),
-              border:       Border.all(color: AppColors.border),
-            ),
-          ).animate().shimmer(
-              duration: 1000.ms, color: Colors.white.withValues(alpha: 0.03)),
-          const SizedBox(height: 12),
-          Container(
-            height: 70,
-            decoration: BoxDecoration(
-              color:        AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
-              border:       Border.all(color: AppColors.border),
-            ),
-          ).animate().shimmer(
-              duration: 1100.ms, color: Colors.white.withValues(alpha: 0.03)),
-          const SizedBox(height: 24),
-          ...List.generate(6, (i) => _SkeletonRow(index: i)),
-        ],
-      ),
-    );
-  }
-}
-
-class _SkeletonRow extends StatelessWidget {
-  final int index;
-  const _SkeletonRow({required this.index});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height:  76,
-      margin:  const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      decoration: BoxDecoration(
-        color:        AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border:       Border.all(color: AppColors.border),
-      ),
-      child: Row(children: [
-        Container(
-          width: 42, height: 42,
-          decoration: BoxDecoration(
-            color:        AppColors.surfaceVariant,
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        const SizedBox(width: 13),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment:  MainAxisAlignment.center,
-            children: [
-              Container(
-                height: 11,
-                decoration: BoxDecoration(
-                  color:        AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(5),
-                ),
-              ),
-              const SizedBox(height: 7),
-              Container(
-                height: 9,
-                width:  80,
-                decoration: BoxDecoration(
-                  color:        AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(5),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        Container(
-          height: 13,
-          width:  58,
-          decoration: BoxDecoration(
-            color:        AppColors.surfaceVariant,
-            borderRadius: BorderRadius.circular(5),
-          ),
-        ),
-      ]),
-    )
-        .animate(delay: Duration(milliseconds: index * 40))
-        .fadeIn(duration: 200.ms)
-        .then()
-        .shimmer(
-          duration: 1000.ms,
-          color:    Colors.white.withValues(alpha: 0.03),
-        );
   }
 }
 
@@ -1013,58 +941,44 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return const Center(
       child: Padding(
-        padding: const EdgeInsets.all(40),
+        padding: EdgeInsets.all(40),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 72, height: 72,
-              decoration: BoxDecoration(
-                color:        AppColors.surface,
-                borderRadius: BorderRadius.circular(22),
-                border:       Border.all(color: AppColors.border),
-              ),
-              child: const Icon(
-                Icons.receipt_long_outlined,
-                size:  30,
-                color: AppColors.textSecondary,
-              ),
-            ),
-            const SizedBox(height: 22),
-            const Text(
+            Icon(Icons.receipt_long_outlined,
+                size: 40, color: AppColors.textMuted),
+            SizedBox(height: 16),
+            Text(
               'No transactions yet',
               style: TextStyle(
-                fontSize:      17,
-                fontWeight:    FontWeight.w700,
-                color:         AppColors.textPrimary,
-                letterSpacing: -0.4,
-              ),
-            ),
-            const SizedBox(height: 9),
-            const Text(
-              'Entries you log will be grouped\nby date and shown here.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color:    AppColors.textSecondary,
-                height:   1.55,
+                fontSize:   16,
+                fontWeight: FontWeight.w600,
+                color:      AppColors.textSecondary,
               ),
             ),
           ],
-        )
-            .animate()
-            .fadeIn(delay: 80.ms, duration: 300.ms)
-            .slideY(begin: 0.04, end: 0, curve: Curves.easeOut),
+        ),
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Error state
+//  Loading / error states
 // ─────────────────────────────────────────────────────────────────────────────
+
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: CircularProgressIndicator(strokeWidth: 2),
+    );
+  }
+}
 
 class _ErrorState extends StatelessWidget {
   final String message;
@@ -1074,41 +988,12 @@ class _ErrorState extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 62, height: 62,
-              decoration: BoxDecoration(
-                color:        const Color(0x14F87171),
-                borderRadius: BorderRadius.circular(20),
-                border:       Border.all(color: const Color(0x2EF87171)),
-              ),
-              child: const Icon(
-                Icons.wifi_off_rounded,
-                size:  26,
-                color: AppColors.expense,
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              'Could not load transactions',
-              style: TextStyle(
-                fontSize:      16,
-                fontWeight:    FontWeight.w700,
-                color:         AppColors.textPrimary,
-                letterSpacing: -0.3,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Pull down to try again.',
-              style: TextStyle(
-                  fontSize: 14, color: AppColors.textSecondary),
-            ),
-          ],
-        ).animate().fadeIn(duration: 260.ms),
+        padding: const EdgeInsets.all(40),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
+        ),
       ),
     );
   }

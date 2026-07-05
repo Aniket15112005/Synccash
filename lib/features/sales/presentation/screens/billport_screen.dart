@@ -408,19 +408,6 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
     final start = _startDate;
     final end   = _endDate;
 
-    // FIX: build per-party bill totals (all bills, not date-filtered)
-    // so we can detect single-bill overflow → OB routing.
-    final allBillTotals  = <String, double>{};    // billId  -> billTotal
-    final partyAllBillIds = <String, Set<String>>{}; // partyKey -> Set<billId>
-    for (final doc in billsSnap.docs) {
-      final d    = doc.data();
-      final name = (d['partyName'] as String? ?? '').trim().toLowerCase();
-      final id   = d['saleBillId']  as String? ?? doc.id;
-      final tot  = (d['billTotal']  as num?)?.toDouble() ?? 0.0;
-      allBillTotals[id] = tot;
-      partyAllBillIds.putIfAbsent(name, () => {}).add(id);
-    }
-
     final result = <_PartyExportData>[];
 
     for (final partyName in _selected) {
@@ -454,65 +441,135 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
           billStatus:        d['billStatus']          as String? ?? 'pending',
         );
 
-        final billId  = bill.saleBillId;
-        final pays    = List<_PayEntry>.from(payMap[billId] ?? []);
+        final pays    = List<_PayEntry>.from(payMap[bill.saleBillId] ?? []);
         pays.sort((a, b) => a.date.compareTo(b.date));
-
-        final received = pays.fold(0.0, (s, p) => s + p.amount)
-            .clamp(0.0, bill.billTotal);
         final firstPay = pays.isNotEmpty ? pays.first.date : null;
 
         partyBills.add(_BillData(
           bill:         bill,
-          received:     received,
+          received:     0.0, // computed below via FIFO logic
           firstPayDate: firstPay,
           payments:     pays,
         ));
       }
 
-      // Sort bills by date ascending
+      // Sort bills by billDate ascending for FIFO distribution
       partyBills.sort((a, b) => a.bill.billDate.compareTo(b.bill.billDate));
 
-      // FIX: compute how much of the opening balance has been paid.
-      // Handles explicit isObPayment transactions AND single-bill overflow.
+      // ── Mirror party_detail_screen._recomputeReceived() ──────────────────
+      // Build per-bill received map from linked payments
+      final map     = <String, double>{};
       double obPaid = 0.0;
-      if (ob > 0) {
-        final allBillIds = partyAllBillIds[partyKey] ?? {};
-        for (final txDoc in txSnap.docs) {
-          final raw         = txDoc.data();
-          final linkedId    = raw['linkedSaleBillId'] as String?;
-          final amount      = (raw['amount'] as num?)?.toDouble() ?? 0.0;
-          final isObPay     = raw['isObPayment'] as bool? ?? false;
-          final obPartyRaw  =
-              (raw['obPartyName'] as String? ?? '').toLowerCase().trim();
-          final desc        =
-              (raw['description'] as String? ?? '').toLowerCase();
+      double totalOldUnlinked = 0.0;
 
-          if (linkedId != null && linkedId.isNotEmpty &&
-              allBillIds.contains(linkedId)) {
-            // Single-bill party: excess payment above billTotal routes to OB.
-            if (allBillIds.length == 1) {
-              final billTotal = allBillTotals[linkedId] ?? 0.0;
-              final overflow  =
-                  (amount - billTotal).clamp(0.0, double.infinity);
-              if (overflow > 0) {
-                final rem = (ob - obPaid).clamp(0.0, double.infinity);
-                obPaid += overflow > rem ? rem : overflow;
-              }
-            }
-          } else if (isObPay &&
-              (obPartyRaw == partyKey ||
-               (obPartyRaw.isEmpty && desc.contains(partyKey)))) {
-            // Explicitly-flagged OB payment for this party.
-            obPaid += amount;
+      for (final bd in partyBills) {
+        final billId = bd.bill.saleBillId;
+        map[billId] = (payMap[billId] ?? [])
+            .fold(0.0, (s, p) => s + p.amount);
+      }
+
+      // Scan all income transactions for OB and old-style unlinked payments
+      for (final txDoc in txSnap.docs) {
+        final raw        = txDoc.data();
+        final linkedId   = raw['linkedSaleBillId'] as String?;
+        final amount     = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+        final desc       = (raw['description'] as String? ?? '').toLowerCase();
+        final isObPay    = raw['isObPayment'] as bool? ?? false;
+        final obPartyRaw = (raw['obPartyName'] as String? ?? '').toLowerCase().trim();
+
+        if (linkedId != null && linkedId.isNotEmpty) {
+          continue; // already handled via payMap above
+        } else if (isObPay &&
+            (obPartyRaw == partyKey ||
+             (obPartyRaw.isEmpty && desc.contains(partyKey)))) {
+          // Explicitly-flagged OB payment for this party
+          obPaid += amount;
+        } else if (desc.contains(partyKey)) {
+          // Old-style description-matched unlinked payment (pre-linkedSaleBillId era)
+          totalOldUnlinked += amount;
+        }
+      }
+
+      // Cap linked payments at bill total; redistribute overflow FIFO
+      {
+        final sorted = List<_BillData>.from(partyBills)
+          ..sort((a, b) => a.bill.billCreatedAt.compareTo(b.bill.billCreatedAt));
+        double pool = 0.0;
+
+        // Collect overflow from over-paid bills
+        for (final bd in sorted) {
+          final billId = bd.bill.saleBillId;
+          final raw    = map[billId] ?? 0.0;
+          final capped = raw.clamp(0.0, bd.bill.billTotal);
+          if (raw > capped) {
+            map[billId] = capped;
+            pool += raw - capped;
           }
         }
-        obPaid = obPaid.clamp(0.0, ob);
+
+        // Fill remaining capacity in bills (oldest first)
+        if (pool > 0) {
+          for (final bd in sorted) {
+            if (pool <= 0) break;
+            final billId  = bd.bill.saleBillId;
+            final already = map[billId] ?? 0.0;
+            final rem     = (bd.bill.billTotal - already).clamp(0.0, double.infinity);
+            if (rem <= 0) continue;
+            final toThis  = pool < rem ? pool : rem;
+            map[billId] = already + toThis;
+            pool -= toThis;
+          }
+          // Remaining pool flows to opening balance
+          if (pool > 0 && ob > 0) {
+            final remainOb = (ob - obPaid).clamp(0.0, double.infinity);
+            obPaid += pool < remainOb ? pool : remainOb;
+          }
+        }
       }
+
+      // FIFO distribution of old-style unlinked payments (bills first, then OB)
+      if (totalOldUnlinked > 0) {
+        var overflow = totalOldUnlinked;
+
+        // partyBills already sorted by billDate ascending
+        for (final bd in partyBills) {
+          if (overflow <= 0) break;
+          final billId      = bd.bill.saleBillId;
+          final alreadyRcvd = map[billId] ?? 0.0;
+          final billRemain  =
+              (bd.bill.billTotal - alreadyRcvd).clamp(0.0, double.infinity);
+          final toThisBill  = overflow > billRemain ? billRemain : overflow;
+          if (toThisBill > 0) {
+            map[billId] = alreadyRcvd + toThisBill;
+          }
+          overflow -= toThisBill;
+        }
+
+        // Remaining overflow goes to opening balance
+        if (overflow > 0 && ob > 0) {
+          final remainingOb = (ob - obPaid).clamp(0.0, double.infinity);
+          final toOb = overflow > remainingOb ? remainingOb : overflow;
+          obPaid += toOb;
+        }
+      }
+
+      obPaid = obPaid.clamp(0.0, ob);
+
+      // Rebuild partyBills with correct received values from map
+      final finalBills = partyBills.map((bd) {
+        final billId   = bd.bill.saleBillId;
+        final received = (map[billId] ?? 0.0).clamp(0.0, bd.bill.billTotal);
+        return _BillData(
+          bill:         bd.bill,
+          received:     received,
+          firstPayDate: bd.firstPayDate,
+          payments:     bd.payments,
+        );
+      }).toList();
 
       result.add(_PartyExportData(
         name:           partyName,
-        bills:          partyBills,
+        bills:          finalBills,
         openingBalance: ob,
         obPaid:         obPaid,
       ));
