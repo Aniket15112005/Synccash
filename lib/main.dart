@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'package:synccash/app/app.dart';
 import 'package:synccash/core/services/notification_service.dart';
@@ -12,12 +13,15 @@ import 'package:synccash/firebase_options.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1. Firebase core
+  // 1. Load .env (API keys)
+  await dotenv.load(fileName: '.env');
+
+  // 2. Firebase core
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // 2. Firestore offline persistence (mobile only)
+  // 3. Firestore offline persistence (mobile only)
   if (!kIsWeb) {
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
@@ -25,12 +29,12 @@ void main() async {
     );
   }
 
-  // 3. Lock to portrait (mobile only)
+  // 4. Lock to portrait (mobile only)
   if (!kIsWeb) {
     await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   }
 
-  // 4. Status/nav bar styling (mobile only)
+  // 5. Status/nav bar styling (mobile only)
   if (!kIsWeb) {
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
@@ -45,7 +49,7 @@ void main() async {
 
   runApp(const ProviderScope(child: SyncCashApp()));
 
-  // 5. Notifications — runs AFTER runApp so app shows instantly
+  // 6. Notifications — runs AFTER runApp so app shows instantly
   NotificationService.initialize().catchError((e) {
     if (kDebugMode) debugPrint('⚠️ NotificationService init error: $e');
   });

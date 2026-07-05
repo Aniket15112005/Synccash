@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -11,7 +12,7 @@ class PartyVoiceNavigator {
   PartyVoiceNavigator(this.apiKey);
 
   static const _endpoint =
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
   /// Returns the extracted party name (raw, as spoken/transcribed) or null
   /// if nothing usable was said.
@@ -59,17 +60,26 @@ exactly this shape:
         'temperature': 0.1,
         'response_mime_type': 'application/json',
         'maxOutputTokens': 100,
-        'thinkingConfig': {'thinkingBudget': 0},
       },
     });
 
-    final response = await http.post(
-      Uri.parse('$_endpoint?key=$apiKey'),
-      headers: {'Content-Type': 'application/json'},
-      body: body,
-    );
-
-    if (response.statusCode != 200) {
+    // 503 = model overload → retry up to 3×; 429 = quota exhausted → friendly message.
+    late http.Response response;
+    for (int _attempt = 1; ; _attempt++) {
+      response = await http.post(
+        Uri.parse('$_endpoint?key=$apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      );
+      if (response.statusCode == 200) break;
+      if (response.statusCode == 503 && _attempt < 3) {
+        await Future.delayed(Duration(seconds: _attempt));
+        continue;
+      }
+      if (response.statusCode == 429) {
+        throw Exception(
+            'Daily voice quota exceeded. Please try again tomorrow or upgrade your Gemini API plan at ai.google.dev.');
+      }
       throw Exception(
           'Gemini API error (${response.statusCode}): ${response.body}');
     }
