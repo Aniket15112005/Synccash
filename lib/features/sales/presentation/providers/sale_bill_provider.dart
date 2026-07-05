@@ -644,3 +644,17 @@ class _OverflowData {
     required this.obRemaining,
   });
 }
+/// All sale bills for the current cashbook — unfiltered.
+/// Used by voice navigation, party-name autocomplete, and bill dropdowns.
+final allSaleBillsProvider = StreamProvider<List<SaleBillEntity>>((ref) {
+  final cashbookId = ref.watch(currentCashbookIdProvider);
+  if (cashbookId == null || cashbookId.isEmpty) return const Stream.empty();
+  return FirebaseFirestore.instance
+      .collection('cashbooks')
+      .doc(cashbookId)
+      .collection('sale_bills')
+      .orderBy('billCreatedAt', descending: true)
+      .snapshots()
+      .map((snap) =>
+          snap.docs.map(SaleBillModel.fromFirestore).toList());
+});
