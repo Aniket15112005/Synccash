@@ -135,3 +135,4 @@ test_driver/screenshots/
 # Generated web build
 
 build/web/
+.env

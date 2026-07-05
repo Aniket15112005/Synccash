@@ -18,6 +18,11 @@ import 'package:synccash/features/sales/presentation/providers/sale_bill_provide
 // ADDED: party provider for description autocomplete
 import 'package:synccash/features/sales/presentation/providers/party_provider.dart';
 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:synccash/voice/voice_recorder_service.dart';
+import 'package:synccash/voice/ai_command_fallback.dart';
+import 'package:synccash/voice/parsed_entry.dart';
+
 class _C {
   static const bg       = Color(0xFF08090B);
   static const surface  = Color(0xFF111316);
@@ -67,6 +72,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
 
   // ADDED: true once party name is confirmed (selected from list or pre-filled when editing)
   bool _partyConfirmed = false;
+
+  // ADDED: voice command state
+  final _voiceRecorder = VoiceRecorderService();
+  bool _voiceRecording = false;
+  bool _voiceProcessing = false;
 
   late final AnimationController _btnCtrl;
   late final Animation<double>   _btnScale;
@@ -154,7 +164,134 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     _amountCtrl.dispose();
     _descCtrl.dispose();
     _btnCtrl.dispose();
+    _voiceRecorder.dispose(); // ADDED
     super.dispose();
+  }
+
+  // ADDED: voice command handler — records audio, sends to Gemini for
+  // transcription + structured extraction, then pre-fills the form fields.
+  Future<void> _onVoiceMicTap() async {
+    if (!_voiceRecording) {
+      final started = await _voiceRecorder.start();
+      if (started) {
+        HapticFeedback.selectionClick();
+        setState(() => _voiceRecording = true);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission denied')),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _voiceRecording = false;
+      _voiceProcessing = true;
+    });
+
+    try {
+      final bytes = await _voiceRecorder.stop();
+      final apiKey = dotenv.env['GEMINI_API_KEY'];
+      if (apiKey == null || apiKey.isEmpty) {
+        throw Exception('Missing GEMINI_API_KEY');
+      }
+      final result = await AiCommandFallback(apiKey).parseAudio(bytes);
+
+      if (!mounted) return;
+
+      if (result == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't understand, please try again or type manually"),
+          ),
+        );
+        return;
+      }
+
+      final parsed = ParsedEntry.fromJson(result);
+      if (!parsed.isUsable) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Couldn't detect amount/type, please try again"),
+          ),
+        );
+        return;
+      }
+
+      // ADDED: build the same "all known party names" set the suggestion
+      // list uses, so we can auto-confirm an exact match spoken by voice
+      // instead of forcing a manual tap on the suggestion list.
+      final savedParties = ref.read(partiesProvider).asData?.value ?? [];
+      final allBills = ref.read(allSaleBillsProvider).asData?.value ?? [];
+      final allPartyNames = <String>{
+        ...savedParties.map((p) => p.partyName),
+        ...allBills.map((b) => b.partyName.trim()),
+      };
+
+      // Pre-fill existing form fields with the parsed voice entry — user still
+      // reviews and taps the existing Save/Record button, nothing auto-saves.
+      setState(() {
+        if (parsed.amount != null) {
+          _amountCtrl.text = parsed.amount!.toStringAsFixed(0);
+        }
+        if (parsed.type == 'income' || parsed.type == 'expense') {
+          _type = parsed.type!;
+        }
+        if (parsed.partyName != null && parsed.partyName!.trim().isNotEmpty) {
+          final spokenName = parsed.partyName!.trim();
+          // Temporarily detach the listener so setting text doesn't reset
+          // _partyConfirmed before we've had a chance to check for a match.
+          _descCtrl.removeListener(_onDescChanged);
+          _descCtrl.text = spokenName;
+          final exactMatch = allPartyNames.firstWhere(
+            (name) => name.toLowerCase() == spokenName.toLowerCase(),
+            orElse: () => '',
+          );
+          if (exactMatch.isNotEmpty) {
+            _descCtrl.text = exactMatch; // use the saved casing/spelling
+            _partyConfirmed = true;
+          } else {
+            _partyConfirmed = false; // shows suggestion list for manual tap
+          }
+          _descCtrl.addListener(_onDescChanged);
+        }
+        // ADDED: apply spoken category (Retail/Wholesale/Bank/UPI/CB). Logic
+        // mirrors _switchCategory, inlined here since we're already inside
+        // a setState block (calling _switchCategory would nest a 2nd one).
+        if (parsed.category != null && parsed.category!.trim().isNotEmpty) {
+          const validCategories = {'Retail', 'Wholesale', 'Bank', 'UPI', 'CB'};
+          final normalized = _normalizeCategory(parsed.category!.trim());
+          if (validCategories.contains(normalized) && normalized != _category) {
+            _category = normalized;
+            if (normalized != 'Wholesale' && normalized != 'Bank' && normalized != 'UPI') {
+              _selectedBill = null;
+              _isObPayment = false;
+            }
+          }
+        }
+        // ADDED: apply spoken date (e.g. "yesterday", "5 July") if Gemini
+        // resolved one; otherwise the field simply stays at its current
+        // default (today, or whatever was already picked).
+        if (parsed.date != null) {
+          final d = parsed.date!;
+          final now = DateTime.now();
+          final isToday = d.year == now.year && d.month == now.month && d.day == now.day;
+          _selectedDate = isToday ? now : DateTime(d.year, d.month, d.day, 12, 0, 0);
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Heard: "${parsed.transcript ?? ''}"')),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Voice error: ${e.toString()}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _voiceProcessing = false);
+    }
   }
 
   Color get _accentColor => _type == 'income' ? _C.income : _C.expense;
@@ -502,7 +639,20 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               .animate()
                               .fadeIn(delay: 245.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
-                          const SizedBox(height: 36),
+                          const SizedBox(height: 20),
+                          // ADDED: voice command mic button — tap to speak an
+                          // entry (English or Hindi), it pre-fills the form
+                          // above; user still reviews and taps Record/Save.
+                          _VoiceMicButton(
+                            recording:  _voiceRecording,
+                            processing: _voiceProcessing,
+                            accent:     _accentColor,
+                            onTap:      _onVoiceMicTap,
+                          )
+                              .animate()
+                              .fadeIn(delay: 260.ms, duration: 280.ms)
+                              .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                          const SizedBox(height: 16),
                           ScaleTransition(
                             scale: _btnScale,
                             child: _SubmitButton(
@@ -1141,6 +1291,87 @@ class _PartySuggestionTileState extends State<_PartySuggestionTile> {
               color: Color(0xFF3D4149),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Voice mic button ─────────────────────────────────────────────────────────
+// ADDED: speak-to-fill entry point. Tap once to start recording, tap again to
+// stop and send to Gemini for transcription + parsing. Purely fills the form
+// above — the existing Submit button still does the actual save.
+
+class _VoiceMicButton extends StatelessWidget {
+  final bool recording;
+  final bool processing;
+  final Color accent;
+  final VoidCallback onTap;
+
+  const _VoiceMicButton({
+    required this.recording,
+    required this.processing,
+    required this.accent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: processing ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        height: 52,
+        decoration: BoxDecoration(
+          color: recording ? accent.withValues(alpha: 0.14) : const Color(0xFF14161B),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: recording ? accent.withValues(alpha: 0.55) : const Color(0xFF23262D),
+          ),
+        ),
+        child: Center(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            child: processing
+                ? Row(
+                    key: const ValueKey('processing'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: _C.textSec),
+                      ),
+                      SizedBox(width: 10),
+                      Text(
+                        'Listening to voice…',
+                        style: TextStyle(color: _C.textSec, fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  )
+                : Row(
+                    key: ValueKey<bool>(recording),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        recording ? Icons.stop_circle_rounded : Icons.mic_rounded,
+                        size: 18,
+                        color: recording ? accent : _C.textSec,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        recording ? 'Tap to stop & save' : 'Speak to add entry',
+                        style: TextStyle(
+                          color: recording ? accent : _C.textSec,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.1,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
         ),
       ),
     );
