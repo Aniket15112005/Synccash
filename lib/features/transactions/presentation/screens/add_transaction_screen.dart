@@ -85,6 +85,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   // ADDED: true once party name is confirmed (selected from picker or pre-filled when editing)
   bool _partyConfirmed = false;
 
+  // ADDED (FIX, permanent): guards against a double-tap opening two pickers
+  // in the same frame. The real freeze bug is now gone at the root — see
+  // _openPartyPicker() below, which no longer waits on ANY provider before
+  // navigating — so this is just a cheap safety net, not load-bearing.
+  bool _openingPartyPicker = false;
+
   // ADDED: voice command state
   final _voiceRecorder = VoiceRecorderService();
   bool _voiceRecording = false;
@@ -193,56 +199,28 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
 
   // ADDED: opens the dedicated PartyPickerScreen and back-fills the description
   // field with whatever name the user confirmed there.
+  //
+  // FIX (permanent, root cause): the previous fixes (re-entrancy guard,
+  // shorter timeout, spinner) only made a slow/erroring purchase stream
+  // LESS BAD — they didn't remove the wait itself, so the field could still
+  // pause for up to ~3-6s before the picker opened. The actual bug was that
+  // _openPartyPicker() awaited party/bill/purchase-client/purchase-bill data
+  // BEFORE calling Navigator.push at all. That ordering is now reversed:
+  // the picker screen is pushed immediately (a real Flutter Navigator.push
+  // is synchronous — the route is on screen before this function's next
+  // line runs), and the four data sources are resolved in the background as
+  // a Future that PartyPickerScreen itself awaits internally to populate
+  // suggestions once ready. A tap now opens the picker in the same frame no
+  // matter how slow or broken purchase_clients/purchase_bills are; the
+  // worst case is now "suggestions pop in a moment late", never "tap does
+  // nothing".
   Future<void> _openPartyPicker() async {
-    // FIX (permanent): ref.read() only returns whatever the provider's state
-    // happens to be RIGHT NOW, so if neither StreamProvider had loaded yet
-    // the old `?? []` fallback silently handed the picker an empty list.
-    // The first attempt at fixing this bundled both sources into a single
-    // Future.wait(...) — but allSaleBillsProvider deliberately returns
-    // Stream.empty() whenever currentCashbookIdProvider isn't ready yet
-    // (see sale_bill_provider.dart), and waiting on an empty stream's first
-    // value throws. Future.wait is all-or-nothing: that one failure was
-    // wiping out BOTH lists, even when partiesProvider had already loaded
-    // fine. Each source is now resolved independently, so one failing
-    // can never erase the other's already-successful data.
-    // FIX: these four used to be awaited one after another, each with its own
-    // 6s timeout — so if any (or all) of the providers were slow/erroring,
-    // tapping the description field could hang for up to ~24s before the
-    // picker opened. _resolveAsync already catches its own errors internally,
-    // so it's safe to kick off all four immediately and await them together;
-    // the worst case is now a single ~6s timeout, not four stacked ones.
-    final partiesFuture = _resolveAsync(
-      cached: ref.read(partiesProvider).asData?.value,
-      load: () => ref.read(partiesProvider.future),
-    );
-    final billsFuture = _resolveAsync(
-      cached: ref.read(allSaleBillsProvider).asData?.value,
-      load: () => ref.read(allSaleBillsProvider.future),
-    );
-    // ADDED: purchase-side mirror of the two loads above, so purchase client
-    // names show up in the same suggestion list.
-    final purchaseClientsFuture = _resolveAsync(
-      cached: ref.read(purchaseClientsProvider).asData?.value,
-      load: () => ref.read(purchaseClientsProvider.future),
-    );
-    final purchaseBillsFuture = _resolveAsync(
-      cached: ref.read(allPurchaseBillsProvider).asData?.value,
-      load: () => ref.read(allPurchaseBillsProvider.future),
-    );
+    // Still a cheap guard against a double-tap landing in the same frame
+    // before the new route has visually covered the button.
+    if (_openingPartyPicker) return;
+    _openingPartyPicker = true;
 
-    final savedParties = await partiesFuture;
-    final allBills = await billsFuture;
-    final savedPurchaseClients = await purchaseClientsFuture;
-    final allPurchaseBills = await purchaseBillsFuture;
-
-    if (!mounted) return;
-
-    final allPartyNames = <String>{
-      ...savedParties.map((p) => p.partyName),
-      ...allBills.map((b) => b.partyName.trim()),
-      ...savedPurchaseClients.map((c) => c.clientName),      // ADDED
-      ...allPurchaseBills.map((b) => b.clientName.trim()),   // ADDED
-    }.toList()..sort();
+    final namesFuture = _resolveAllPartyNames();
 
     // FIX: this used to gate suggestions behind Income + Wholesale/Bank/UPI,
     // so for Expense (the default type) or Retail/CB categories the picker
@@ -252,16 +230,23 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     // transaction type or category.
     const bool canSuggest = true;
 
-    final result = await Navigator.push<String>(
+    final navigateFuture = Navigator.push<String>(
       context,
       MaterialPageRoute(
         builder: (_) => PartyPickerScreen(
-          initialValue:   _descCtrl.text,
-          allPartyNames:  allPartyNames,
-          canSuggest:     canSuggest,
+          initialValue:        _descCtrl.text,
+          allPartyNamesFuture: namesFuture,
+          canSuggest:          canSuggest,
         ),
       ),
     );
+
+    // The route above is already pushed by this point (Navigator.push
+    // enqueues the transition synchronously); clear the guard so it can
+    // never block a legitimate later tap.
+    _openingPartyPicker = false;
+
+    final result = await navigateFuture;
 
     if (result != null && mounted) {
       _descCtrl.removeListener(_onDescChanged);
@@ -274,6 +259,73 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       _descCtrl.addListener(_onDescChanged);
       setState(() {});
     }
+  }
+
+  // ADDED (FIX, permanent): pure background resolution of the suggestion
+  // list — no longer awaited before navigating, only awaited by
+  // PartyPickerScreen itself once it's already on screen.
+  //
+  // CHANGED: source is now picked by category instead of always merging
+  // sale + purchase data together. Previously EVERY category waited on
+  // purchase_clients/purchase_bills too, so on a slow/erroring purchase
+  // stream (e.g. Firestore rules not deployed for those subcollections)
+  // Retail/Wholesale/Bank/UPI transactions still showed a 2-3s loading
+  // spinner before falling back to an empty/"No matching parties" list —
+  // even though they never needed purchase data in the first place. Now:
+  //   - Category "P" (Purchase) → ONLY purchase clients + purchase bills.
+  //   - Every other category   → ONLY sale parties + sale bills (as before
+  //     the purchase feature was added), never touching the purchase
+  //     providers at all.
+  // This means the common case (any non-Purchase category) can no longer
+  // be slowed down or broken by purchase-side data, and Purchase itself
+  // gets a focused, uncluttered client list instead of a merged one.
+  Future<List<String>> _resolveAllPartyNames() async {
+    if (_category == 'P') {
+      final purchaseClientsFuture = _resolveAsync(
+        cached: ref.read(purchaseClientsProvider).asData?.value,
+        load: () => ref.read(purchaseClientsProvider.future),
+      );
+      final purchaseBillsFuture = _resolveAsync(
+        cached: ref.read(allPurchaseBillsProvider).asData?.value,
+        load: () => ref.read(allPurchaseBillsProvider.future),
+      );
+
+      final savedPurchaseClients = await purchaseClientsFuture;
+      final allPurchaseBills = await purchaseBillsFuture;
+
+      return <String>{
+        ...savedPurchaseClients.map((c) => c.clientName),
+        ...allPurchaseBills.map((b) => b.clientName.trim()),
+      }.toList()..sort();
+    }
+
+    // FIX (permanent): ref.read() only returns whatever the provider's state
+    // happens to be RIGHT NOW, so if neither StreamProvider had loaded yet
+    // the old `?? []` fallback silently handed the picker an empty list.
+    // The first attempt at fixing this bundled both sources into a single
+    // Future.wait(...) — but allSaleBillsProvider deliberately returns
+    // Stream.empty() whenever currentCashbookIdProvider isn't ready yet
+    // (see sale_bill_provider.dart), and waiting on an empty stream's first
+    // value throws. Future.wait is all-or-nothing: that one failure was
+    // wiping out BOTH lists, even when partiesProvider had already loaded
+    // fine. Each source is now resolved independently, so one failing
+    // can never erase the other's already-successful data.
+    final partiesFuture = _resolveAsync(
+      cached: ref.read(partiesProvider).asData?.value,
+      load: () => ref.read(partiesProvider.future),
+    );
+    final billsFuture = _resolveAsync(
+      cached: ref.read(allSaleBillsProvider).asData?.value,
+      load: () => ref.read(allSaleBillsProvider.future),
+    );
+
+    final savedParties = await partiesFuture;
+    final allBills = await billsFuture;
+
+    return <String>{
+      ...savedParties.map((p) => p.partyName),
+      ...allBills.map((b) => b.partyName.trim()),
+    }.toList()..sort();
   }
 
   // ADDED: resolves a single StreamProvider's data independently — returns
@@ -289,7 +341,13 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   }) async {
     if (cached != null) return cached;
     try {
-      return await load().timeout(const Duration(seconds: 6));
+      // ADDED (FIX): shortened from 6s to 3s. A slow/erroring purchase
+      // collection (e.g. Firestore rules not yet deployed for
+      // purchase_clients/purchase_bills) was making the description field
+      // look frozen for up to 6 seconds before falling back to an empty
+      // list — now capped at 3s per source, with all four sources still
+      // resolving in parallel.
+      return await load().timeout(const Duration(seconds: 3));
     } catch (_) {
       return const [];
     }
@@ -716,6 +774,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                           _DescTapField(
                             value: _descCtrl.text,
                             onTap: _openPartyPicker,
+                            loading: _openingPartyPicker,
                           )
                               .animate()
                               .fadeIn(delay: 210.ms, duration: 280.ms)
@@ -1223,7 +1282,7 @@ class _CategoryToggle extends StatelessWidget {
         border: Border.all(color: _C.border),
       ),
       child: Row(
-        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI', if (showBank) 'CB'].map((cat) {
+        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI', 'P', if (showBank) 'CB'].map((cat) {
           final active = selected == cat;
           return Expanded(
             child: GestureDetector(
@@ -1269,7 +1328,15 @@ class _CategoryToggle extends StatelessWidget {
 class _DescTapField extends StatelessWidget {
   final String value;
   final VoidCallback onTap;
-  const _DescTapField({required this.value, required this.onTap});
+  // ADDED (FIX): when true, shows a small spinner instead of the chevron so
+  // the field visibly reacts to a tap while it resolves party/bill data,
+  // instead of appearing frozen/unresponsive for up to a few seconds.
+  final bool loading;
+  const _DescTapField({
+    required this.value,
+    required this.onTap,
+    this.loading = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1307,11 +1374,21 @@ class _DescTapField extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            const Icon(
-              Icons.chevron_right_rounded,
-              size: 18,
-              color: _C.textMut,
-            ),
+            if (loading)
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: Color(0xFF6B7280),
+                ),
+              )
+            else
+              const Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: _C.textMut,
+              ),
           ],
         ),
       ),

@@ -621,10 +621,14 @@ class _EditTransactionSheetState extends ConsumerState<_EditTransactionSheet> {
     final result = await Navigator.push<String>(
       context,
       MaterialPageRoute(
+        // CHANGED: PartyPickerScreen now takes allPartyNamesFuture instead
+        // of an already-resolved List (see party_picker_screen.dart) — this
+        // call site already had the names ready synchronously above, so
+        // it's wrapped in Future.value(...) with no behavior change here.
         builder: (_) => PartyPickerScreen(
-          initialValue:  _descCtrl.text,
-          allPartyNames: allPartyNames,
-          canSuggest:    canSuggest,
+          initialValue:        _descCtrl.text,
+          allPartyNamesFuture: Future.value(allPartyNames),
+          canSuggest:          canSuggest,
         ),
       ),
     );

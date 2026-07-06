@@ -14,8 +14,14 @@ class PartyPickerScreen extends StatefulWidget {
   /// Current value to pre-populate the text field.
   final String initialValue;
 
-  /// All party names to show in suggestions (already sorted).
-  final List<String> allPartyNames;
+  /// ADDED (FIX, permanent): party names now arrive as a Future instead of
+  /// an already-resolved List. This screen is pushed by the caller BEFORE
+  /// that data has necessarily loaded — see add_transaction_screen.dart's
+  /// _openPartyPicker() — so it opens instantly every time, and just shows
+  /// a brief "loading suggestions…" state here if the future is still
+  /// pending (e.g. a slow purchase_clients/purchase_bills stream) instead of
+  /// making the whole screen wait to appear.
+  final Future<List<String>> allPartyNamesFuture;
 
   /// Whether suggestions should be shown at all.
   /// Pass false for expense / non-wholesale categories → no suggestions,
@@ -25,7 +31,7 @@ class PartyPickerScreen extends StatefulWidget {
   const PartyPickerScreen({
     super.key,
     required this.initialValue,
-    required this.allPartyNames,
+    required this.allPartyNamesFuture,
     required this.canSuggest,
   });
 
@@ -36,18 +42,33 @@ class PartyPickerScreen extends StatefulWidget {
 class _PartyPickerScreenState extends State<PartyPickerScreen> {
   late final TextEditingController _ctrl;
   final FocusNode _focusNode = FocusNode();
+  List<String> _allNames = [];
   List<String> _filtered = [];
+  // ADDED (FIX, permanent): true until allPartyNamesFuture resolves, so the
+  // suggestion area can show a lightweight loading state instead of a
+  // misleading "No matching parties" while data is still on the way.
+  bool _loadingNames = true;
 
   @override
   void initState() {
     super.initState();
     _ctrl = TextEditingController(text: widget.initialValue);
-    _updateFilter(widget.initialValue);
     _ctrl.addListener(() => _updateFilter(_ctrl.text));
     // Request focus after first frame so keyboard opens immediately.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
+
+    if (widget.canSuggest) {
+      widget.allPartyNamesFuture.then((names) {
+        if (!mounted) return;
+        _allNames = names;
+        _loadingNames = false;
+        _updateFilter(_ctrl.text);
+      });
+    } else {
+      _loadingNames = false;
+    }
   }
 
   void _updateFilter(String text) {
@@ -56,7 +77,7 @@ class _PartyPickerScreenState extends State<PartyPickerScreen> {
       return;
     }
     final q = text.trim().toLowerCase();
-    final next = widget.allPartyNames
+    final next = _allNames
         .where((n) => n.toLowerCase().contains(q))
         .toList();
     setState(() => _filtered = next);
@@ -235,6 +256,37 @@ class _PartyPickerScreenState extends State<PartyPickerScreen> {
             SizedBox(height: 12),
             Text(
               'Type a description below',
+              style: TextStyle(
+                color: Color(0xFF3D4149),
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // ADDED (FIX, permanent): while allPartyNamesFuture is still resolving
+    // (e.g. a slow purchase_clients/purchase_bills stream), show a clear
+    // "loading" state instead of the misleading "No matching parties" —
+    // the screen itself is already open and usable (typing + Done both
+    // work immediately), only the suggestion list is still on the way.
+    if (_loadingNames && _filtered.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Color(0xFF6B7280),
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Loading suggestions…',
               style: TextStyle(
                 color: Color(0xFF3D4149),
                 fontSize: 14,
