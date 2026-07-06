@@ -1,117 +1,121 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+
+/// Result of a recording: raw bytes + the mime type they're actually in.
+/// Native platforms give real PCM16 (wrapped as WAV here). Web gives
+/// whatever container/codec the browser's MediaRecorder actually used —
+/// which is NOT PCM, no matter what encoder you ask for.
+class RecordedAudio {
+  final Uint8List bytes;
+  final String mimeType;
+  RecordedAudio(this.bytes, this.mimeType);
+}
 
 /// Push-to-talk audio capture. Records only between start() and stop().
 ///
-/// Strategy per platform:
-///   Web  — startStream + pcm16bits (browser MediaRecorder requires PCM),
-///           raw samples are wrapped in a WAV header before sending to Gemini.
-///   Native (Android / iOS)
-///        — file-based recording with aacLc into a temp .m4a file.
-///           startStream + aacLc is NOT supported by the record package on
-///           native and throws AudioRecorderNotInitialisedException.
-///           File-based recording is reliable on both platforms.
+/// IMPORTANT: `record`'s web backend is built on the browser's
+/// MediaRecorder API, which cannot produce raw PCM. Even when you request
+/// AudioEncoder.pcm16bits on web, it silently records Opus (usually in a
+/// WebM container, sometimes AAC/MP4 on Safari) instead — with no error,
+/// no warning your app sees. Treating those bytes as PCM and wrapping
+/// them in a fake WAV header (the old bug) produces a corrupt file that
+/// no STT API can read. Fix: on web, record in whatever the browser
+/// actually supports, and pass the REAL mime type through — don't fake WAV.
 class VoiceRecorderService {
   final AudioRecorder _recorder = AudioRecorder();
-
-  // Web streaming state
   StreamSubscription<Uint8List>? _sub;
   final BytesBuilder _buffer = BytesBuilder();
 
-  // Native file-based state
-  String? _nativeTempPath;
-
-  static const int _sampleRate   = 16000;
-  static const int _numChannels  = 1;
+  static const int _sampleRate = 16000;
+  static const int _numChannels = 1;
   static const int _bitsPerSample = 16;
+
+  // Which web codec actually got used — decided at start() time, since it
+  // depends on what the browser supports (Chrome/Firefox: Opus, Safari:
+  // typically AAC — Safari has historically not supported Opus in
+  // MediaRecorder, including in iOS PWA contexts).
+  String _webMimeType = 'audio/webm';
 
   /// Starts recording. Returns false if mic permission was denied.
   Future<bool> start() async {
     final hasPermission = await _recorder.hasPermission();
     if (!hasPermission) return false;
 
+    _buffer.clear();
+
+    late final RecordConfig config;
+
     if (kIsWeb) {
-      _buffer.clear();
-      final stream = await _recorder.startStream(
-        const RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          sampleRate: _sampleRate,
+      if (await _recorder.isEncoderSupported(AudioEncoder.opus)) {
+        config = const RecordConfig(
+          encoder: AudioEncoder.opus,
           numChannels: _numChannels,
-        ),
-      );
-      _sub = stream.listen((chunk) => _buffer.add(chunk));
-    } else {
-      // Native: file-based recording into a temp path.
-      final dir = await getTemporaryDirectory();
-      _nativeTempPath =
-          '${dir.path}/synccash_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await _recorder.start(
-        const RecordConfig(
+        );
+        _webMimeType = 'audio/ogg';
+      } else if (await _recorder.isEncoderSupported(AudioEncoder.aacLc)) {
+        config = const RecordConfig(
           encoder: AudioEncoder.aacLc,
-          sampleRate: _sampleRate,
           numChannels: _numChannels,
-        ),
-        path: _nativeTempPath!,
+        );
+        _webMimeType = 'audio/aac';
+      } else {
+        // Last resort — let the browser pick whatever it can.
+        config = const RecordConfig(numChannels: _numChannels);
+        _webMimeType = 'audio/webm';
+      }
+    } else {
+      // Native (Android/iOS): real PCM16 streaming actually works here,
+      // so the original approach is correct on these platforms.
+      config = const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: _sampleRate,
+        numChannels: _numChannels,
       );
     }
+
+    final stream = await _recorder.startStream(config);
+    _sub = stream.listen((chunk) => _buffer.add(chunk));
     return true;
   }
 
-  /// Stops recording and returns bytes ready to send to Gemini.
-  ///   Web    → WAV (PCM + 44-byte header)
-  ///   Native → raw AAC/M4A bytes from the temp file
-  Future<Uint8List> stop() async {
+  /// Stops recording and returns the audio bytes plus their real mime type.
+  Future<RecordedAudio> stop() async {
+    await _recorder.stop();
+    await _sub?.cancel();
+    _sub = null;
+
+    final rawBytes = _buffer.takeBytes();
+    if (rawBytes.isEmpty) {
+      throw Exception('No audio was recorded — please try again');
+    }
+
     if (kIsWeb) {
-      try {
-        await _recorder.stop();
-      } catch (_) {
-        // ignore stop errors — data is already in the buffer
-      }
-      await _sub?.cancel();
-      _sub = null;
-
-      final rawBytes = _buffer.takeBytes();
-      if (rawBytes.isEmpty) {
-        throw Exception('No audio was recorded — please try again');
-      }
-      return _pcmToWav(rawBytes);
+      // Already a complete, valid audio file in whatever codec was chosen
+      // above. Do NOT wrap it in a fake WAV header.
+      return RecordedAudio(rawBytes, _webMimeType);
     } else {
-      // Native: stop() returns the path to the finished file.
-      final returnedPath = await _recorder.stop();
-      final filePath = returnedPath ?? _nativeTempPath;
-      _nativeTempPath = null;
-
-      if (filePath == null) {
-        throw Exception('No audio file was created — please try again');
-      }
-      final file = File(filePath);
-      if (!await file.exists()) {
-        throw Exception('Audio file not found — please try again');
-      }
-      final bytes = await file.readAsBytes();
-      file.delete().catchError((_) {}); // best-effort cleanup
-      if (bytes.isEmpty) {
-        throw Exception('No audio was recorded — please try again');
-      }
-      return bytes;
+      return RecordedAudio(_pcmToWav(rawBytes), 'audio/wav');
     }
   }
 
-  /// Wraps raw PCM samples in a standard 44-byte WAV header so Gemini
-  /// can parse the format. Only used on web (streaming PCM path).
+  /// `record`'s native streaming mode gives raw PCM samples with no file
+  /// header, so we prepend a standard 44-byte WAV header describing the
+  /// format we recorded with. Only valid to call with genuine PCM16 bytes
+  /// (i.e. native platforms) — never call this on web-recorded bytes.
   Uint8List _pcmToWav(Uint8List pcmData) {
-    final byteRate    = _sampleRate * _numChannels * _bitsPerSample ~/ 8;
-    final blockAlign  = _numChannels * _bitsPerSample ~/ 8;
-    final dataLength  = pcmData.length;
+    final byteRate = _sampleRate * _numChannels * _bitsPerSample ~/ 8;
+    final blockAlign = _numChannels * _bitsPerSample ~/ 8;
+    final dataLength = pcmData.length;
 
     final header = BytesBuilder();
     void writeString(String s) => header.add(s.codeUnits);
     void writeUint32(int v) => header.add([
-          v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff,
+          v & 0xff,
+          (v >> 8) & 0xff,
+          (v >> 16) & 0xff,
+          (v >> 24) & 0xff,
         ]);
     void writeUint16(int v) => header.add([v & 0xff, (v >> 8) & 0xff]);
 
@@ -119,8 +123,8 @@ class VoiceRecorderService {
     writeUint32(36 + dataLength);
     writeString('WAVE');
     writeString('fmt ');
-    writeUint32(16);
-    writeUint16(1);           // PCM
+    writeUint32(16); // PCM fmt chunk size
+    writeUint16(1); // audio format = PCM
     writeUint16(_numChannels);
     writeUint32(_sampleRate);
     writeUint32(byteRate);
@@ -129,10 +133,10 @@ class VoiceRecorderService {
     writeString('data');
     writeUint32(dataLength);
 
-    final wav = BytesBuilder();
-    wav.add(header.toBytes());
-    wav.add(pcmData);
-    return wav.toBytes();
+    final wavFile = BytesBuilder();
+    wavFile.add(header.toBytes());
+    wavFile.add(pcmData);
+    return wavFile.toBytes();
   }
 
   Future<void> dispose() async {

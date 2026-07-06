@@ -74,12 +74,12 @@ class _PartyNavMicButtonState extends State<PartyNavMicButton> {
     });
 
     try {
-      final bytes = await _recorder.stop();
-      final apiKey = dotenv.env['GEMINI_API_KEY'];
+      final recorded = await _recorder.stop();
+      final apiKey = dotenv.env['GROQ_API_KEY'];
       if (apiKey == null || apiKey.isEmpty) {
-        throw Exception('Missing GEMINI_API_KEY');
+        throw Exception('Missing GROQ_API_KEY');
       }
-      final spokenName = await PartyVoiceNavigator(apiKey).extractPartyName(bytes);
+      final spokenName = await PartyVoiceNavigator(apiKey).extractPartyName(recorded);
       if (spokenName == null) {
         if (mounted) _showError("Didn't catch a party name — try again");
         return;

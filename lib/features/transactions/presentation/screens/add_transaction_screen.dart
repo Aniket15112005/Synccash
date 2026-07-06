@@ -75,10 +75,6 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   // ADDED: true once party name is confirmed (selected from picker or pre-filled when editing)
   bool _partyConfirmed = false;
 
-  // Cached party names — refreshed reactively in build() via ref.watch so
-  // the list is always populated when _openPartyPicker or voice is used.
-  List<String> _allPartyNames = [];
-
   // ADDED: voice command state
   final _voiceRecorder = VoiceRecorderService();
   bool _voiceRecording = false;
@@ -165,7 +161,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   // ADDED: opens the dedicated PartyPickerScreen and back-fills the description
   // field with whatever name the user confirmed there.
   Future<void> _openPartyPicker() async {
-    final allPartyNames = _allPartyNames;
+    final savedParties = ref.read(partiesProvider).asData?.value ?? [];
+    final allBills     = ref.read(allSaleBillsProvider).asData?.value ?? [];
+    final allPartyNames = <String>{
+      ...savedParties.map((p) => p.partyName),
+      ...allBills.map((b) => b.partyName.trim()),
+    }.toList()..sort();
 
     final bool canSuggest = _type == 'income' &&
         (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI');
@@ -205,8 +206,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     super.dispose();
   }
 
-  // ADDED: voice command handler — records audio, sends to Gemini for
-  // transcription + structured extraction, then pre-fills the form fields.
+  // ADDED: voice command handler — records audio, sends to Groq (Whisper
+  // transcription + Llama structured extraction), then pre-fills the form fields.
   Future<void> _onVoiceMicTap() async {
     if (!_voiceRecording) {
       final started = await _voiceRecorder.start();
@@ -227,12 +228,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     });
 
     try {
-      final bytes = await _voiceRecorder.stop();
-      final apiKey = dotenv.env['GEMINI_API_KEY'];
+      final recorded = await _voiceRecorder.stop();
+      final apiKey = dotenv.env['GROQ_API_KEY'];
       if (apiKey == null || apiKey.isEmpty) {
-        throw Exception('Missing GEMINI_API_KEY');
+        throw Exception('Missing GROQ_API_KEY');
       }
-      final result = await AiCommandFallback(apiKey).parseAudio(bytes);
+      final result = await AiCommandFallback(apiKey).parseAudio(recorded);
 
       if (!mounted) return;
 
@@ -258,7 +259,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       // ADDED: build the same "all known party names" set the suggestion
       // list uses, so we can auto-confirm an exact match spoken by voice
       // instead of forcing a manual tap on the suggestion list.
-      final allPartyNames = _allPartyNames.toSet();
+      final savedParties = ref.read(partiesProvider).asData?.value ?? [];
+      final allBills = ref.read(allSaleBillsProvider).asData?.value ?? [];
+      final allPartyNames = <String>{
+        ...savedParties.map((p) => p.partyName),
+        ...allBills.map((b) => b.partyName.trim()),
+      };
 
       // Pre-fill existing form fields with the parsed voice entry — user still
       // reviews and taps the existing Save/Record button, nothing auto-saves.
@@ -471,15 +477,6 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Watch both providers so _allPartyNames is always current when the
-    // picker opens — ref.read() at tap-time returns empty if not yet loaded.
-    final _watchedParties = ref.watch(partiesProvider).asData?.value ?? [];
-    final _watchedBills   = ref.watch(allSaleBillsProvider).asData?.value ?? [];
-    _allPartyNames = <String>{
-      ..._watchedParties.map((p) => p.partyName),
-      ..._watchedBills.map((b) => b.partyName.trim()),
-    }.toList()..sort();
-
     final isEditing = widget.existingTransaction != null;
     final bool showBank = kIsWeb || defaultTargetPlatform != TargetPlatform.android;
 
@@ -1134,7 +1131,7 @@ class _DescTapField extends StatelessWidget {
 
 // ─── Voice mic button ─────────────────────────────────────────────────────────
 // ADDED: speak-to-fill entry point. Tap once to start recording, tap again to
-// stop and send to Gemini for transcription + parsing. Purely fills the form
+// stop and send to Groq for transcription + parsing. Purely fills the form
 // above — the existing Submit button still does the actual save.
 
 class _VoiceMicButton extends StatelessWidget {
