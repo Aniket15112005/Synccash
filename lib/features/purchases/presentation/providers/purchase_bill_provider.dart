@@ -268,19 +268,7 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
         desc: description.isNotEmpty ? description : 'Payment – $clientName',
       );
 
-      // 2. Opening balance overflow.
-      if (left > 0 && data.obRemaining > 0) {
-        final toOb = left.clamp(0.0, data.obRemaining);
-        left -= toOb;
-        alloc(
-          linkedBillId: null,
-          amount: toOb,
-          desc: 'Opening balance payment – $clientName',
-          isOb: true,
-        );
-      }
-
-      // 3. Other pending bills (oldest first, skipping the selected one).
+      // 2. Other pending bills (oldest first, skipping the selected one).
       if (left > 0) {
         final others = data.allBills.where((b) {
           if (b.id == selectedBillId) return false;
@@ -305,6 +293,23 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
         }
       }
 
+      // 3. Opening balance overflow (last resort — excess covers OB debt).
+      if (left > 0 && data.obRemaining > 0) {
+        final toOb = left.clamp(0.0, data.obRemaining);
+        left -= toOb;
+        alloc(
+          linkedBillId: null,
+          amount: toOb,
+          desc: 'Opening balance payment – $clientName',
+          isOb: true,
+        );
+      }
+
+      // Update cashbook running totals so balance/expense reflect this payment.
+      batch.update(cashRef, {
+        'balance': FieldValue.increment(-totalAmount),
+        'expense': FieldValue.increment(totalAmount),
+      });
       await batch.commit();
     });
   }
@@ -410,9 +415,56 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
         );
       }
 
+      // Update cashbook running totals so balance/expense reflect this payment.
+      batch.update(cashRef, {
+        'balance': FieldValue.increment(-totalAmount),
+        'expense': FieldValue.increment(totalAmount),
+      });
       await batch.commit();
     });
   }
+
+  /// Records a final expense entry settling the remaining balance on a specific
+  /// bill (write-off). If remaining == 0 the method is a no-op. Mirrors
+  /// saleBillActionsProvider.settleWithPayment on the sales side.
+  Future<void> settleWithPayment({
+    required String cashbookId,
+    required String billId,
+    required String billNumber,
+    required String clientName,
+    required double remaining,
+    required String createdBy,
+    required String createdByName,
+  }) async {
+    if (remaining <= 0) return; // already settled — nothing to do
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      final db       = FirebaseFirestore.instance;
+      final cashRef  = db.collection('cashbooks').doc(cashbookId);
+      final txRef    = cashRef.collection('transactions').doc();
+
+      final batch = db.batch();
+      batch.set(txRef, {
+        'transactionId':       txRef.id,
+        'cashbookId':          cashbookId,
+        'type':                'expense',
+        'amount':              remaining,
+        'description':         'Settlement – $clientName – Bill #$billNumber',
+        'category':            'wholesale',
+        'linkedPurchaseBillId': billId,
+        'createdBy':           createdBy,
+        'creatorName':         createdByName,
+        'createdAt':           Timestamp.fromDate(DateTime.now()),
+      });
+      // Update cashbook running totals
+      batch.update(cashRef, {
+        'balance': FieldValue.increment(-remaining),
+        'expense': FieldValue.increment(remaining),
+      });
+      await batch.commit();
+    });
+  }
+
 }
 
 class _PurchaseBillSnapshot {

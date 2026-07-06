@@ -1,9 +1,8 @@
+
 // lib/features/purchases/presentation/screens/purchase_client_detail_screen.dart
 //
-// Simplified mirror of lib/features/sales/presentation/screens/party_detail_screen.dart
-// Shows: client header, opening balance, and every bill recorded for the
-// client (with status + amount). Lets the user add a new bill, edit the
-// opening balance, or delete a bill.
+// Mirrors lib/features/sales/presentation/screens/party_detail_screen.dart
+// Bills are now tappable — tapping opens PurchaseClientBillDetailScreen.
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -16,6 +15,7 @@ import 'package:synccash/features/auth/presentation/providers/auth_provider.dart
 import '../../domain/entities/purchase_bill_entity.dart';
 import '../providers/purchase_client_provider.dart';
 import '../providers/purchase_bill_provider.dart';
+import 'purchase_client_bill_detail_screen.dart';
 
 class _T {
   static const bg      = Color(0xFF0F1011);
@@ -41,11 +41,6 @@ class PurchaseClientDetailScreen extends ConsumerStatefulWidget {
 
 class _PurchaseClientDetailScreenState
     extends ConsumerState<PurchaseClientDetailScreen> {
-  // Live-computed payment totals — mirrors party_detail_screen.dart in the
-  // Sales feature. Pending/closing balance is NEVER read from a stored
-  // "billStatus" field; it's derived from every expense transaction linked
-  // to this client's bills (and opening balance), recomputed on every
-  // Firestore update.
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _txSub;
   Map<String, double> _paidPerBill = {};
   double _obPaid = 0.0;
@@ -149,7 +144,9 @@ class _PurchaseClientDetailScreenState
         content: Text('Bill #${bill.billNumber} will be permanently deleted.',
             style: const TextStyle(color: _T.muted)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete', style: TextStyle(color: _T.red)),
@@ -163,19 +160,31 @@ class _PurchaseClientDetailScreenState
         .deleteBill(cashbookId, bill.purchaseBillId);
   }
 
+  void _openBillDetail(PurchaseBillEntity bill, List<PurchaseBillEntity> allBills) {
+    HapticFeedback.selectionClick();
+    final precomputedPaid = _paidPerBill[bill.purchaseBillId] ?? 0.0;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PurchaseClientBillDetailScreen(
+          bill:            bill,
+          billCount:       allBills.length,
+          precomputedPaid: precomputedPaid,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final clientsAsync = ref.watch(purchaseClientsProvider);
-    final billsAsync = ref.watch(purchaseBillsForClientProvider(widget.clientName));
+    final billsAsync   = ref.watch(purchaseBillsForClientProvider(widget.clientName));
     final client = clientsAsync.asData?.value.where(
         (c) => c.clientName.toLowerCase() == widget.clientName.toLowerCase());
     final openingBalance =
         (client != null && client.isNotEmpty) ? client.first.openingBalance : 0.0;
     final bills = billsAsync.asData?.value ?? [];
 
-    // Closing balance = opening balance + total billed - total paid so far,
-    // computed live from linked expense transactions — mirrors
-    // sales_screen.dart's closingBalance calc, never a stored field.
     final totalBilled = bills.fold<double>(0, (sum, b) => sum + b.billAmount);
     final totalBillsPaid = bills.fold<double>(
         0, (sum, b) => sum + (_paidPerBill[b.purchaseBillId] ?? 0.0));
@@ -201,7 +210,9 @@ class _PurchaseClientDetailScreenState
                   Expanded(
                     child: Text(widget.clientName,
                         style: const TextStyle(
-                            color: _T.text, fontSize: 18, fontWeight: FontWeight.w700),
+                            color: _T.text,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700),
                         overflow: TextOverflow.ellipsis),
                   ),
                 ],
@@ -223,15 +234,18 @@ class _PurchaseClientDetailScreenState
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Total Due', style: TextStyle(color: _T.muted, fontSize: 12)),
+                        const Text('Total Due',
+                            style: TextStyle(color: _T.muted, fontSize: 12)),
                         InkWell(
                           onTap: () => _editOpeningBalance(openingBalance),
                           child: const Row(
                             children: [
                               Text('Edit opening balance',
-                                  style: TextStyle(color: _T.accent, fontSize: 12)),
+                                  style: TextStyle(
+                                      color: _T.accent, fontSize: 12)),
                               SizedBox(width: 4),
-                              Icon(Icons.edit_rounded, size: 12, color: _T.accent),
+                              Icon(Icons.edit_rounded,
+                                  size: 12, color: _T.accent),
                             ],
                           ),
                         ),
@@ -259,7 +273,14 @@ class _PurchaseClientDetailScreenState
                 children: const [
                   Icon(Icons.receipt_long_rounded, size: 16, color: _T.muted),
                   SizedBox(width: 6),
-                  Text('All Bills', style: TextStyle(color: _T.text, fontSize: 14, fontWeight: FontWeight.w600)),
+                  Text('All Bills',
+                      style: TextStyle(
+                          color: _T.text,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  SizedBox(width: 6),
+                  Text('(tap to view details)',
+                      style: TextStyle(color: _T.muted, fontSize: 11)),
                 ],
               ),
             ),
@@ -267,16 +288,19 @@ class _PurchaseClientDetailScreenState
             Expanded(
               child: bills.isEmpty
                   ? const Center(
-                      child: Text('No bills yet', style: TextStyle(color: _T.muted)))
+                      child: Text('No bills yet',
+                          style: TextStyle(color: _T.muted)))
                   : ListView.separated(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                       itemCount: bills.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (_, i) {
                         final bill = bills[i];
-                        final paidOnBill = _paidPerBill[bill.purchaseBillId] ?? 0.0;
+                        final paidOnBill =
+                            _paidPerBill[bill.purchaseBillId] ?? 0.0;
                         final pendingOnBill =
-                            (bill.billAmount - paidOnBill).clamp(0.0, double.infinity);
+                            (bill.billAmount - paidOnBill)
+                                .clamp(0.0, double.infinity);
                         final isSettled = pendingOnBill <= 0;
                         final isPartial = !isSettled && paidOnBill > 0;
                         final statusColor = isSettled
@@ -289,64 +313,93 @@ class _PurchaseClientDetailScreenState
                             : isPartial
                                 ? 'PARTIAL'
                                 : 'PENDING';
-                        return Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: _T.card,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: _T.border),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('Bill #${bill.billNumber}',
-                                        style: const TextStyle(
-                                            color: _T.text, fontSize: 14, fontWeight: FontWeight.w600)),
-                                    const SizedBox(height: 2),
-                                    Text(dateFmt.format(bill.billDate),
-                                        style: const TextStyle(color: _T.muted, fontSize: 12)),
-                                    if (bill.billNote != null && bill.billNote!.trim().isNotEmpty) ...[
-                                      const SizedBox(height: 4),
-                                      Text(bill.billNote!,
-                                          style: const TextStyle(color: _T.muted, fontSize: 12),
-                                          maxLines: 2, overflow: TextOverflow.ellipsis),
+
+                        // Tappable bill row — opens PurchaseClientBillDetailScreen
+                        return InkWell(
+                          onTap: () => _openBillDetail(bill, bills),
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: _T.card,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: _T.border),
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Bill #${bill.billNumber}',
+                                          style: const TextStyle(
+                                              color: _T.text,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w600)),
+                                      const SizedBox(height: 2),
+                                      Text(dateFmt.format(bill.billDate),
+                                          style: const TextStyle(
+                                              color: _T.muted, fontSize: 12)),
+                                      if (bill.billNote != null &&
+                                          bill.billNote!.trim().isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Text(bill.billNote!,
+                                            style: const TextStyle(
+                                                color: _T.muted, fontSize: 12),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis),
+                                      ],
                                     ],
+                                  ),
+                                ),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    Text(
+                                        '₹${bill.billAmount.toStringAsFixed(0)}',
+                                        style: const TextStyle(
+                                            color: _T.text,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700)),
+                                    if (!isSettled) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                          '₹${pendingOnBill.toStringAsFixed(0)} pending',
+                                          style: const TextStyle(
+                                              color: _T.amber,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600)),
+                                    ],
+                                    const SizedBox(height: 4),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: statusColor.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Text(statusLabel,
+                                          style: TextStyle(
+                                              color: statusColor,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w700)),
+                                    ),
                                   ],
                                 ),
-                              ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text('₹${bill.billAmount.toStringAsFixed(0)}',
-                                      style: const TextStyle(
-                                          color: _T.text, fontSize: 15, fontWeight: FontWeight.w700)),
-                                  if (!isSettled) ...[
-                                    const SizedBox(height: 2),
-                                    Text('₹${pendingOnBill.toStringAsFixed(0)} pending',
-                                        style: const TextStyle(
-                                            color: _T.amber, fontSize: 11, fontWeight: FontWeight.w600)),
-                                  ],
-                                  const SizedBox(height: 4),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: statusColor.withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Text(statusLabel,
-                                        style: TextStyle(
-                                            color: statusColor, fontSize: 10, fontWeight: FontWeight.w700)),
-                                  ),
-                                ],
-                              ),
-                              IconButton(
-                                onPressed: () => _deleteBill(bill),
-                                icon: const Icon(Icons.delete_outline_rounded, color: _T.muted, size: 18),
-                              ),
-                            ],
+                                // Chevron indicator (tap hint) + delete
+                                const SizedBox(width: 4),
+                                const Icon(Icons.chevron_right_rounded,
+                                    color: _T.muted, size: 18),
+                                IconButton(
+                                  onPressed: () => _deleteBill(bill),
+                                  icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: _T.muted,
+                                      size: 18),
+                                ),
+                              ],
+                            ),
                           ),
                         );
                       },

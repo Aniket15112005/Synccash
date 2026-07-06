@@ -1,53 +1,34 @@
+
 // lib/features/purchases/presentation/widgets/purchase_bill_no_dropdown_field.dart
 //
-// Mirrors lib/features/sales/presentation/widgets/bill_no_dropdown_field.dart
-// Shown on the Add Transaction screen when Expense + Wholesale/Bank/UPI is
-// selected and a purchase client name has been confirmed. Lets the user pick
-// either "Opening Balance" or one of the client's pending bill numbers to
-// allocate the payment against.
-//
-// Pending amounts are computed LIVE from Firestore — never from a stored
-// "billStatus" field. A ₹50,000 bill with a ₹40,000 expense recorded against
-// it will always show ₹10,000 pending here, exactly like the Sales dropdown.
+// Mirrors bill_no_dropdown_field.dart (Sales) for the purchase/expense side.
+// Key difference: starts COLLAPSED — shows a "Select Bill" tap-target first.
+// Only streams / updates when type == 'expense' (enforced by the caller in
+// add_transaction_screen.dart — no sales data is touched here).
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
     show currentCashbookIdProvider;
-import '../../data/repositories/purchase_bill_repository_impl.dart';
 import '../../domain/entities/purchase_bill_entity.dart';
 
-class _C {
-  static const bg = Color(0xFF08090B);
-  static const surface2 = Color(0xFF18191E);
-  static const border = Color(0xFF202228);
-  static const border2 = Color(0xFF2A2C33);
-  static const textPri = Color(0xFFF0F1F3);
-  static const textSec = Color(0xFF6B7280);
-  static const textMut = Color(0xFF3D4149);
-  static const accent = Color(0xFFF59E0B); // amber — matches the Purchase settings tile
-  static const red = Color(0xFFE05C5C);
-  static const amber = Color(0xFFFBBF24);
-}
-
 class PurchaseBillNoDropdownField extends ConsumerStatefulWidget {
-  final String clientName;
-  final PurchaseBillEntity? selectedBill;
+  final String               clientName;
+  final PurchaseBillEntity?  selectedBill;
   final ValueChanged<PurchaseBillEntity?> onBillSelected;
-  final bool isObSelected;
-  final VoidCallback onObSelected;
+  final bool                 isObSelected;
+  final VoidCallback?        onObSelected;
 
   const PurchaseBillNoDropdownField({
     super.key,
     required this.clientName,
-    required this.selectedBill,
     required this.onBillSelected,
-    required this.isObSelected,
-    required this.onObSelected,
+    this.selectedBill,
+    this.isObSelected = false,
+    this.onObSelected,
   });
 
   @override
@@ -57,58 +38,112 @@ class PurchaseBillNoDropdownField extends ConsumerStatefulWidget {
 
 class _PurchaseBillNoDropdownFieldState
     extends ConsumerState<PurchaseBillNoDropdownField> {
-  bool _open = false;
 
-  StreamSubscription<List<PurchaseBillEntity>>? _billsSub;
+  // ── colours (amber = purchase feature) ────────────────────────────────────
+  static const _bg       = Color(0xFF181B22);
+  static const _border   = Color(0xFF252830);
+  static const _secondary= Color(0xFF7A8494);
+  static const _accent   = Color(0xFFF59E0B); // amber
+  static const _orange   = Color(0xFFD4580A);
+
+  // ── streams ───────────────────────────────────────────────────────────────
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _billSub;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _clientSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _txSub;
+  Timer? _debounce;
 
   List<PurchaseBillEntity> _bills = [];
-  double _ob = 0.0;
-  double _obPaid = 0.0;
+  String  _activeQuery   = '';
+  double  _ob            = 0.0;
+  double  _obPaid        = 0.0;
   Map<String, double> _paidPerBill = {};
-  String _activeClient = '';
+
+  /// Start COLLAPSED (shows "Select Bill" button, not the full list).
+  /// Flips to true when the user taps the button, or when the widget is
+  /// re-used with a party-change that clears the selection.
+  bool _isExpanded = false;
 
   @override
   void initState() {
     super.initState();
-    _startStreams(widget.clientName);
+    // If a bill or OB is already selected (edit/re-open flow), start in the
+    // collapsed-selected chip state so the pre-selection is visible immediately.
+    if (widget.selectedBill != null || widget.isObSelected) {
+      _isExpanded = false;
+    }
+    _scheduleDebounce(widget.clientName);
   }
 
   @override
   void didUpdateWidget(PurchaseBillNoDropdownField old) {
     super.didUpdateWidget(old);
-    if (old.clientName.trim().toLowerCase() !=
-        widget.clientName.trim().toLowerCase()) {
-      _startStreams(widget.clientName);
+    if (old.clientName != widget.clientName) {
+      _scheduleDebounce(widget.clientName);
+      // New party → go back to "Select Bill" button state
+      if (mounted) setState(() => _isExpanded = false);
+    }
+    // If selection was cleared externally, show "Select Bill" button again
+    final wasSelected = old.selectedBill != null || old.isObSelected;
+    final nowSelected = widget.selectedBill != null || widget.isObSelected;
+    if (wasSelected && !nowSelected) {
+      if (mounted) setState(() => _isExpanded = false);
     }
   }
 
-  void _startStreams(String rawClientName) {
-    final clientName = rawClientName.trim();
-    if (clientName.isEmpty || clientName.toLowerCase() == _activeClient) {
+  void _scheduleDebounce(String raw) {
+    _debounce?.cancel();
+    final trimmed = raw.trim();
+    if (trimmed.length < 2) {
+      _cancelStreams();
       return;
     }
-    _activeClient = clientName.toLowerCase();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      if (trimmed == _activeQuery) return;
+      _activeQuery = trimmed;
+      _startStreams(trimmed);
+    });
+  }
 
-    _billsSub?.cancel();
-    _clientSub?.cancel();
-    _txSub?.cancel();
-
+  void _startStreams(String query) {
+    _cancelStreams();
     final cashbookId = ref.read(currentCashbookIdProvider);
     if (cashbookId == null || cashbookId.isEmpty) return;
 
-    final repo = PurchaseBillRepositoryImpl(firestore: FirebaseFirestore.instance);
-    _billsSub =
-        repo.watchPendingBillsByClientName(cashbookId, clientName).listen((bills) {
-      if (mounted) setState(() => _bills = bills);
+    final db        = FirebaseFirestore.instance;
+    final cashRef   = db.collection('cashbooks').doc(cashbookId);
+    final clientLow = query.trim().toLowerCase();
+
+    // 1. Stream pending purchase bills for this client
+    _billSub = cashRef
+        .collection('purchase_bills')
+        .where('clientName', isEqualTo: query.trim())
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      final bills = snap.docs.map((d) {
+        final raw = d.data();
+        return PurchaseBillEntity(
+          purchaseBillId: raw['purchaseBillId'] as String? ?? d.id,
+          clientName:     raw['clientName']     as String? ?? '',
+          billNumber:     raw['billNumber']      as String? ?? '',
+          billAmount:     (raw['billAmount']     as num?)?.toDouble() ?? 0.0,
+          billDate:       (raw['billDate']       as Timestamp?)?.toDate() ?? DateTime.now(),
+          billNote:       raw['billNote']        as String?,
+          billCreatedAt:  (raw['billCreatedAt']  as Timestamp?)?.toDate() ?? DateTime.now(),
+          billCreatedBy:  raw['billCreatedBy']   as String? ?? '',
+          billCreatedByName: raw['billCreatedByName'] as String? ?? '',
+          billStatus:     raw['billStatus']      as String? ?? 'pending',
+        );
+      }).toList()
+        ..sort((a, b) => a.billCreatedAt.compareTo(b.billCreatedAt));
+      setState(() => _bills = bills);
     });
 
-    _clientSub = FirebaseFirestore.instance
-        .collection('cashbooks')
-        .doc(cashbookId)
+    // 2. Stream purchase client doc to get opening balance
+    _clientSub = cashRef
         .collection('purchase_clients')
-        .doc(clientName.toLowerCase())
+        .doc(clientLow)
         .snapshots()
         .listen((doc) {
       if (!mounted) return;
@@ -116,9 +151,8 @@ class _PurchaseBillNoDropdownFieldState
       if (ob != _ob) setState(() => _ob = ob);
     });
 
-    _txSub = FirebaseFirestore.instance
-        .collection('cashbooks')
-        .doc(cashbookId)
+    // 3. Stream expense transactions to compute paid amounts
+    _txSub = cashRef
         .collection('transactions')
         .where('type', isEqualTo: 'expense')
         .snapshots()
@@ -126,224 +160,391 @@ class _PurchaseBillNoDropdownFieldState
       if (!mounted) return;
       double obPaid = 0.0;
       final perBill = <String, double>{};
-      final q = clientName.toLowerCase();
       for (final d in snap.docs) {
-        final raw = d.data();
+        final raw      = d.data();
         final linkedId = raw['linkedPurchaseBillId'] as String?;
-        final amount = (raw['amount'] as num?)?.toDouble() ?? 0.0;
-        final desc = (raw['description'] as String? ?? '').toLowerCase();
-        final isObForThisClient = raw['isObPayment'] == true &&
-            (raw['obPartyName'] as String? ?? '').trim().toLowerCase() == q;
+        final amount   = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+        final isObForThis = raw['isObPayment'] == true &&
+            (raw['obPartyName'] as String? ?? '').trim().toLowerCase() == clientLow;
         if (linkedId != null && linkedId.isNotEmpty) {
           perBill[linkedId] = (perBill[linkedId] ?? 0.0) + amount;
-        } else if (isObForThisClient || desc.contains(q)) {
+        } else if (isObForThis) {
           obPaid += amount;
         }
       }
       if (mounted) {
         setState(() {
-          _obPaid = obPaid;
-          _paidPerBill = perBill;
+          _obPaid       = obPaid;
+          _paidPerBill  = perBill;
         });
       }
     });
   }
 
+  void _cancelStreams() {
+    _billSub?.cancel();   _billSub   = null;
+    _clientSub?.cancel(); _clientSub = null;
+    _txSub?.cancel();     _txSub     = null;
+    _activeQuery = '';
+    final needsRebuild = _bills.isNotEmpty || _ob != 0.0;
+    if (needsRebuild && mounted) {
+      setState(() {
+        _bills       = [];
+        _ob          = 0.0;
+        _obPaid      = 0.0;
+        _paidPerBill = {};
+      });
+    }
+  }
+
   @override
   void dispose() {
-    _billsSub?.cancel();
+    _debounce?.cancel();
+    _billSub?.cancel();
     _clientSub?.cancel();
     _txSub?.cancel();
     super.dispose();
   }
 
-  void _toggle() {
-    HapticFeedback.selectionClick();
-    setState(() => _open = !_open);
-  }
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final clientName = widget.clientName.trim();
-    if (clientName.isEmpty) return const SizedBox.shrink();
+    final billFmt   = NumberFormat('#,##,##0', 'en_IN');
+    final obFmt     = NumberFormat('#,##,##0', 'en_IN');
 
-    final obRemaining = (_ob - _obPaid).clamp(0.0, double.infinity);
-    final pendingBills = _bills.where((b) {
+    final obRemaining   = (_ob - _obPaid).clamp(0.0, double.infinity);
+    final hasOb         = obRemaining > 0;
+    final pendingBills  = _bills.where((b) {
       final paid = _paidPerBill[b.purchaseBillId] ?? 0.0;
       return b.billAmount - paid > 0;
     }).toList();
+    final hasBills       = pendingBills.isNotEmpty;
+    final somethingSelected = widget.selectedBill != null || widget.isObSelected;
 
-    final label = widget.isObSelected
-        ? 'Opening Balance'
-        : widget.selectedBill != null
-            ? 'Bill #${widget.selectedBill!.billNumber}'
-            : 'Select bill or opening balance';
+    // ── Nothing pending at all — hide widget entirely ─────────────────────
+    if (!hasBills && !hasOb && !somethingSelected) return const SizedBox.shrink();
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          GestureDetector(
-            onTap: _toggle,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                color: _C.bg,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: (widget.selectedBill != null || widget.isObSelected)
-                      ? _C.accent.withValues(alpha: 0.5)
-                      : _C.border,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.receipt_long_rounded, size: 16, color: _C.textSec),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: TextStyle(
-                        color: (widget.selectedBill != null || widget.isObSelected)
-                            ? _C.textPri
-                            : _C.textMut,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  if (widget.selectedBill != null) ...[
-                    Text(
-                      '₹${(widget.selectedBill!.billAmount - (_paidPerBill[widget.selectedBill!.purchaseBillId] ?? 0.0)).toStringAsFixed(0)} pending',
-                      style: const TextStyle(
-                        color: _C.amber,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                  ] else if (widget.isObSelected) ...[
-                    Text(
-                      '₹${obRemaining.toStringAsFixed(0)} remaining',
-                      style: const TextStyle(
-                        color: _C.red,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                  Icon(
-                    _open ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-                    size: 20,
-                    color: _C.textSec,
-                  ),
-                ],
-              ),
-            ),
+    // ── Collapsed + something selected: show selected chip ────────────────
+    if (!_isExpanded && somethingSelected) {
+      return GestureDetector(
+        onTap: () => setState(() => _isExpanded = true),
+        child: Container(
+          margin: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: _bg,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _accent.withValues(alpha: 0.45)),
           ),
-          if (_open)
-            Container(
-              margin: const EdgeInsets.only(top: 8),
-              decoration: BoxDecoration(
-                color: _C.surface2,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _C.border2),
+          child: Row(
+            children: [
+              Icon(
+                widget.isObSelected
+                    ? Icons.account_balance_wallet_rounded
+                    : Icons.receipt_long_rounded,
+                color: widget.isObSelected ? _orange : _accent,
+                size: 16,
               ),
-              constraints: const BoxConstraints(maxHeight: 260),
-              child: _buildList(pendingBills, obRemaining),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildList(List<PurchaseBillEntity> bills, double obRemaining) {
-    final dateFmt = DateFormat('dd MMM yyyy');
-    final amtFmt = NumberFormat('#,##,##0', 'en_IN');
-
-    if (bills.isEmpty && obRemaining <= 0) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: Text('No pending bills for this client',
-            style: TextStyle(color: _C.textSec, fontSize: 13)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: widget.isObSelected
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Opening Balance',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13)),
+                          Text('₹${obFmt.format(obRemaining)} remaining',
+                              style: const TextStyle(
+                                  color: Color(0xFFE05C5C),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11)),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(widget.selectedBill!.billNumber,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13)),
+                          Text(widget.selectedBill!.clientName,
+                              style: const TextStyle(
+                                  color: _secondary, fontSize: 11)),
+                        ],
+                      ),
+              ),
+              if (widget.selectedBill != null) ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('₹${billFmt.format(widget.selectedBill!.billAmount)}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '₹${billFmt.format(widget.selectedBill!.billAmount - (_paidPerBill[widget.selectedBill!.purchaseBillId] ?? 0.0))} pending',
+                      style: const TextStyle(
+                          color: Color(0xFFFBBF24),
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11),
+                    ),
+                  ],
+                ),
+                const SizedBox(width: 6),
+                const Icon(Icons.check_circle_rounded, color: _accent, size: 16),
+              ],
+              const SizedBox(width: 8),
+              const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: _secondary, size: 18),
+            ],
+          ),
+        ),
       );
     }
 
-    return ListView(
-      shrinkWrap: true,
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      children: [
-        if (obRemaining > 0)
-          _OptionTile(
-            title: 'Opening Balance',
-            subtitle: '₹${amtFmt.format(obRemaining)} remaining',
-            selected: widget.isObSelected,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              widget.onObSelected();
-              setState(() => _open = false);
-            },
+    // ── Collapsed + nothing selected: "Select Bill" tap-target ───────────
+    if (!_isExpanded && !somethingSelected) {
+      return GestureDetector(
+        onTap: () => setState(() => _isExpanded = true),
+        child: Container(
+          margin: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          decoration: BoxDecoration(
+            color: _bg,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _border),
           ),
-        for (final bill in bills)
-          _OptionTile(
-            title: 'Bill #${bill.billNumber}',
-            subtitle:
-                '₹${amtFmt.format(bill.billAmount - (_paidPerBill[bill.purchaseBillId] ?? 0.0))} pending of ₹${amtFmt.format(bill.billAmount)} • ${dateFmt.format(bill.billDate)}',
-            selected: widget.selectedBill?.purchaseBillId == bill.purchaseBillId,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              widget.onBillSelected(bill);
-              setState(() => _open = false);
-            },
-          ),
-      ],
-    );
-  }
-}
-
-class _OptionTile extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final bool selected;
-  final VoidCallback onTap;
-  const _OptionTile({
-    required this.title,
-    required this.subtitle,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        color: selected ? _C.accent.withValues(alpha: 0.08) : Colors.transparent,
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: TextStyle(
-                        color: selected ? _C.accent : _C.textPri,
-                        fontSize: 14,
+          child: Row(
+            children: [
+              Container(
+                width: 30, height: 30,
+                decoration: BoxDecoration(
+                  color: _accent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.receipt_long_rounded,
+                    color: _accent, size: 15),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('Select Bill',
+                    style: TextStyle(
+                        color: Colors.white,
                         fontWeight: FontWeight.w600,
-                      )),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: const TextStyle(color: _C.amber, fontSize: 12)),
-                ],
+                        fontSize: 14)),
+              ),
+              Text(
+                '${[
+                  if (hasBills) '${pendingBills.length} bill${pendingBills.length == 1 ? '' : 's'}',
+                  if (hasOb) 'OB',
+                ].join(' · ')} pending',
+                style: TextStyle(
+                    color: _secondary.withValues(alpha: 0.8), fontSize: 11),
+              ),
+              const SizedBox(width: 6),
+              const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: _secondary, size: 18),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ── Expanded: show full list ──────────────────────────────────────────
+    final anythingSelected = somethingSelected;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      decoration: BoxDecoration(
+        color: _bg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+            child: Row(
+              children: [
+                const Icon(Icons.receipt_long_rounded, color: _accent, size: 16),
+                const SizedBox(width: 6),
+                const Text('Link Bill No.',
+                    style: TextStyle(
+                        color: _accent,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5)),
+                const Spacer(),
+                if (anythingSelected)
+                  GestureDetector(
+                    onTap: () {
+                      widget.onBillSelected(null);
+                      setState(() => _isExpanded = false);
+                    },
+                    child: const Text('Clear',
+                        style: TextStyle(color: _secondary, fontSize: 11)),
+                  )
+                else
+                  GestureDetector(
+                    onTap: () => setState(() => _isExpanded = false),
+                    child: const Text('Close',
+                        style: TextStyle(color: _secondary, fontSize: 11)),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(color: _border, height: 1),
+
+          // Opening Balance row
+          if (hasOb) ...[
+            GestureDetector(
+              onTap: () {
+                widget.onObSelected?.call();
+                setState(() => _isExpanded = false);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: widget.isObSelected
+                      ? _orange.withValues(alpha: 0.12)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: widget.isObSelected ? _orange : _border,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.account_balance_wallet_rounded,
+                        size: 14,
+                        color: widget.isObSelected ? _orange : _secondary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text('Opening Balance',
+                          style: TextStyle(
+                              color: widget.isObSelected
+                                  ? _orange
+                                  : Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13)),
+                    ),
+                    Text('₹${obFmt.format(obRemaining)} remaining',
+                        style: const TextStyle(
+                            color: Color(0xFFE05C5C),
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13)),
+                    if (widget.isObSelected) ...[
+                      const SizedBox(width: 6),
+                      const Icon(Icons.check_circle_rounded,
+                          color: _orange, size: 16),
+                    ],
+                  ],
+                ),
               ),
             ),
-            if (selected) const Icon(Icons.check_circle_rounded, size: 18, color: _C.accent),
+            if (hasBills)
+              const Divider(color: _border, height: 1, indent: 8, endIndent: 8),
           ],
-        ),
+
+          // Pending bills list
+          if (hasBills)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220),
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                itemCount: pendingBills.length,
+                itemBuilder: (_, i) {
+                  final bill       = pendingBills[i];
+                  final isSelected =
+                      widget.selectedBill?.purchaseBillId == bill.purchaseBillId;
+                  final paid       = _paidPerBill[bill.purchaseBillId] ?? 0.0;
+                  final pendingAmt = (bill.billAmount - paid)
+                      .clamp(0.0, double.infinity);
+
+                  return GestureDetector(
+                    onTap: () {
+                      widget.onBillSelected(isSelected ? null : bill);
+                      if (!isSelected) setState(() => _isExpanded = false);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? _accent.withValues(alpha: 0.12)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected ? _accent : Colors.transparent,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(bill.billNumber,
+                                    style: TextStyle(
+                                        color: isSelected
+                                            ? _accent
+                                            : Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13)),
+                                Text(bill.clientName,
+                                    style: const TextStyle(
+                                        color: _secondary, fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text('₹${billFmt.format(bill.billAmount)}',
+                                  style: TextStyle(
+                                      color: isSelected
+                                          ? _accent
+                                          : Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13)),
+                              const SizedBox(height: 2),
+                              Text('₹${billFmt.format(pendingAmt)} pending',
+                                  style: const TextStyle(
+                                      color: Color(0xFFFBBF24),
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 11)),
+                            ],
+                          ),
+                          if (isSelected) ...[
+                            const SizedBox(width: 6),
+                            const Icon(Icons.check_circle_rounded,
+                                color: _accent, size: 16),
+                          ],
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+          const SizedBox(height: 4),
+        ],
       ),
     );
   }
