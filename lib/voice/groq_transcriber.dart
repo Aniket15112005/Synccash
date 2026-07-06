@@ -43,7 +43,12 @@ class GroqTranscriber {
     switch (mimeType) {
       case 'audio/wav':
         return (ext: 'wav', subtype: 'wav');
+      case 'audio/mp4':
+        // Safari/iOS's real MediaRecorder output container.
+        return (ext: 'm4a', subtype: 'mp4');
       case 'audio/aac':
+        // Kept defensively in case a bare AAC stream ever shows up, but
+        // Safari specifically produces audio/mp4, not this.
         return (ext: 'm4a', subtype: 'aac');
       case 'audio/ogg':
         return (ext: 'ogg', subtype: 'ogg');

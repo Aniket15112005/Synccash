@@ -210,14 +210,26 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   // transcription + Llama structured extraction), then pre-fills the form fields.
   Future<void> _onVoiceMicTap() async {
     if (!_voiceRecording) {
-      final started = await _voiceRecorder.start();
-      if (started) {
-        HapticFeedback.selectionClick();
-        setState(() => _voiceRecording = true);
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission denied')),
-        );
+      // ADDED try/catch: previously an exception thrown while starting the
+      // recorder (e.g. MediaRecorder setup failing on iOS PWA) propagated
+      // uncaught, so the button just sat there after the permission prompt
+      // with no feedback at all. Now the real error is shown.
+      try {
+        final started = await _voiceRecorder.start();
+        if (started) {
+          HapticFeedback.selectionClick();
+          setState(() => _voiceRecording = true);
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone permission denied')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Voice error: ${e.toString()}')),
+          );
+        }
       }
       return;
     }

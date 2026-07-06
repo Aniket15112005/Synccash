@@ -57,12 +57,20 @@ class _PartyNavMicButtonState extends State<PartyNavMicButton> {
 
     if (!_recording) {
       HapticFeedback.mediumImpact();
-      final started = await _recorder.start();
-      if (!started) {
-        if (mounted) _showError('Microphone permission denied');
-        return;
+      // ADDED try/catch: previously an exception thrown while starting the
+      // recorder (e.g. MediaRecorder setup failing on iOS PWA) propagated
+      // uncaught, so the button just sat there after the permission prompt
+      // with no feedback at all. Now the real error is shown.
+      try {
+        final started = await _recorder.start();
+        if (!started) {
+          if (mounted) _showError('Microphone permission denied');
+          return;
+        }
+        if (mounted) setState(() => _recording = true);
+      } catch (e) {
+        if (mounted) _showError('Voice error: $e');
       }
-      if (mounted) setState(() => _recording = true);
       return;
     }
 

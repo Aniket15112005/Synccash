@@ -48,22 +48,61 @@ class VoiceRecorderService {
     late final RecordConfig config;
 
     if (kIsWeb) {
-      if (await _recorder.isEncoderSupported(AudioEncoder.opus)) {
+      // iOS Safari — including standalone/home-screen PWAs — has a history
+      // of isEncoderSupported() being unreliable (throwing, or reporting
+      // support incorrectly) specifically in standalone display mode.
+      // Trusting it blindly meant one bad/throwing check here took down the
+      // entire start() call with an exception nothing ever caught — on iOS
+      // PWA that looked like "tap the mic, permission prompt appears, then
+      // nothing happens". Each check is now defensive on its own.
+      bool opusSupported = false;
+      bool aacSupported = false;
+
+      try {
+        opusSupported = await _recorder.isEncoderSupported(AudioEncoder.opus);
+      } catch (_) {
+        opusSupported = false;
+      }
+
+      if (!opusSupported) {
+        try {
+          aacSupported =
+              await _recorder.isEncoderSupported(AudioEncoder.aacLc);
+        } catch (_) {
+          aacSupported = false;
+        }
+      }
+
+      if (opusSupported) {
         config = const RecordConfig(
           encoder: AudioEncoder.opus,
           numChannels: _numChannels,
         );
         _webMimeType = 'audio/ogg';
-      } else if (await _recorder.isEncoderSupported(AudioEncoder.aacLc)) {
+      } else if (aacSupported) {
         config = const RecordConfig(
           encoder: AudioEncoder.aacLc,
           numChannels: _numChannels,
         );
-        _webMimeType = 'audio/aac';
+        // Safari (incl. iOS PWA) only ever produces MP4-container audio
+        // with AAC codec via MediaRecorder — confirmed directly from
+        // WebKit's own MediaRecorder documentation. It is NOT a bare AAC
+        // stream, so label it as MP4, not audio/aac — Groq's docs list
+        // mp4/m4a as accepted formats directly.
+        _webMimeType = 'audio/mp4';
       } else {
-        // Last resort — let the browser pick whatever it can.
-        config = const RecordConfig(numChannels: _numChannels);
-        _webMimeType = 'audio/webm';
+        // Both checks failed or threw — this is exactly the state seen on
+        // some iOS PWA installs. Rather than falling back to "let the
+        // browser pick" (which previously mislabeled the result as
+        // audio/webm even though Safari never produces webm — Safari's
+        // MediaRecorder has only ever supported MP4/AAC), force AAC/MP4
+        // explicitly here. This is a no-op for Chrome/Firefox, which
+        // always report opusSupported == true and never reach this branch.
+        config = const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          numChannels: _numChannels,
+        );
+        _webMimeType = 'audio/mp4';
       }
     } else {
       // Native (Android/iOS): real PCM16 streaming actually works here,
@@ -75,9 +114,21 @@ class VoiceRecorderService {
       );
     }
 
-    final stream = await _recorder.startStream(config);
-    _sub = stream.listen((chunk) => _buffer.add(chunk));
-    return true;
+    try {
+      final stream = await _recorder.startStream(config);
+      _sub = stream.listen((chunk) => _buffer.add(chunk));
+      return true;
+    } catch (e) {
+      // Previously this exception propagated straight out of start() with
+      // no try/catch anywhere in the call chain (both mic button handlers
+      // only checked the *return value* for permission-denied, never
+      // wrapped the call itself). On iOS PWA that meant a thrown error here
+      // was silently swallowed by Flutter's unhandled-future-error path —
+      // the button just sat there after the permission prompt, with no
+      // feedback at all. Now it's rethrown with context so the callers
+      // (which now have try/catch) can actually show what went wrong.
+      throw Exception('Could not start recording ($_webMimeType): $e');
+    }
   }
 
   /// Stops recording and returns the audio bytes plus their real mime type.
@@ -94,6 +145,12 @@ class VoiceRecorderService {
     if (kIsWeb) {
       // Already a complete, valid audio file in whatever codec was chosen
       // above. Do NOT wrap it in a fake WAV header.
+      assert(() {
+        // ignore: avoid_print
+        print('[VoiceRecorderService] web recording: '
+            '$_webMimeType, ${rawBytes.length} bytes');
+        return true;
+      }());
       return RecordedAudio(rawBytes, _webMimeType);
     } else {
       return RecordedAudio(_pcmToWav(rawBytes), 'audio/wav');
