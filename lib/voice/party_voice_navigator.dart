@@ -51,7 +51,7 @@ exactly this shape:
     final body = jsonEncode({
       'model': 'llama-3.1-8b-instant',
       'temperature': 0.1,
-      'max_tokens': 100,
+      'max_tokens': 60,
       'response_format': {'type': 'json_object'},
       'messages': [
         {'role': 'system', 'content': systemPrompt},
@@ -59,7 +59,7 @@ exactly this shape:
       ],
     });
 
-    final response = await http.post(
+    final response = await groqHttpClient.post(
       Uri.parse(_chatEndpoint),
       headers: {
         'Content-Type': 'application/json',

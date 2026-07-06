@@ -119,9 +119,15 @@ Output: {"transcript":"Ramesh","amount":null,"type":null,"category":null,"partyN
 ''';
 
     final body = jsonEncode({
-      'model': 'llama-3.3-70b-versatile',
+      // llama-3.1-8b-instant instead of the 70b model: this is a fixed
+      // 6-field extraction task (map to 5 known categories, convert number
+      // words, resolve a date) — mechanical enough that the smaller/faster
+      // model should hold up. If you see accuracy regressions on tricky
+      // Hinglish phrasing during testing, swap back to
+      // 'llama-3.3-70b-versatile'.
+      'model': 'llama-3.1-8b-instant',
       'temperature': 0.1,
-      'max_tokens': 300,
+      'max_tokens': 200,
       'response_format': {'type': 'json_object'},
       'messages': [
         {'role': 'system', 'content': systemPrompt},
@@ -129,7 +135,7 @@ Output: {"transcript":"Ramesh","amount":null,"type":null,"category":null,"partyN
       ],
     });
 
-    final response = await http.post(
+    final response = await groqHttpClient.post(
       Uri.parse(_chatEndpoint),
       headers: {
         'Content-Type': 'application/json',
