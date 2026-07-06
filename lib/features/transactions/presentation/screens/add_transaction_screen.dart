@@ -261,55 +261,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     }
   }
 
-  // ADDED (FIX, permanent): pure background resolution of the suggestion
-  // list — no longer awaited before navigating, only awaited by
-  // PartyPickerScreen itself once it's already on screen.
-  //
-  // CHANGED: source is now picked by category instead of always merging
-  // sale + purchase data together. Previously EVERY category waited on
-  // purchase_clients/purchase_bills too, so on a slow/erroring purchase
-  // stream (e.g. Firestore rules not deployed for those subcollections)
-  // Retail/Wholesale/Bank/UPI transactions still showed a 2-3s loading
-  // spinner before falling back to an empty/"No matching parties" list —
-  // even though they never needed purchase data in the first place. Now:
-  //   - Category "P" (Purchase) → ONLY purchase clients + purchase bills.
-  //   - Every other category   → ONLY sale parties + sale bills (as before
-  //     the purchase feature was added), never touching the purchase
-  //     providers at all.
-  // This means the common case (any non-Purchase category) can no longer
-  // be slowed down or broken by purchase-side data, and Purchase itself
-  // gets a focused, uncluttered client list instead of a merged one.
+  // All four sources — sale parties, sale bills, purchase clients, purchase bills —
+  // are always merged into one unified list regardless of category or type.
+  // Each source is resolved independently so a failure or empty stream in one
+  // can never wipe out data from the others.
   Future<List<String>> _resolveAllPartyNames() async {
-    if (_category == 'P') {
-      final purchaseClientsFuture = _resolveAsync(
-        cached: ref.read(purchaseClientsProvider).asData?.value,
-        load: () => ref.read(purchaseClientsProvider.future),
-      );
-      final purchaseBillsFuture = _resolveAsync(
-        cached: ref.read(allPurchaseBillsProvider).asData?.value,
-        load: () => ref.read(allPurchaseBillsProvider.future),
-      );
-
-      final savedPurchaseClients = await purchaseClientsFuture;
-      final allPurchaseBills = await purchaseBillsFuture;
-
-      return <String>{
-        ...savedPurchaseClients.map((c) => c.clientName),
-        ...allPurchaseBills.map((b) => b.clientName.trim()),
-      }.toList()..sort();
-    }
-
-    // FIX (permanent): ref.read() only returns whatever the provider's state
-    // happens to be RIGHT NOW, so if neither StreamProvider had loaded yet
-    // the old `?? []` fallback silently handed the picker an empty list.
-    // The first attempt at fixing this bundled both sources into a single
-    // Future.wait(...) — but allSaleBillsProvider deliberately returns
-    // Stream.empty() whenever currentCashbookIdProvider isn't ready yet
-    // (see sale_bill_provider.dart), and waiting on an empty stream's first
-    // value throws. Future.wait is all-or-nothing: that one failure was
-    // wiping out BOTH lists, even when partiesProvider had already loaded
-    // fine. Each source is now resolved independently, so one failing
-    // can never erase the other's already-successful data.
     final partiesFuture = _resolveAsync(
       cached: ref.read(partiesProvider).asData?.value,
       load: () => ref.read(partiesProvider.future),
@@ -318,13 +274,25 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       cached: ref.read(allSaleBillsProvider).asData?.value,
       load: () => ref.read(allSaleBillsProvider.future),
     );
+    final purchaseClientsFuture = _resolveAsync(
+      cached: ref.read(purchaseClientsProvider).asData?.value,
+      load: () => ref.read(purchaseClientsProvider.future),
+    );
+    final purchaseBillsFuture = _resolveAsync(
+      cached: ref.read(allPurchaseBillsProvider).asData?.value,
+      load: () => ref.read(allPurchaseBillsProvider.future),
+    );
 
-    final savedParties = await partiesFuture;
-    final allBills = await billsFuture;
+    final savedParties       = await partiesFuture;
+    final allBills           = await billsFuture;
+    final purchaseClients    = await purchaseClientsFuture;
+    final allPurchaseBills   = await purchaseBillsFuture;
 
     return <String>{
       ...savedParties.map((p) => p.partyName),
       ...allBills.map((b) => b.partyName.trim()),
+      ...purchaseClients.map((c) => c.clientName),
+      ...allPurchaseBills.map((b) => b.clientName.trim()),
     }.toList()..sort();
   }
 
@@ -523,13 +491,15 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   void _switchCategory(String cat) {
     if (_category == cat) return;
     HapticFeedback.selectionClick();
-    // ADDED: clear selected bill when switching away from Wholesale, Bank, or UPI
     setState(() {
       _category = cat;
+      // Clear sale bill when switching away from Wholesale/Bank/UPI.
       if (cat != 'Wholesale' && cat != 'Bank' && cat != 'UPI') {
         _selectedBill = null;
         _isObPayment = false;
-        // ADDED: clear purchase bill selection alongside the sale bill one
+      }
+      // Clear purchase bill when switching away from Wholesale/Bank/UPI.
+      if (cat != 'Wholesale' && cat != 'Bank' && cat != 'UPI') {
         _selectedPurchaseBill = null;
         _isPurchaseObPayment = false;
       }
@@ -686,6 +656,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   Widget build(BuildContext context) {
     final isEditing = widget.existingTransaction != null;
     final bool showBank = kIsWeb || defaultTargetPlatform != TargetPlatform.android;
+    // Pre-warm all party sources so data is cached before the picker opens.
+    ref.watch(partiesProvider);
+    ref.watch(allSaleBillsProvider);
+    ref.watch(purchaseClientsProvider);
+    ref.watch(allPurchaseBillsProvider);
 
     return Scaffold(
       backgroundColor: _C.bg,
@@ -818,7 +793,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               ),
                           ],
 
-                          // ADDED: Purchase bill dropdown — expense + Wholesale/Bank/UPI only.
+                          // ADDED: Purchase bill dropdown — expense + Wholesale/Bank/UPI.
                           // Mirrors the sales bill dropdown above; the two never render
                           // together since one requires _type == 'income' and the other
                           // requires _type == 'expense'.
@@ -1282,7 +1257,7 @@ class _CategoryToggle extends StatelessWidget {
         border: Border.all(color: _C.border),
       ),
       child: Row(
-        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI', 'P', if (showBank) 'CB'].map((cat) {
+        children: ['Retail', 'Wholesale', if (showBank) 'Bank', 'UPI', if (showBank) 'CB'].map((cat) {
           final active = selected == cat;
           return Expanded(
             child: GestureDetector(
