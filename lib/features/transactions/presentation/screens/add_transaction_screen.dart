@@ -161,15 +161,40 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   // ADDED: opens the dedicated PartyPickerScreen and back-fills the description
   // field with whatever name the user confirmed there.
   Future<void> _openPartyPicker() async {
-    final savedParties = ref.read(partiesProvider).asData?.value ?? [];
-    final allBills     = ref.read(allSaleBillsProvider).asData?.value ?? [];
+    // FIX (permanent): ref.read() only returns whatever the provider's state
+    // happens to be RIGHT NOW, so if neither StreamProvider had loaded yet
+    // the old `?? []` fallback silently handed the picker an empty list.
+    // The first attempt at fixing this bundled both sources into a single
+    // Future.wait(...) — but allSaleBillsProvider deliberately returns
+    // Stream.empty() whenever currentCashbookIdProvider isn't ready yet
+    // (see sale_bill_provider.dart), and waiting on an empty stream's first
+    // value throws. Future.wait is all-or-nothing: that one failure was
+    // wiping out BOTH lists, even when partiesProvider had already loaded
+    // fine. Each source is now resolved independently, so one failing
+    // can never erase the other's already-successful data.
+    final savedParties = await _resolveAsync(
+      cached: ref.read(partiesProvider).asData?.value,
+      load: () => ref.read(partiesProvider.future),
+    );
+    final allBills = await _resolveAsync(
+      cached: ref.read(allSaleBillsProvider).asData?.value,
+      load: () => ref.read(allSaleBillsProvider.future),
+    );
+
+    if (!mounted) return;
+
     final allPartyNames = <String>{
       ...savedParties.map((p) => p.partyName),
       ...allBills.map((b) => b.partyName.trim()),
     }.toList()..sort();
 
-    final bool canSuggest = _type == 'income' &&
-        (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI');
+    // FIX: this used to gate suggestions behind Income + Wholesale/Bank/UPI,
+    // so for Expense (the default type) or Retail/CB categories the picker
+    // showed the plain "Type a description below" prompt instead of the
+    // party list, no matter how well the data loaded. Suggestions are now
+    // always shown — party names are useful to autocomplete regardless of
+    // transaction type or category.
+    const bool canSuggest = true;
 
     final result = await Navigator.push<String>(
       context,
@@ -192,6 +217,25 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       }
       _descCtrl.addListener(_onDescChanged);
       setState(() {});
+    }
+  }
+
+  // ADDED: resolves a single StreamProvider's data independently — returns
+  // the cached value immediately if already loaded, otherwise awaits the
+  // stream's first emission with a timeout, and only falls back to an empty
+  // list if that genuinely fails/errors/times out. Kept separate per-source
+  // (rather than combined via Future.wait) so one source failing — e.g.
+  // allSaleBillsProvider's Stream.empty() when the cashbook id isn't ready
+  // yet — can never wipe out a different source's already-successful data.
+  Future<List<T>> _resolveAsync<T>({
+    required List<T>? cached,
+    required Future<List<T>> Function() load,
+  }) async {
+    if (cached != null) return cached;
+    try {
+      return await load().timeout(const Duration(seconds: 6));
+    } catch (_) {
+      return const [];
     }
   }
 

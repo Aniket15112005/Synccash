@@ -24,7 +24,12 @@ class RecordedAudio {
 /// no STT API can read. Fix: on web, record in whatever the browser
 /// actually supports, and pass the REAL mime type through — don't fake WAV.
 class VoiceRecorderService {
-  final AudioRecorder _recorder = AudioRecorder();
+  // NOT final anymore: on web, a failed startStream() attempt on one
+  // AudioRecorder instance can leave its underlying MediaStreamTrack
+  // "ended" — reusing that same instance for the next fallback candidate
+  // then fails with the exact same error regardless of codec. start()
+  // swaps this to a fresh instance per successful attempt; see below.
+  AudioRecorder _recorder = AudioRecorder();
   StreamSubscription<Uint8List>? _sub;
   final BytesBuilder _buffer = BytesBuilder();
 
@@ -33,9 +38,9 @@ class VoiceRecorderService {
   static const int _bitsPerSample = 16;
 
   // Which web codec actually got used — decided at start() time, since it
-  // depends on what the browser supports (Chrome/Firefox: Opus, Safari:
-  // typically AAC — Safari has historically not supported Opus in
-  // MediaRecorder, including in iOS PWA contexts).
+  // depends on what the browser actually accepted (see start() below —
+  // this is now set only once startStream() has genuinely succeeded with
+  // that format, not from an upfront guess).
   String _webMimeType = 'audio/webm';
 
   /// Starts recording. Returns false if mic permission was denied.
@@ -45,90 +50,106 @@ class VoiceRecorderService {
 
     _buffer.clear();
 
-    late final RecordConfig config;
-
-    if (kIsWeb) {
-      // iOS Safari — including standalone/home-screen PWAs — has a history
-      // of isEncoderSupported() being unreliable (throwing, or reporting
-      // support incorrectly) specifically in standalone display mode.
-      // Trusting it blindly meant one bad/throwing check here took down the
-      // entire start() call with an exception nothing ever caught — on iOS
-      // PWA that looked like "tap the mic, permission prompt appears, then
-      // nothing happens". Each check is now defensive on its own.
-      bool opusSupported = false;
-      bool aacSupported = false;
-
-      try {
-        opusSupported = await _recorder.isEncoderSupported(AudioEncoder.opus);
-      } catch (_) {
-        opusSupported = false;
-      }
-
-      if (!opusSupported) {
-        try {
-          aacSupported =
-              await _recorder.isEncoderSupported(AudioEncoder.aacLc);
-        } catch (_) {
-          aacSupported = false;
-        }
-      }
-
-      if (opusSupported) {
-        config = const RecordConfig(
-          encoder: AudioEncoder.opus,
-          numChannels: _numChannels,
-        );
-        _webMimeType = 'audio/ogg';
-      } else if (aacSupported) {
-        config = const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          numChannels: _numChannels,
-        );
-        // Safari (incl. iOS PWA) only ever produces MP4-container audio
-        // with AAC codec via MediaRecorder — confirmed directly from
-        // WebKit's own MediaRecorder documentation. It is NOT a bare AAC
-        // stream, so label it as MP4, not audio/aac — Groq's docs list
-        // mp4/m4a as accepted formats directly.
-        _webMimeType = 'audio/mp4';
-      } else {
-        // Both checks failed or threw — this is exactly the state seen on
-        // some iOS PWA installs. Rather than falling back to "let the
-        // browser pick" (which previously mislabeled the result as
-        // audio/webm even though Safari never produces webm — Safari's
-        // MediaRecorder has only ever supported MP4/AAC), force AAC/MP4
-        // explicitly here. This is a no-op for Chrome/Firefox, which
-        // always report opusSupported == true and never reach this branch.
-        config = const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          numChannels: _numChannels,
-        );
-        _webMimeType = 'audio/mp4';
-      }
-    } else {
+    if (!kIsWeb) {
       // Native (Android/iOS): real PCM16 streaming actually works here,
       // so the original approach is correct on these platforms.
-      config = const RecordConfig(
+      // UNCHANGED — Android relies on this exact path working as-is. The
+      // try/catch below changes nothing about the success path; it only
+      // gives a clearer error message in the hypothetical case this ever
+      // throws, instead of an unhandled exception with no context.
+      final config = const RecordConfig(
         encoder: AudioEncoder.pcm16bits,
         sampleRate: _sampleRate,
         numChannels: _numChannels,
       );
+      try {
+        final stream = await _recorder.startStream(config);
+        _sub = stream.listen((chunk) => _buffer.add(chunk));
+        return true;
+      } catch (e) {
+        throw Exception('Could not start recording (audio/wav): $e');
+      }
     }
 
+    // ── Web (includes Android web/PWA and iOS Safari/PWA) ──────────────
+    //
+    // FIX: iOS Safari has been observed to report
+    // isEncoderSupported(AudioEncoder.opus) == true and then throw
+    // "Stream not supported" the instant startStream() actually tries to
+    // use it — i.e. the feature-detection check itself lies on iOS. The
+    // old code trusted that single upfront check and picked ONE config,
+    // so when it lied, the whole start() call threw with nothing to fall
+    // back to.
+    //
+    // Now: try each candidate format in order, and only move to the next
+    // one if ACTUALLY starting the stream throws — never trust the
+    // upfront check as the final word. AAC/MP4 is the one format that has
+    // reliably worked on Safari in testing, so it's always in the chain
+    // regardless of what isEncoderSupported claims. This changes nothing
+    // for Chrome/Firefox: Opus is genuinely supported there, so the first
+    // candidate always succeeds immediately, same as before.
+    bool opusSupported = false;
     try {
-      final stream = await _recorder.startStream(config);
-      _sub = stream.listen((chunk) => _buffer.add(chunk));
-      return true;
-    } catch (e) {
-      // Previously this exception propagated straight out of start() with
-      // no try/catch anywhere in the call chain (both mic button handlers
-      // only checked the *return value* for permission-denied, never
-      // wrapped the call itself). On iOS PWA that meant a thrown error here
-      // was silently swallowed by Flutter's unhandled-future-error path —
-      // the button just sat there after the permission prompt, with no
-      // feedback at all. Now it's rethrown with context so the callers
-      // (which now have try/catch) can actually show what went wrong.
-      throw Exception('Could not start recording ($_webMimeType): $e');
+      opusSupported = await _recorder.isEncoderSupported(AudioEncoder.opus);
+    } catch (_) {
+      opusSupported = false;
     }
+
+    final candidates = <(RecordConfig config, String mimeType)>[
+      if (opusSupported)
+        (
+          const RecordConfig(encoder: AudioEncoder.opus, numChannels: _numChannels),
+          'audio/ogg',
+        ),
+      (
+        const RecordConfig(encoder: AudioEncoder.aacLc, numChannels: _numChannels),
+        'audio/mp4',
+      ),
+      // Last resort — let the browser pick whatever default it can.
+      (
+        const RecordConfig(numChannels: _numChannels),
+        'audio/webm',
+      ),
+    ];
+
+    Object? lastError;
+    for (final candidate in candidates) {
+      // FIX: reusing the same AudioRecorder/stream across attempts meant
+      // that once one attempt died, EVERY later candidate failed with the
+      // identical error too (same dead MediaStreamTrack underneath),
+      // making the fallback chain pointless in practice. Each attempt now
+      // gets its own fresh instance — and therefore its own fresh
+      // getUserMedia() stream — so a dead track from a failed try can't
+      // carry over and poison the next candidate.
+      final recorder = AudioRecorder();
+      try {
+        final hasPerm = await recorder.hasPermission();
+        if (!hasPerm) {
+          lastError = Exception('permission unavailable on retry');
+          try { await recorder.dispose(); } catch (_) {}
+          continue;
+        }
+        final stream = await recorder.startStream(candidate.$1);
+        // Success — this instance becomes the "live" recorder; dispose
+        // the old one (from a previous failed attempt, or the initial
+        // permission-check instance) now that it's no longer needed.
+        if (!identical(recorder, _recorder)) {
+          try { await _recorder.dispose(); } catch (_) {}
+        }
+        _recorder = recorder;
+        _sub = stream.listen((chunk) => _buffer.add(chunk));
+        _webMimeType = candidate.$2;
+        return true;
+      } catch (e) {
+        lastError = e;
+        try { await recorder.dispose(); } catch (_) {}
+      }
+    }
+
+    // Every candidate failed for real (not just the detection check) —
+    // surface the actual browser error instead of the previous silent
+    // failure/uncaught exception.
+    throw Exception('Could not start recording on this browser: $lastError');
   }
 
   /// Stops recording and returns the audio bytes plus their real mime type.
