@@ -21,14 +21,20 @@ class GroqTranscriber {
   final String apiKey;
   GroqTranscriber(this.apiKey);
 
-  static const _endpoint =
+  static const _transcribeEndpoint =
       'https://api.groq.com/openai/v1/audio/transcriptions';
+  static const _translateEndpoint =
+      'https://api.groq.com/openai/v1/audio/translations';
 
   // whisper-large-v3-turbo is noticeably faster than whisper-large-v3 with
   // only a small accuracy trade-off — fine for short, clear single-sentence
   // commands. If you notice Hinglish/mixed-script accuracy drop in testing,
   // switch this back to 'whisper-large-v3'.
   static const _model = 'whisper-large-v3-turbo';
+
+  // Translation endpoint output quality is more sensitive to model choice
+  // than transcription is — using the full model here, not turbo.
+  static const _translateModel = 'whisper-large-v3';
 
   /// Maps our known mime types to a file extension + subtype for the
   /// multipart upload. Groq accepts flac, mp3, mp4, mpeg, mpga, m4a, ogg,
@@ -48,11 +54,15 @@ class GroqTranscriber {
     }
   }
 
-  /// Returns the raw transcript text, or null if nothing usable came back.
+  /// Returns the raw transcript text, IN WHATEVER SCRIPT WAS SPOKEN
+  /// (Hindi audio may come back in Devanagari or Romanized Hindi,
+  /// inconsistently). Kept for cases where you genuinely want the original
+  /// language preserved. For anything that gets shown/stored as English
+  /// (like your description field), use translate() below instead.
   Future<String?> transcribe(RecordedAudio audio) async {
     final info = _fileInfoFor(audio.mimeType);
 
-    final request = http.MultipartRequest('POST', Uri.parse(_endpoint))
+    final request = http.MultipartRequest('POST', Uri.parse(_transcribeEndpoint))
       ..headers['Authorization'] = 'Bearer $apiKey'
       ..fields['model'] = _model
       ..fields['response_format'] = 'json'
@@ -69,6 +79,46 @@ class GroqTranscriber {
     if (response.statusCode != 200) {
       throw Exception(
           'Groq transcription error (${response.statusCode}): ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final text = decoded['text'] as String?;
+    if (text == null || text.trim().isEmpty) return null;
+    return text.trim();
+  }
+
+  /// Returns the audio's content translated into English, ALWAYS in Latin
+  /// script — regardless of whether the speech was English, Hindi, or
+  /// mixed Hinglish. This is what fixes inconsistent
+  /// Devanagari-vs-Romanized output: the translation endpoint normalizes
+  /// everything to English, so downstream extraction (partyName,
+  /// description, etc.) is always in English too.
+  ///
+  /// The `prompt` param nudges Whisper to keep proper nouns (people/shop
+  /// names) as-is in English letters rather than translating or dropping
+  /// them — translation models can otherwise mangle names.
+  Future<String?> translate(RecordedAudio audio) async {
+    final info = _fileInfoFor(audio.mimeType);
+
+    final request = http.MultipartRequest('POST', Uri.parse(_translateEndpoint))
+      ..headers['Authorization'] = 'Bearer $apiKey'
+      ..fields['model'] = _translateModel
+      ..fields['response_format'] = 'json'
+      ..fields['prompt'] =
+          'This is a business cashbook voice command. Keep any person or shop names unchanged, spelled out in English letters.'
+      ..files.add(http.MultipartFile.fromBytes(
+        'file',
+        audio.bytes,
+        filename: 'audio.${info.ext}',
+        contentType: MediaType('audio', info.subtype),
+      ));
+
+    final streamed = await groqHttpClient.send(request);
+    final response = await http.Response.fromStream(streamed);
+
+    if (response.statusCode != 200) {
+      throw Exception(
+          'Groq translation error (${response.statusCode}): ${response.body}');
     }
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;

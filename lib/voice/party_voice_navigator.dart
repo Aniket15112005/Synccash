@@ -21,7 +21,7 @@ class PartyVoiceNavigator {
   /// Returns the extracted party name (raw, as transcribed) or null if
   /// nothing usable was said.
   Future<String?> extractPartyName(RecordedAudio audio) async {
-    final transcript = await GroqTranscriber(apiKey).transcribe(audio);
+    final transcript = await GroqTranscriber(apiKey).translate(audio);
     if (transcript == null) return null;
 
     const systemPrompt = '''

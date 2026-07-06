@@ -3,18 +3,23 @@ import 'package:http/http.dart' as http;
 import 'voice_recorder_service.dart';
 import 'groq_transcriber.dart';
 
-/// Takes a recorded audio clip, transcribes it via Groq Whisper, then asks
-/// a Groq chat model to extract structured transaction data from the
-/// transcript. Handles English, Hindi, and mixed Hindi-English
-/// ("Hinglish") speech.
+/// Takes a recorded audio clip, translates it to English via Groq Whisper's
+/// translation endpoint, then asks a Groq chat model to extract structured
+/// transaction data from that English text. Handles English, Hindi, and
+/// mixed Hindi-English ("Hinglish") speech — regardless of spoken language,
+/// the text handed to extraction (and therefore the partyName/description
+/// that ends up in the form) is always English/Latin script.
 ///
 /// NOTE: this previously called Gemini's multimodal endpoint directly
-/// (audio in, JSON out, one call). Groq's Whisper models can't do
-/// combined transcribe+extract in a single call the way Gemini's
-/// generateContent could, so this is now two calls:
-///   1. Whisper transcription (audio -> text)
-///   2. A text-only chat completion that extracts fields from the
-///      transcript, with response_format forced to JSON.
+/// (audio in, JSON out, one call), then briefly used Groq's plain
+/// transcription endpoint (audio -> text in ORIGINAL script/language,
+/// which caused Hindi audio to sometimes come back in Devanagari and
+/// sometimes Romanized — inconsistent). Using the translation endpoint
+/// instead fixes that: output is always English, so downstream fields are
+/// consistent. This is now two calls:
+///   1. Whisper translation (audio -> English text, any input language)
+///   2. A text-only chat completion that extracts fields from that text,
+///      with response_format forced to JSON.
 class AiCommandFallback {
   final String apiKey;
 
@@ -27,7 +32,7 @@ class AiCommandFallback {
   /// date) or null if transcription/extraction failed or produced nothing
   /// usable.
   Future<Map<String, dynamic>?> parseAudio(RecordedAudio audio) async {
-    final transcript = await GroqTranscriber(apiKey).transcribe(audio);
+    final transcript = await GroqTranscriber(apiKey).translate(audio);
     if (transcript == null) return null;
     return parseTranscript(transcript);
   }
