@@ -19,6 +19,11 @@ import 'package:synccash/features/sales/presentation/providers/sale_bill_provide
 import 'package:synccash/features/sales/presentation/providers/party_provider.dart';
 // ADDED: dedicated party picker screen (keyboard-safe suggestion flow)
 import 'package:synccash/features/transactions/presentation/screens/party_picker_screen.dart';
+// ADDED: purchase bill imports (mirror of the sales bill imports above)
+import 'package:synccash/features/purchases/domain/entities/purchase_bill_entity.dart';
+import 'package:synccash/features/purchases/presentation/widgets/purchase_bill_no_dropdown_field.dart';
+import 'package:synccash/features/purchases/presentation/providers/purchase_bill_provider.dart';
+import 'package:synccash/features/purchases/presentation/providers/purchase_client_provider.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:synccash/voice/voice_recorder_service.dart';
@@ -72,6 +77,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   // ADDED: true while fetching the existing linked bill on edit open
   bool _loadingBill = false;
 
+  // ADDED: purchase-side mirror of the sale bill selection state
+  PurchaseBillEntity? _selectedPurchaseBill;
+  bool _isPurchaseObPayment = false;
+  bool _loadingPurchaseBill = false;
+
   // ADDED: true once party name is confirmed (selected from picker or pre-filled when editing)
   bool _partyConfirmed = false;
 
@@ -116,6 +126,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       if (tx.linkedSaleBillId != null && tx.linkedSaleBillId!.isNotEmpty) {
         _loadExistingBill(tx.cashbookId, tx.linkedSaleBillId!);
       }
+      // ADDED: load the existing linked purchase bill (mirror of above)
+      if (tx.linkedPurchaseBillId != null && tx.linkedPurchaseBillId!.isNotEmpty) {
+        _loadExistingPurchaseBill(tx.cashbookId, tx.linkedPurchaseBillId!);
+      }
       // Editing: description is already a confirmed party name
       _partyConfirmed = tx.description.isNotEmpty;
     } else if (widget.initialCategory != null) {
@@ -150,11 +164,30 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     }
   }
 
+  // ADDED: fetches the PurchaseBillEntity for the existing linkedPurchaseBillId
+  // so it can be shown pre-selected in the dropdown when editing a transaction.
+  Future<void> _loadExistingPurchaseBill(String cashbookId, String billId) async {
+    if (!mounted) return;
+    setState(() => _loadingPurchaseBill = true);
+    try {
+      final bill = await loadPurchaseBillDirect(cashbookId, billId);
+      if (mounted && bill != null) {
+        setState(() => _selectedPurchaseBill = bill);
+      }
+    } catch (_) {
+      // silently ignore — dropdown will just be unselected
+    } finally {
+      if (mounted) setState(() => _loadingPurchaseBill = false);
+    }
+  }
+
   // ADDED
   void _onDescChanged() {
     _partyConfirmed = false;
     _selectedBill = null;
     _isObPayment = false;
+    _selectedPurchaseBill = null;
+    _isPurchaseObPayment = false;
     setState(() {});
   }
 
@@ -172,20 +205,43 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     // wiping out BOTH lists, even when partiesProvider had already loaded
     // fine. Each source is now resolved independently, so one failing
     // can never erase the other's already-successful data.
-    final savedParties = await _resolveAsync(
+    // FIX: these four used to be awaited one after another, each with its own
+    // 6s timeout — so if any (or all) of the providers were slow/erroring,
+    // tapping the description field could hang for up to ~24s before the
+    // picker opened. _resolveAsync already catches its own errors internally,
+    // so it's safe to kick off all four immediately and await them together;
+    // the worst case is now a single ~6s timeout, not four stacked ones.
+    final partiesFuture = _resolveAsync(
       cached: ref.read(partiesProvider).asData?.value,
       load: () => ref.read(partiesProvider.future),
     );
-    final allBills = await _resolveAsync(
+    final billsFuture = _resolveAsync(
       cached: ref.read(allSaleBillsProvider).asData?.value,
       load: () => ref.read(allSaleBillsProvider.future),
     );
+    // ADDED: purchase-side mirror of the two loads above, so purchase client
+    // names show up in the same suggestion list.
+    final purchaseClientsFuture = _resolveAsync(
+      cached: ref.read(purchaseClientsProvider).asData?.value,
+      load: () => ref.read(purchaseClientsProvider.future),
+    );
+    final purchaseBillsFuture = _resolveAsync(
+      cached: ref.read(allPurchaseBillsProvider).asData?.value,
+      load: () => ref.read(allPurchaseBillsProvider.future),
+    );
+
+    final savedParties = await partiesFuture;
+    final allBills = await billsFuture;
+    final savedPurchaseClients = await purchaseClientsFuture;
+    final allPurchaseBills = await purchaseBillsFuture;
 
     if (!mounted) return;
 
     final allPartyNames = <String>{
       ...savedParties.map((p) => p.partyName),
       ...allBills.map((b) => b.partyName.trim()),
+      ...savedPurchaseClients.map((c) => c.clientName),      // ADDED
+      ...allPurchaseBills.map((b) => b.clientName.trim()),   // ADDED
     }.toList()..sort();
 
     // FIX: this used to gate suggestions behind Income + Wholesale/Bank/UPI,
@@ -398,6 +454,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         _selectedBill = null;
         _isObPayment  = false;
       }
+      // ADDED: clear purchase bill link and OB flag when switching away from expense
+      if (type != 'expense') {
+        _selectedPurchaseBill = null;
+        _isPurchaseObPayment = false;
+      }
     });
   }
 
@@ -407,7 +468,13 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     // ADDED: clear selected bill when switching away from Wholesale, Bank, or UPI
     setState(() {
       _category = cat;
-      if (cat != 'Wholesale' && cat != 'Bank' && cat != 'UPI') { _selectedBill = null; _isObPayment = false; }
+      if (cat != 'Wholesale' && cat != 'Bank' && cat != 'UPI') {
+        _selectedBill = null;
+        _isObPayment = false;
+        // ADDED: clear purchase bill selection alongside the sale bill one
+        _selectedPurchaseBill = null;
+        _isPurchaseObPayment = false;
+      }
     });
   }
 
@@ -479,6 +546,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         description:   _descCtrl.text.trim(),
         lastEditedBy:  user.uid,
         linkedSaleBillId: _selectedBill?.saleBillId, // ADDED
+        linkedPurchaseBillId: _selectedPurchaseBill?.purchaseBillId, // ADDED
       );
 
       if (existing != null) {
@@ -501,6 +569,31 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         await ref.read(saleBillActionsProvider.notifier).recordObPaymentWithOverflow(
           cashbookId:    tx.cashbookId,
           partyName:     _descCtrl.text.trim(),
+          totalAmount:   tx.amount,
+          description:   tx.description,
+          category:      tx.category,
+          createdBy:     tx.createdBy,
+          createdByName: tx.creatorName,
+          createdAt:     tx.createdAt,
+        );
+      } else if (_type == 'expense' && _selectedPurchaseBill != null) {
+        // ADDED: purchase-side mirror of the sales bill payment branch above.
+        await ref.read(purchaseBillActionsProvider.notifier).recordPaymentWithOverflow(
+          cashbookId:     tx.cashbookId,
+          selectedBillId: _selectedPurchaseBill!.purchaseBillId,
+          clientName:     _selectedPurchaseBill!.clientName,
+          totalAmount:    tx.amount,
+          description:    tx.description,
+          category:       tx.category,
+          createdBy:      tx.createdBy,
+          createdByName:  tx.creatorName,
+          createdAt:      tx.createdAt,
+        );
+      } else if (_type == 'expense' && _isPurchaseObPayment) {
+        // ADDED: purchase-side mirror of the sales OB payment branch above.
+        await ref.read(purchaseBillActionsProvider.notifier).recordObPaymentWithOverflow(
+          cashbookId:    tx.cashbookId,
+          clientName:    _descCtrl.text.trim(),
           totalAmount:   tx.amount,
           description:   tx.description,
           category:      tx.category,
@@ -663,6 +756,47 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                                 isObSelected: _isObPayment,
                                 onObSelected: () =>
                                     setState(() { _isObPayment = true; _selectedBill = null; }),
+                              ),
+                          ],
+
+                          // ADDED: Purchase bill dropdown — expense + Wholesale/Bank/UPI only.
+                          // Mirrors the sales bill dropdown above; the two never render
+                          // together since one requires _type == 'income' and the other
+                          // requires _type == 'expense'.
+                          if (_type == 'expense' && _partyConfirmed && (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI')) ...[
+                            if (_loadingPurchaseBill)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Row(
+                                  children: [
+                                    const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 1.5,
+                                        color: Color(0xFF6B7280),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    const Text(
+                                      'Loading linked bill…',
+                                      style: TextStyle(
+                                        color: Color(0xFF6B7280),
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              PurchaseBillNoDropdownField(
+                                clientName: _descCtrl.text,
+                                selectedBill: _selectedPurchaseBill,
+                                onBillSelected: (bill) =>
+                                    setState(() { _selectedPurchaseBill = bill; _isPurchaseObPayment = false; }),
+                                isObSelected: _isPurchaseObPayment,
+                                onObSelected: () =>
+                                    setState(() { _isPurchaseObPayment = true; _selectedPurchaseBill = null; }),
                               ),
                           ],
                           const SizedBox(height: 24),

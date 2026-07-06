@@ -132,6 +132,31 @@ service cloud.firestore {
                       && isIosUser(database);
       }
 
+      // ── Purchase Bills ───────────────────────────────────────────────────
+      match /purchase_bills/{billId} {
+
+        // Both Android and iOS/PWA members can read all purchase bills.
+        allow read: if isCashbookMember(database, cashbookId);
+
+        // Both Android and iOS/PWA members can create purchase bills.
+        allow create: if isCashbookMember(database, cashbookId);
+
+        // Both Android and iOS/PWA members can update (e.g. settle a bill).
+        allow update: if isCashbookMember(database, cashbookId);
+
+        // Only iOS/PWA members can delete a bill.
+        allow delete: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+      }
+
+      // ── Purchase Clients ─────────────────────────────────────────────────
+      match /purchase_clients/{clientId} {
+        allow read:   if isCashbookMember(database, cashbookId);
+        allow create: if isCashbookMember(database, cashbookId);
+        allow update: if isCashbookMember(database, cashbookId);
+        allow delete: if isCashbookMember(database, cashbookId);
+      }
+
       // ── Parties (Opening Balances) ────────────────────────────────────────
       match /parties/{partyId} {
         allow read:   if isCashbookMember(database, cashbookId);

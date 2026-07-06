@@ -18,6 +18,11 @@ class TransactionEntity {
   /// Null for all existing transactions — fully backward compatible.
   final String? linkedSaleBillId;
 
+  /// Links this transaction to a purchase bill in purchase_bills
+  /// sub-collection. Null for all existing/non-purchase transactions —
+  /// fully backward compatible.
+  final String? linkedPurchaseBillId;
+
   const TransactionEntity({
     required this.transactionId,
     required this.cashbookId,
@@ -30,6 +35,7 @@ class TransactionEntity {
     required this.description,
     this.lastEditedBy,
     this.linkedSaleBillId,
+    this.linkedPurchaseBillId,
   });
 
   TransactionEntity copyWith({
@@ -44,6 +50,7 @@ class TransactionEntity {
     String? description,
     String? lastEditedBy,
     String? linkedSaleBillId,
+    String? linkedPurchaseBillId,
   }) {
     return TransactionEntity(
       transactionId: transactionId ?? this.transactionId,
@@ -57,6 +64,7 @@ class TransactionEntity {
       description:   description   ?? this.description,
       lastEditedBy:  lastEditedBy  ?? this.lastEditedBy,
       linkedSaleBillId: linkedSaleBillId ?? this.linkedSaleBillId,
+      linkedPurchaseBillId: linkedPurchaseBillId ?? this.linkedPurchaseBillId,
     );
   }
 }

@@ -1,5 +1,7 @@
 // lib/features/settings/presentation/screens/settings_screen.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:synccash/features/purchases/presentation/purchase_routes.dart';
+import 'package:synccash/features/purchases/presentation/screens/purchases_screen.dart';
 
 import 'package:synccash/features/analytics/presentation/screens/analytics_screen.dart';
 
@@ -180,6 +182,24 @@ class _MainSheet extends StatelessWidget {
           ).animate().fadeIn(delay: 210.ms, duration: 220.ms).slideX(
               begin: 0.04, end: 0, curve: Curves.easeOut),
           // ─── end Billport tile ──────────────────────────────────────
+          // ─── Purchases tile ─────────────────────────────────────────
+          const SizedBox(height: 8),
+          _SettingsTile(
+            icon: Icons.shopping_cart_rounded,
+            iconColor: const Color(0xFF10B981),
+            title: 'Purchases',
+            subtitle: 'Manage purchase bills & supplier payments',
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                purchaseRoute(const PurchasesScreen()),
+              );
+            },
+            trailing: const _ChevronIcon(),
+          ).animate().fadeIn(delay: 225.ms, duration: 220.ms).slideX(
+              begin: 0.04, end: 0, curve: Curves.easeOut),
+          // ─── end Purchases tile ─────────────────────────────────────
           if (kIsWeb) ...[
             const SizedBox(height: 8),
             _SettingsTile(
