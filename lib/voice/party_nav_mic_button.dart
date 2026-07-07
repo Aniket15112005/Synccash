@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -35,7 +36,10 @@ class PartyNavMicButton extends StatefulWidget {
   });
 
   /// Whether this feature should be shown at all on the current platform.
-  static bool get isSupportedPlatform => kIsWeb;
+  /// Excluded on iOS PWA — MediaRecorder is unreliable in iOS Safari /
+  /// home-screen PWA, so the button is hidden there.
+  static bool get isSupportedPlatform =>
+      kIsWeb && defaultTargetPlatform != TargetPlatform.iOS;
 
   @override
   State<PartyNavMicButton> createState() => _PartyNavMicButtonState();

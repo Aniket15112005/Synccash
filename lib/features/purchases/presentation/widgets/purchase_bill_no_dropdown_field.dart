@@ -2,7 +2,7 @@
 // lib/features/purchases/presentation/widgets/purchase_bill_no_dropdown_field.dart
 //
 // Mirrors bill_no_dropdown_field.dart (Sales) for the purchase/expense side.
-// Key difference: starts COLLAPSED — shows a "Select Bill" tap-target first.
+// Starts EXPANDED — directly shows pending bills, matching the sales-bill UX.
 // Only streams / updates when type == 'expense' (enforced by the caller in
 // add_transaction_screen.dart — no sales data is touched here).
 
@@ -58,10 +58,9 @@ class _PurchaseBillNoDropdownFieldState
   double  _obPaid        = 0.0;
   Map<String, double> _paidPerBill = {};
 
-  /// Start COLLAPSED (shows "Select Bill" button, not the full list).
-  /// Flips to true when the user taps the button, or when the widget is
-  /// re-used with a party-change that clears the selection.
-  bool _isExpanded = false;
+  /// Starts EXPANDED — directly shows the bill list, matching the sales-bill UX.
+  /// Collapses to the selected-chip view once the user picks a bill.
+  bool _isExpanded = true;
 
   @override
   void initState() {
@@ -79,14 +78,14 @@ class _PurchaseBillNoDropdownFieldState
     super.didUpdateWidget(old);
     if (old.clientName != widget.clientName) {
       _scheduleDebounce(widget.clientName);
-      // New party → go back to "Select Bill" button state
-      if (mounted) setState(() => _isExpanded = false);
+      // New party → re-expand so bills load immediately for the new client
+      if (mounted) setState(() => _isExpanded = true);
     }
-    // If selection was cleared externally, show "Select Bill" button again
+    // If selection was cleared externally, re-expand to show the bill list
     final wasSelected = old.selectedBill != null || old.isObSelected;
     final nowSelected = widget.selectedBill != null || widget.isObSelected;
     if (wasSelected && !nowSelected) {
-      if (mounted) setState(() => _isExpanded = false);
+      if (mounted) setState(() => _isExpanded = true);
     }
   }
 

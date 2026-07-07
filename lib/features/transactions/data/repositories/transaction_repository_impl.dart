@@ -370,7 +370,8 @@ class TransactionRepositoryImpl implements TransactionRepository {
           'createdBy':       tx.createdBy,
           'creatorName':     tx.creatorName,
           'lastEditedBy':    tx.lastEditedBy,
-          'linkedSaleBillId': tx.linkedSaleBillId ?? FieldValue.delete(),
+          'linkedSaleBillId':     tx.linkedSaleBillId     ?? FieldValue.delete(),
+          'linkedPurchaseBillId': tx.linkedPurchaseBillId ?? FieldValue.delete(),
         });
 
         transaction.update(cashbookRef, {

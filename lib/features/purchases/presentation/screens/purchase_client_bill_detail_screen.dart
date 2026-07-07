@@ -1694,7 +1694,7 @@ class _BillShareCard extends StatelessWidget {
                   color: _T.accent.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.local_shipping_outlined,
+                child: const Icon(Icons.storefront_outlined,
                     color: _T.accent, size: 20),
               ),
               const SizedBox(width: 12),

@@ -104,9 +104,122 @@ class _PurchasesScreenState extends ConsumerState<PurchasesScreen> {
     );
   }
 
+  Future<void> _editClient(String clientName) async {
+    HapticFeedback.selectionClick();
+    final ctrl = TextEditingController(text: clientName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1F22),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Rename Client',
+            style: TextStyle(color: Color(0xFFF1F2F5), fontWeight: FontWeight.w700)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          style: const TextStyle(color: Color(0xFFF1F2F5)),
+          decoration: InputDecoration(
+            hintText: 'Client name',
+            hintStyle: const TextStyle(color: Color(0xFF8C8E9A)),
+            filled: true,
+            fillColor: const Color(0xFF1A1B1E),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFF2C2D32))),
+            focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Color(0xFFF59E0B))),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF8C8E9A))),
+          ),
+          TextButton(
+            onPressed: () {
+              final v = ctrl.text.trim();
+              if (v.isNotEmpty) Navigator.pop(ctx, v);
+            },
+            child: const Text('Save',
+                style: TextStyle(
+                    color: Color(0xFFF59E0B), fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (newName == null || newName == clientName) return;
+    final cashbookId = ref.read(currentCashbookIdProvider);
+    if (cashbookId == null) return;
+    try {
+      await ref
+          .read(purchaseClientActionsProvider.notifier)
+          .renameClient(cashbookId, clientName, newName);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: _T.red.withValues(alpha: 0.9),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
+  Future<void> _deleteClient(String clientName) async {
+    HapticFeedback.mediumImpact();
+    final cashbookId = ref.read(currentCashbookIdProvider);
+    if (cashbookId == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1F22),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Delete Client?',
+            style: TextStyle(color: Color(0xFFF1F2F5), fontWeight: FontWeight.w700)),
+        content: Text(
+          'This will delete "$clientName" from your purchase clients. '
+          'Their bills will remain but the client record will be removed.',
+          style: const TextStyle(color: Color(0xFF8C8E9A), fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF8C8E9A))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete',
+                style: TextStyle(
+                    color: Color(0xFFFC8181), fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ref
+          .read(purchaseClientActionsProvider.notifier)
+          .deleteClient(cashbookId, clientName);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: _T.red.withValues(alpha: 0.9),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final clients = ref.watch(filteredPurchaseClientsProvider);
+    final clients    = ref.watch(filteredPurchaseClientsProvider);
+    // Use ALL clients (not search-filtered) so summary totals are always global.
+    final allClients = ref.watch(purchaseClientsProvider).asData?.value ?? [];
     final allBillsAsync = ref.watch(allPurchaseBillsProvider);
     final allBills = allBillsAsync.asData?.value ?? [];
 
@@ -120,6 +233,35 @@ class _PurchasesScreenState extends ConsumerState<PurchasesScreen> {
       pendingByClient[b.clientName] =
           (pendingByClient[b.clientName] ?? 0) + pending;
     }
+
+    // ── Summary strip computation ───────────────────────────────────────────
+    // Per-client bill totals (raw, unpaid).
+    final billTotalByKey = <String, double>{};
+    for (final b in allBills) {
+      final key = b.clientName.trim().toLowerCase();
+      billTotalByKey[key] = (billTotalByKey[key] ?? 0) + b.billAmount;
+    }
+    // Per-client pending bill amount (live: sum of (billAmt - paid).clamp(0)).
+    final billPendingByKey = <String, double>{};
+    for (final b in allBills) {
+      final key  = b.clientName.trim().toLowerCase();
+      final paid = _paidPerBill[b.purchaseBillId] ?? 0.0;
+      billPendingByKey[key] =
+          (billPendingByKey[key] ?? 0) + (b.billAmount - paid).clamp(0.0, double.infinity);
+    }
+    // Aggregate across every client.
+    double _totalBillAmt = 0;
+    double _totalClosing = 0;
+    for (final client in allClients) {
+      final key         = client.clientName.trim().toLowerCase();
+      final ob          = client.openingBalance;
+      final obPaid      = _obPaidByClient[key] ?? 0.0;
+      final obRemaining = (ob - obPaid).clamp(0.0, double.infinity);
+      _totalBillAmt += ob + (billTotalByKey[key]   ?? 0);
+      _totalClosing += obRemaining + (billPendingByKey[key] ?? 0);
+    }
+    final _totalPaid =
+        (_totalBillAmt - _totalClosing).clamp(0.0, double.infinity);
 
     return Scaffold(
       backgroundColor: _T.bg,
@@ -146,6 +288,14 @@ class _PurchasesScreenState extends ConsumerState<PurchasesScreen> {
                 ],
               ),
             ),
+            // ── Summary strip ─────────────────────────────────────────────
+            if (allClients.isNotEmpty || allBills.isNotEmpty)
+              _PurchaseSummaryStrip(
+                totalBillAmt: _totalBillAmt,
+                totalPaid:    _totalPaid,
+                totalClosing: _totalClosing,
+              ),
+            const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _SearchBar(
@@ -179,6 +329,8 @@ class _PurchasesScreenState extends ConsumerState<PurchasesScreen> {
                               clientName: client.clientName,
                             )),
                           ),
+                          onEdit:   () => _editClient(client.clientName),
+                          onDelete: () => _deleteClient(client.clientName),
                         );
                       },
                     ),
@@ -260,12 +412,16 @@ class _ClientCard extends StatelessWidget {
   final double openingBalance;
   final double pendingBills;
   final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   const _ClientCard({
     required this.clientName,
     required this.openingBalance,
     required this.pendingBills,
     required this.onTap,
+    required this.onEdit,
+    required this.onDelete,
   });
 
   @override
@@ -275,7 +431,7 @@ class _ClientCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
         decoration: BoxDecoration(
           color: _T.card,
           borderRadius: BorderRadius.circular(16),
@@ -290,7 +446,7 @@ class _ClientCard extends StatelessWidget {
                 color: _T.accent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.local_shipping_outlined, color: _T.accent, size: 20),
+              child: const Icon(Icons.storefront_outlined, color: _T.accent, size: 20),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -315,7 +471,52 @@ class _ClientCard extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: _T.muted),
+            // Three-dot menu for edit / delete
+            PopupMenuButton<String>(
+              padding: EdgeInsets.zero,
+              icon: const Icon(Icons.more_vert_rounded, color: _T.muted, size: 20),
+              color: _T.card2,
+              elevation: 8,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: _T.border)),
+              onSelected: (v) {
+                if (v == 'edit') onEdit();
+                if (v == 'delete') onDelete();
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem<String>(
+                  value: 'edit',
+                  height: 44,
+                  child: Row(
+                    children: const [
+                      Icon(Icons.edit_outlined, color: _T.accent, size: 16),
+                      SizedBox(width: 10),
+                      Text('Edit Client',
+                          style: TextStyle(
+                              color: _T.text,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+                PopupMenuItem<String>(
+                  value: 'delete',
+                  height: 44,
+                  child: Row(
+                    children: const [
+                      Icon(Icons.delete_outline_rounded, color: _T.red, size: 16),
+                      SizedBox(width: 10),
+                      Text('Delete Client',
+                          style: TextStyle(
+                              color: _T.red,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -459,7 +660,7 @@ class _AddPurchaseClientBillSheetState
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: _T.accent.withValues(alpha: 0.2)),
                     ),
-                    child: const Icon(Icons.local_shipping_outlined, color: _T.accent, size: 20),
+                    child: const Icon(Icons.storefront_outlined, color: _T.accent, size: 20),
                   ),
                   const SizedBox(width: 12),
                   const Column(
@@ -553,4 +754,104 @@ class _AddPurchaseClientBillSheetState
       ),
     );
   }
+}
+
+// ─── Purchase summary strip ──────────────────────────────────────────────────
+
+class _PurchaseSummaryStrip extends StatelessWidget {
+  final double totalBillAmt;
+  final double totalPaid;
+  final double totalClosing;
+
+  const _PurchaseSummaryStrip({
+    required this.totalBillAmt,
+    required this.totalPaid,
+    required this.totalClosing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = NumberFormat('#,##,##0.##', 'en_IN');
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: _T.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _T.border),
+      ),
+      child: Row(
+        children: [
+          _PurchaseSummaryCell(
+            label: 'Bill Amt',
+            value: '₹${fmt.format(totalBillAmt)}',
+            color: _T.text,
+          ),
+          _PurchaseSummaryDivider(),
+          _PurchaseSummaryCell(
+            label: 'Paid',
+            value: '₹${fmt.format(totalPaid)}',
+            color: const Color(0xFF38D68A),
+          ),
+          _PurchaseSummaryDivider(),
+          _PurchaseSummaryCell(
+            label: 'Closing Bal.',
+            value: '₹${fmt.format(totalClosing)}',
+            color: const Color(0xFFD4580A),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PurchaseSummaryCell extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color  color;
+  const _PurchaseSummaryCell({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+  @override
+  Widget build(BuildContext context) => Expanded(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: _T.muted,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.3,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    ),
+  );
+}
+
+class _PurchaseSummaryDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 1,
+    height: 28,
+    margin: const EdgeInsets.symmetric(horizontal: 4),
+    color: _T.border,
+  );
 }

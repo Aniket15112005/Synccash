@@ -19,17 +19,17 @@ import '../../../../voice/party_nav_mic_button.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _T {
-  static const bg     = Color(0xFF080A0E);
-  static const card   = Color(0xFF0F1318);
-  static const card2  = Color(0xFF141921);
-  static const border = Color(0xFF1C2130);
-  static const muted  = Color(0xFF4A5568);
-  static const accent = Color(0xFF6C7FE4);
-  static const text   = Color(0xFFE8ECF4);
+  static const bg     = Color(0xFF161616);
+  static const card   = Color(0xFF1E1E1E);
+  static const card2  = Color(0xFF1E1E1E);
+  static const border = Color(0xFF2A2A2A);
+  static const muted  = Color(0xFF8A8A8A);
+  static const accent = Color(0xFFF2F2F2);
+  static const text   = Color(0xFFF2F2F2);
   static const green  = Color(0xFF38D68A);
   static const amber  = Color(0xFFF5A623);
   static const red        = Color(0xFFE85C5C);
-  static const darkOrange = Color(0xFFD4580A);
+  static const darkOrange = Color(0xFFF2F2F2);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -161,16 +161,15 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 7),
                   decoration: BoxDecoration(
-                    color: _T.accent.withValues(alpha: 0.10),
+                    color: _T.card,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                        color: _T.accent.withValues(alpha: 0.22)),
+                    border: Border.all(color: _T.border),
                   ),
                   child: const Text('Opening Bal.',
                       style: TextStyle(
-                          color: _T.accent,
+                          color: _T.muted,
                           fontSize: 11,
-                          fontWeight: FontWeight.w700)),
+                          fontWeight: FontWeight.w600)),
                 ),
               ),
               const SizedBox(width: 8),
@@ -190,21 +189,12 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 14, vertical: 7),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF6C7FE4), Color(0xFF8B5CF6)],
-                    ),
+                    color: _T.accent,
                     borderRadius: BorderRadius.circular(10),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _T.accent.withValues(alpha: 0.30),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
                   ),
                   child: const Text('+ Add Bill',
                       style: TextStyle(
-                          color: Colors.white,
+                          color: _T.bg,
                           fontSize: 11,
                           fontWeight: FontWeight.w700)),
                 ),
@@ -485,20 +475,9 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
       },
       child: Container(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF0F1318), Color(0xFF111520)],
-          ),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _T.border.withValues(alpha: 0.9)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 20,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          color: _T.card,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _T.border),
         ),
         child: IntrinsicHeight(
           child: Row(
@@ -508,17 +487,10 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
               Container(
                 width: 3,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      statusColor,
-                      statusColor.withValues(alpha: 0.35),
-                    ],
-                  ),
+                  color: statusColor,
                   borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(20),
-                    bottomLeft: Radius.circular(20),
+                    topLeft: Radius.circular(16),
+                    bottomLeft: Radius.circular(16),
                   ),
                 ),
               ),
@@ -565,18 +537,16 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
                                                 horizontal: 6,
                                                 vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: _T.accent
-                                              .withValues(alpha: 0.12),
+                                          color: _T.bg,
                                           borderRadius:
                                               BorderRadius.circular(6),
                                           border: Border.all(
-                                              color: _T.accent.withValues(
-                                                  alpha: 0.25)),
+                                              color: _T.border),
                                         ),
                                         child: Text(
                                           'OB ₹${fmt.format(_ob)}',
                                           style: const TextStyle(
-                                            color: _T.accent,
+                                            color: _T.muted,
                                             fontSize: 10,
                                             fontWeight: FontWeight.w700,
                                           ),
@@ -643,7 +613,7 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
   Text(
     '₹${fmt.format(outstanding)} due',
     style: const TextStyle(
-      color: Color(0xFFB8860B),
+      color: _T.muted,
       fontSize: 11,
       fontWeight: FontWeight.w700,
     ),
@@ -667,15 +637,7 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
                         children: [
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 9, vertical: 4),
-                            decoration: BoxDecoration(
-                              color:
-                                  statusColor.withValues(alpha: 0.10),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                  color: statusColor
-                                      .withValues(alpha: 0.25)),
-                            ),
+                                horizontal: 2, vertical: 4),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -706,7 +668,7 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
                             iconSize: 18,
                             icon: Icon(Icons.more_vert_rounded,
                                 color: _T.muted.withValues(alpha: 0.5), size: 18),
-                            color: const Color(0xFF141921),
+                            color: _T.card2,
                             elevation: 8,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
@@ -722,11 +684,11 @@ class _PartyCardState extends ConsumerState<_PartyCard> {
                                 child: Row(
                                   children: [
                                     const Icon(Icons.edit_rounded,
-                                        color: _T.accent, size: 15),
+                                        color: _T.text, size: 15),
                                     const SizedBox(width: 10),
                                     const Text('Edit Party',
                                         style: TextStyle(
-                                            color: _T.accent,
+                                            color: _T.text,
                                             fontSize: 13,
                                             fontWeight: FontWeight.w600)),
                                   ],
@@ -890,13 +852,12 @@ class _EditPartySheetState extends State<_EditPartySheet> {
                 Container(
                   width: 40, height: 40,
                   decoration: BoxDecoration(
-                    color: _T.accent.withValues(alpha: 0.10),
+                    color: _T.bg,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: _T.accent.withValues(alpha: 0.20)),
+                    border: Border.all(color: _T.border),
                   ),
                   child: const Icon(Icons.business_rounded,
-                      color: _T.accent, size: 20),
+                      color: _T.text, size: 20),
                 ),
                 const SizedBox(width: 12),
                 const Column(
@@ -947,7 +908,7 @@ class _EditPartySheetState extends State<_EditPartySheet> {
                 onPressed: _saving ? null : _save,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _T.accent,
-                  foregroundColor: Colors.white,
+                  foregroundColor: _T.bg,
                   disabledBackgroundColor:
                       _T.accent.withValues(alpha: 0.35),
                   shape: RoundedRectangleBorder(
@@ -955,10 +916,10 @@ class _EditPartySheetState extends State<_EditPartySheet> {
                   elevation: 0,
                 ),
                 child: _saving
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 20, height: 20,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2.5, color: Colors.white))
+                            strokeWidth: 2.5, color: _T.bg))
                     : const Text('Save Changes',
                         style: TextStyle(
                             fontWeight: FontWeight.w700, fontSize: 15)),
@@ -1157,12 +1118,12 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
         data: Theme.of(ctx).copyWith(
           colorScheme: const ColorScheme.dark(
             primary: _T.accent,
-            onPrimary: Colors.white,
-            surface: Color(0xFF141921),
+            onPrimary: _T.bg,
+            surface: _T.card2,
             onSurface: _T.text,
           ),
           dialogTheme: const DialogThemeData(
-              backgroundColor: Color(0xFF080A0E)),
+              backgroundColor: _T.bg),
         ),
         child: child!,
       ),
@@ -1442,7 +1403,7 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
                   onPressed: _submitting ? null : _submit,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _T.accent,
-                    foregroundColor: Colors.white,
+                    foregroundColor: _T.bg,
                     disabledBackgroundColor:
                         _T.accent.withValues(alpha: 0.35),
                     shape: RoundedRectangleBorder(
@@ -1450,10 +1411,10 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
                     elevation: 0,
                   ),
                   child: _submitting
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 20, height: 20,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2.5, color: Colors.white))
+                              strokeWidth: 2.5, color: _T.bg))
                       : const Text('Save Bill',
                           style: TextStyle(
                               fontWeight: FontWeight.w700, fontSize: 15)),
@@ -1513,39 +1474,19 @@ class _GradientAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const gradients = [
-      [Color(0xFF6D28D9), Color(0xFF4F46E5)],
-      [Color(0xFF0284C7), Color(0xFF06B6D4)],
-      [Color(0xFF059669), Color(0xFF0D9488)],
-      [Color(0xFFE11D48), Color(0xFFEC4899)],
-      [Color(0xFFD97706), Color(0xFFEA580C)],
-    ];
-    final idx =
-        name.isNotEmpty ? name.codeUnitAt(0) % gradients.length : 0;
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: gradients[idx],
-        ),
+        color: _T.border,
         borderRadius: BorderRadius.circular(size * 0.30),
-        boxShadow: [
-          BoxShadow(
-            color: gradients[idx][0].withValues(alpha: 0.28),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
       child: Center(
         child: Text(
           name.isNotEmpty ? name[0].toUpperCase() : '?',
           style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w800,
+            color: _T.text,
+            fontWeight: FontWeight.w700,
             fontSize: size * 0.40,
           ),
         ),

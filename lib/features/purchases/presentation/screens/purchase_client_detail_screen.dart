@@ -132,6 +132,18 @@ class _PurchaseClientDetailScreenState
         .setOpeningBalance(cashbookId, widget.clientName, result);
   }
 
+  Future<void> _editBill(PurchaseBillEntity bill) async {
+    HapticFeedback.selectionClick();
+    final cashbookId = ref.read(currentCashbookIdProvider);
+    if (cashbookId == null) return;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditBillSheet(bill: bill, cashbookId: cashbookId),
+    );
+  }
+
   Future<void> _deleteBill(PurchaseBillEntity bill) async {
     HapticFeedback.mediumImpact();
     final cashbookId = ref.read(currentCashbookIdProvider);
@@ -387,16 +399,13 @@ class _PurchaseClientDetailScreenState
                                     ),
                                   ],
                                 ),
-                                // Chevron indicator (tap hint) + delete
+                                // Chevron indicator (tap hint) + ⋮ menu
                                 const SizedBox(width: 4),
                                 const Icon(Icons.chevron_right_rounded,
                                     color: _T.muted, size: 18),
-                                IconButton(
-                                  onPressed: () => _deleteBill(bill),
-                                  icon: const Icon(
-                                      Icons.delete_outline_rounded,
-                                      color: _T.muted,
-                                      size: 18),
+                                _BillRowMenu(
+                                  onEdit:   () => _editBill(bill),
+                                  onDelete: () => _deleteBill(bill),
                                 ),
                               ],
                             ),
@@ -406,6 +415,269 @@ class _PurchaseClientDetailScreenState
                     ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Three-dot menu for a bill row ──────────────────────────────────────────
+
+class _BillRowMenu extends StatelessWidget {
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+  const _BillRowMenu({required this.onEdit, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+        padding: EdgeInsets.zero,
+        icon: const Icon(Icons.more_vert_rounded, color: _T.muted, size: 18),
+        color: _T.card2,
+        elevation: 8,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: _T.border)),
+        onSelected: (v) {
+          if (v == 'edit') onEdit();
+          if (v == 'delete') onDelete();
+        },
+        itemBuilder: (_) => [
+          PopupMenuItem<String>(
+            value: 'edit',
+            height: 44,
+            child: Row(
+              children: const [
+                Icon(Icons.edit_outlined, color: _T.accent, size: 16),
+                SizedBox(width: 10),
+                Text('Edit Bill',
+                    style: TextStyle(
+                        color: _T.text,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          PopupMenuItem<String>(
+            value: 'delete',
+            height: 44,
+            child: Row(
+              children: const [
+                Icon(Icons.delete_outline_rounded, color: _T.red, size: 16),
+                SizedBox(width: 10),
+                Text('Delete Bill',
+                    style: TextStyle(
+                        color: _T.red,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
+      );
+}
+
+// ─── Edit bill sheet ─────────────────────────────────────────────────────────
+
+class _EditBillSheet extends ConsumerStatefulWidget {
+  final PurchaseBillEntity bill;
+  final String cashbookId;
+  const _EditBillSheet({required this.bill, required this.cashbookId});
+
+  @override
+  ConsumerState<_EditBillSheet> createState() => _EditBillSheetState();
+}
+
+class _EditBillSheetState extends ConsumerState<_EditBillSheet> {
+  final _formKey    = GlobalKey<FormState>();
+  late final _billNoCtrl = TextEditingController(text: widget.bill.billNumber);
+  late final _amountCtrl = TextEditingController(
+      text: widget.bill.billAmount.toStringAsFixed(0));
+  late final _noteCtrl   = TextEditingController(
+      text: widget.bill.billNote ?? '');
+  late DateTime _date    = widget.bill.billDate;
+  bool _submitting       = false;
+
+  @override
+  void dispose() {
+    _billNoCtrl.dispose();
+    _amountCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final d = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(now.year - 5),
+      lastDate: now,
+    );
+    if (d != null && mounted) setState(() => _date = d);
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _submitting = true);
+    try {
+      final updated = PurchaseBillEntity(
+        purchaseBillId:    widget.bill.purchaseBillId,
+        clientName:        widget.bill.clientName,
+        billNumber:        _billNoCtrl.text.trim(),
+        billAmount:        double.parse(_amountCtrl.text.trim()),
+        billDate:          _date,
+        billNote:          _noteCtrl.text.trim().isEmpty
+                               ? null
+                               : _noteCtrl.text.trim(),
+        billCreatedAt:     widget.bill.billCreatedAt,
+        billCreatedBy:     widget.bill.billCreatedBy,
+        billCreatedByName: widget.bill.billCreatedByName,
+        billStatus:        widget.bill.billStatus,
+      );
+      await ref
+          .read(purchaseBillActionsProvider.notifier)
+          .updateBill(widget.cashbookId, updated);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: _T.red.withValues(alpha: 0.9),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  InputDecoration _fieldDec(String label, {IconData? icon}) => InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: _T.muted, fontSize: 13),
+        prefixIcon: icon != null ? Icon(icon, color: _T.muted, size: 18) : null,
+        filled: true,
+        fillColor: _T.card,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: _T.border)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: _T.border)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: _T.accent)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom  = MediaQuery.of(context).viewInsets.bottom;
+    final dateFmt = DateFormat('dd MMM yyyy');
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: _T.card2,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, 28 + bottom),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                      color: _T.border, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const Text('Edit Bill',
+                  style: TextStyle(
+                      color: _T.text,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text('${widget.bill.clientName}',
+                  style: const TextStyle(color: _T.muted, fontSize: 13)),
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _billNoCtrl,
+                style: const TextStyle(color: _T.text),
+                decoration: _fieldDec('Bill No *',
+                    icon: Icons.confirmation_number_outlined),
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _amountCtrl,
+                style: const TextStyle(color: _T.text),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration:
+                    _fieldDec('Bill Amount (INR) *', icon: Icons.currency_rupee_rounded),
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return 'Required';
+                  final n = double.tryParse(v.trim());
+                  if (n == null || n <= 0) return 'Enter a valid amount';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _noteCtrl,
+                style: const TextStyle(color: _T.text),
+                maxLines: 2,
+                decoration: _fieldDec('Description', icon: Icons.notes_rounded),
+              ),
+              const SizedBox(height: 14),
+              InkWell(
+                onTap: _pickDate,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 14),
+                  decoration: BoxDecoration(
+                      color: _T.card,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: _T.border)),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.calendar_today_rounded,
+                          size: 16, color: _T.muted),
+                      const SizedBox(width: 10),
+                      Text(dateFmt.format(_date),
+                          style: const TextStyle(
+                              color: _T.text, fontSize: 14)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _submitting ? null : _save,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _T.accent,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: _submitting
+                      ? const SizedBox(
+                          width: 20, height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.black))
+                      : const Text('Save Changes',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

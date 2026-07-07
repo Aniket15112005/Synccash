@@ -110,6 +110,12 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
     return newBillId!;
   }
 
+  Future<void> updateBill(String cashbookId, PurchaseBillEntity bill) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() =>
+        ref.read(purchaseBillRepositoryProvider).updateBill(cashbookId, bill));
+  }
+
   Future<void> deleteBill(String cashbookId, String billId) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() =>
@@ -416,6 +422,123 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
       }
 
       // Update cashbook running totals so balance/expense reflect this payment.
+      batch.update(cashRef, {
+        'balance': FieldValue.increment(-totalAmount),
+        'expense': FieldValue.increment(totalAmount),
+      });
+      await batch.commit();
+    });
+  }
+
+  /// Auto-allocates a payment against a purchase client when the user did NOT
+  /// explicitly select a bill or the opening balance.
+  ///
+  /// Priority order:
+  ///   1. OB still pending → pay OB first, any overflow spills into pending
+  ///      bills (oldest first).
+  ///   2. OB fully settled, ≥1 pending bill → FIFO across all pending bills,
+  ///      any remainder after all bills cleared is recorded unlinked.
+  ///   3. Nothing pending → plain unlinked expense transaction.
+  Future<void> recordAutoPayment({
+    required String cashbookId,
+    required String clientName,
+    required double totalAmount,
+    required String description,
+    required String category,
+    required String createdBy,
+    required String createdByName,
+    required DateTime createdAt,
+  }) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      final db       = FirebaseFirestore.instance;
+      final cashRef  = db.collection('cashbooks').doc(cashbookId);
+      final txColl   = cashRef.collection('transactions');
+      final client   = clientName.trim();
+
+      final data = await _fetchOverflowData(
+        db: db,
+        cashbookId: cashbookId,
+        clientName: client,
+      );
+
+      final pendingBills = data.allBills.where((b) {
+        final paid = data.paidPerBill[b.id] ?? 0.0;
+        return (b.total - paid) > 0;
+      }).toList(); // already sorted oldest-first by _fetchOverflowData
+
+      double left      = totalAmount;
+      final  batch     = db.batch();
+      final  baseDesc  = description.isNotEmpty ? description : 'Payment – $client';
+
+      void alloc({
+        required String? linkedBillId,
+        required double  amount,
+        required String  desc,
+        bool isOb = false,
+      }) {
+        if (amount <= 0) return;
+        final ref = txColl.doc();
+        batch.set(ref, {
+          'transactionId':        ref.id,
+          'cashbookId':           cashbookId,
+          'type':                 'expense',
+          'amount':               amount,
+          'description':          desc,
+          'category':             category,
+          'linkedPurchaseBillId': linkedBillId,
+          'createdBy':            createdBy,
+          'creatorName':          createdByName,
+          'createdAt':            Timestamp.fromDate(createdAt),
+          if (isOb) 'isObPayment': true,
+          if (isOb) 'obPartyName': client,
+        });
+      }
+
+      if (data.obRemaining > 0) {
+        // ── Priority 1: OB pending ──────────────────────────────────────────
+        final toOb = left.clamp(0.0, data.obRemaining);
+        left -= toOb;
+        alloc(
+          linkedBillId: null,
+          amount: toOb,
+          desc: description.isNotEmpty
+              ? description
+              : 'Opening balance payment – $client',
+          isOb: true,
+        );
+        // Overflow into pending bills (FIFO).
+        for (final bill in pendingBills) {
+          if (left <= 0) break;
+          final paid    = data.paidPerBill[bill.id] ?? 0.0;
+          final rem     = (bill.total - paid).clamp(0.0, double.infinity);
+          final toThis  = left.clamp(0.0, rem);
+          left -= toThis;
+          alloc(linkedBillId: bill.id, amount: toThis, desc: baseDesc);
+        }
+        // Any remainder (everything cleared): still record unlinked.
+        if (left > 0) {
+          alloc(linkedBillId: null, amount: left, desc: baseDesc);
+        }
+      } else if (pendingBills.isNotEmpty) {
+        // ── Priority 2: OB settled, bills pending — pure FIFO ──────────────
+        for (final bill in pendingBills) {
+          if (left <= 0) break;
+          final paid   = data.paidPerBill[bill.id] ?? 0.0;
+          final rem    = (bill.total - paid).clamp(0.0, double.infinity);
+          final toThis = left.clamp(0.0, rem);
+          left -= toThis;
+          alloc(linkedBillId: bill.id, amount: toThis, desc: baseDesc);
+        }
+        // Remainder after all bills cleared.
+        if (left > 0) {
+          alloc(linkedBillId: null, amount: left, desc: baseDesc);
+        }
+      } else {
+        // ── Priority 3: nothing pending — plain unlinked expense ───────────
+        alloc(linkedBillId: null, amount: totalAmount, desc: baseDesc);
+      }
+
       batch.update(cashRef, {
         'balance': FieldValue.increment(-totalAmount),
         'expense': FieldValue.increment(totalAmount),

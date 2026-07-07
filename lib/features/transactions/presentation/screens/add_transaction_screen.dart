@@ -629,6 +629,30 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdByName: tx.creatorName,
           createdAt:     tx.createdAt,
         );
+      } else if (_type == 'expense' &&
+          _partyConfirmed &&
+          (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI') &&
+          // Gate: only auto-route when the confirmed party is a known purchase client.
+          // purchaseClientsProvider is pre-warmed in build(), so this is a sync read.
+          (ref.read(purchaseClientsProvider).asData?.value ?? []).any(
+            (c) => c.clientName.trim().toLowerCase() ==
+                _descCtrl.text.trim().toLowerCase(),
+          )) {
+        // Auto-route: user selected a purchase client but did NOT explicitly
+        // pick a bill or OB. Priority:
+        //   1. OB pending → credit OB first, overflow FIFO into bills.
+        //   2. OB settled, bills pending → FIFO across pending bills.
+        //   3. Nothing pending → plain unlinked expense.
+        await ref.read(purchaseBillActionsProvider.notifier).recordAutoPayment(
+          cashbookId:    tx.cashbookId,
+          clientName:    _descCtrl.text.trim(),
+          totalAmount:   tx.amount,
+          description:   tx.description,
+          category:      tx.category,
+          createdBy:     tx.createdBy,
+          createdByName: tx.creatorName,
+          createdAt:     tx.createdAt,
+        );
       } else {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
       }
@@ -845,16 +869,18 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               .fadeIn(delay: 245.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 20),
-                          // ADDED: voice command mic button
-                          _VoiceMicButton(
-                            recording:  _voiceRecording,
-                            processing: _voiceProcessing,
-                            accent:     _accentColor,
-                            onTap:      _onVoiceMicTap,
-                          )
-                              .animate()
-                              .fadeIn(delay: 260.ms, duration: 280.ms)
-                              .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+                          // Voice mic — hidden on iOS PWA (MediaRecorder
+                          // is unreliable in iOS Safari / home-screen PWA).
+                          if (!(kIsWeb && defaultTargetPlatform == TargetPlatform.iOS))
+                            _VoiceMicButton(
+                              recording:  _voiceRecording,
+                              processing: _voiceProcessing,
+                              accent:     _accentColor,
+                              onTap:      _onVoiceMicTap,
+                            )
+                                .animate()
+                                .fadeIn(delay: 260.ms, duration: 280.ms)
+                                .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
                           const SizedBox(height: 16),
                           ScaleTransition(
                             scale: _btnScale,

@@ -89,6 +89,87 @@ class PurchaseClientRepository {
     }, SetOptions(merge: true));
   }
 
+  Future<void> renameClient(
+      String cashbookId, String oldName, String newName) async {
+    final oldNameTrimmed = oldName.trim();
+    final newNameTrimmed = newName.trim();
+    final oldId = oldNameTrimmed.toLowerCase();
+    final newId = newNameTrimmed.toLowerCase();
+
+    if (oldId == newId) {
+      // Same normalized key — only update the display label.
+      await _col(cashbookId).doc(oldId).update({
+        'clientName': newNameTrimmed,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return;
+    }
+
+    // Guard: refuse to overwrite an existing client with a different name.
+    final targetDoc = await _col(cashbookId).doc(newId).get();
+    if (targetDoc.exists) {
+      throw Exception(
+          'A client named "$newNameTrimmed" already exists. '
+          'Please choose a different name.');
+    }
+
+    final cashRef = _db.collection('cashbooks').doc(cashbookId);
+
+    // Read old client document.
+    final oldDoc = await _col(cashbookId).doc(oldId).get();
+    final oldData = (oldDoc.data() as Map<String, dynamic>?) ?? {};
+
+    // Read all bills that reference oldName (case-sensitive — stored consistently
+    // via ensureClientExists). Collect both variants in case of legacy mixed case.
+    final billsSnap = await cashRef
+        .collection('purchase_bills')
+        .where('clientName', isEqualTo: oldNameTrimmed)
+        .get();
+
+    // Read expense transactions whose obPartyName matches this client.
+    final txSnap = await cashRef
+        .collection('transactions')
+        .where('isObPayment', isEqualTo: true)
+        .where('obPartyName', isEqualTo: oldNameTrimmed)
+        .get();
+
+    // --- Chunked batch writes (Firestore limit: 500 ops/batch) ---------------
+    // Ops per chunk: 1 create-client + 1 delete-client = 2 fixed ops;
+    // remaining 498 slots shared by bill + tx updates.
+    const maxOpsPerBatch = 498;
+
+    Future<void> commitChunked(List<DocumentSnapshot> docs,
+        Map<String, dynamic> updateData) async {
+      for (var i = 0; i < docs.length; i += maxOpsPerBatch) {
+        final chunk = docs.sublist(
+            i, (i + maxOpsPerBatch).clamp(0, docs.length));
+        final b = _db.batch();
+        for (final d in chunk) {
+          b.update(d.reference, updateData);
+        }
+        await b.commit();
+      }
+    }
+
+    // 1. Create the new client doc (carries over openingBalance & other data).
+    final clientBatch = _db.batch();
+    clientBatch.set(_col(cashbookId).doc(newId), {
+      ...oldData,
+      'clientName': newNameTrimmed,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    clientBatch.delete(_col(cashbookId).doc(oldId));
+    await clientBatch.commit();
+
+    // 2. Rename clientName on all bills (chunked).
+    await commitChunked(
+        billsSnap.docs, {'clientName': newNameTrimmed});
+
+    // 3. Rename obPartyName on OB-payment transactions (chunked).
+    await commitChunked(
+        txSnap.docs, {'obPartyName': newNameTrimmed});
+  }
+
   Future<void> deleteClient(String cashbookId, String clientName) async {
     await _col(cashbookId).doc(clientName.toLowerCase()).delete();
   }
@@ -138,6 +219,14 @@ class PurchaseClientActionsNotifier extends AsyncNotifier<void> {
     state = await AsyncValue.guard(() => ref
         .read(purchaseClientRepositoryProvider)
         .setOpeningBalance(cashbookId, clientName, amount));
+  }
+
+  Future<void> renameClient(
+      String cashbookId, String oldName, String newName) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() => ref
+        .read(purchaseClientRepositoryProvider)
+        .renameClient(cashbookId, oldName, newName));
   }
 
   Future<void> deleteClient(String cashbookId, String clientName) async {
