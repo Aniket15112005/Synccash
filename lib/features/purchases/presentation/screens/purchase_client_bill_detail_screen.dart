@@ -9,7 +9,8 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -25,6 +26,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
+import 'web_invoice_viewer_stub.dart'
+    if (dart.library.html) 'web_invoice_viewer_web.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Theme  (amber = purchase-feature accent, mirrors _T in purchases_screen.dart)
@@ -295,6 +298,31 @@ class _PurchaseClientBillDetailScreenState
     if (_attachmentUrl == null) return;
     HapticFeedback.selectionClick();
 
+    // ── Web (incl. iOS PWA): open PDFs/images in-app, never hand off ────────
+    if (kIsWeb) {
+      if (_attachmentType == 'pdf') {
+        openPdfInApp(
+          context,
+          _attachmentUrl!,
+          widget.bill.billNumber,
+          widget.bill.clientName,
+        );
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => _BillImageViewer(
+              imageUrl:   _attachmentUrl!,
+              billNumber: widget.bill.billNumber,
+              clientName: widget.bill.clientName,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    // ── Native iOS/Android ────────────────────────────────────────────────
     if (_attachmentType == 'pdf') {
       setState(() => _uploading = true);
       try {

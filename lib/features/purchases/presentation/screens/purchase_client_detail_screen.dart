@@ -702,60 +702,24 @@ class _PurchaseClientDetailScreenState
                                       ],
                                     ),
                                     const SizedBox(width: 4),
-                                    // ── iOS / web: attach icon ───────────
-                                    if (kIsWeb || defaultTargetPlatform ==
-                                        TargetPlatform.iOS)
-                                      isProcessing
-                                          ? const SizedBox(
-                                              width: 20,
-                                              height: 20,
-                                              child:
-                                                  CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: _T.accent,
-                                              ),
-                                            )
-                                          : GestureDetector(
-                                              onTap: () =>
-                                                  _showAttachmentOptions(
-                                                      bill),
-                                              child: Container(
-                                                width: 30,
-                                                height: 30,
-                                                margin: const EdgeInsets.only(
-                                                    right: 2),
-                                                decoration: BoxDecoration(
-                                                  color: hasAttachment
-                                                      ? _T.accent.withValues(
-                                                          alpha: 0.12)
-                                                      : Colors.transparent,
-                                                  borderRadius:
-                                                      BorderRadius.circular(8),
-                                                  border: hasAttachment
-                                                      ? Border.all(
-                                                          color: _T.accent
-                                                              .withValues(
-                                                                  alpha: 0.3))
-                                                      : null,
-                                                ),
-                                                child: Icon(
-                                                  hasAttachment
-                                                      ? Icons
-                                                          .attach_file_rounded
-                                                      : Icons
-                                                          .attach_file_rounded,
-                                                  color: hasAttachment
-                                                      ? _T.accent
-                                                      : _T.muted
-                                                          .withValues(
-                                                              alpha: 0.5),
-                                                  size: 16,
-                                                ),
-                                              ),
-                                            ),
+                                    if (isProcessing)
+                                      const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: _T.accent,
+                                        ),
+                                      ),
                                     const Icon(Icons.chevron_right_rounded,
                                         color: _T.muted, size: 18),
                                     _BillRowMenu(
+                                      showAttach: kIsWeb ||
+                                          defaultTargetPlatform ==
+                                              TargetPlatform.iOS,
+                                      hasAttachment: hasAttachment,
+                                      onAttach: () =>
+                                          _showAttachmentOptions(bill),
                                       onEdit:   () => _editBill(bill),
                                       onDelete: () => _deleteBill(bill),
                                     ),
@@ -831,7 +795,16 @@ class _PurchaseClientDetailScreenState
 class _BillRowMenu extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
-  const _BillRowMenu({required this.onEdit, required this.onDelete});
+  final VoidCallback? onAttach;
+  final bool showAttach;
+  final bool hasAttachment;
+  const _BillRowMenu({
+    required this.onEdit,
+    required this.onDelete,
+    this.onAttach,
+    this.showAttach = false,
+    this.hasAttachment = false,
+  });
 
   @override
   Widget build(BuildContext context) => PopupMenuButton<String>(
@@ -845,8 +818,29 @@ class _BillRowMenu extends StatelessWidget {
         onSelected: (v) {
           if (v == 'edit') onEdit();
           if (v == 'delete') onDelete();
+          if (v == 'attach') onAttach?.call();
         },
         itemBuilder: (_) => [
+          if (showAttach)
+            PopupMenuItem<String>(
+              value: 'attach',
+              height: 44,
+              child: Row(
+                children: [
+                  Icon(Icons.attach_file_rounded,
+                      color: _T.accent, size: 16),
+                  const SizedBox(width: 10),
+                  Text(
+                      hasAttachment
+                          ? 'Change Attachment'
+                          : 'Add Attachment',
+                      style: const TextStyle(
+                          color: _T.text,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
           PopupMenuItem<String>(
             value: 'edit',
             height: 44,
