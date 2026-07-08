@@ -116,6 +116,26 @@ class _MainSheet extends StatelessWidget {
       child: Column(
         children: [
           const _SectionLabel('DATA'),
+          // ─── Daily tile — iOS / PWA / Web only, hidden on Android ───
+          if (kIsWeb || Platform.isIOS) ...[
+            const SizedBox(height: 8),
+            _SettingsTile(
+              icon: Icons.bolt_rounded,
+              iconColor: const Color(0xFF8B5CF6),
+              title: 'Daily',
+              subtitle: 'Personal income & expense manager',
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DailyScreen()),
+                );
+              },
+              trailing: const _ChevronIcon(),
+            ).animate().fadeIn(delay: 60.ms, duration: 220.ms).slideX(
+                begin: 0.04, end: 0, curve: Curves.easeOut),
+          ],
+          // ─── end Daily tile ─────────────────────────────────────────
           // Export, Import, Backup — iOS/PWA only (kIsWeb covers PWA + web)
           if (kIsWeb) ...[
             const SizedBox(height: 8),
@@ -204,26 +224,6 @@ class _MainSheet extends StatelessWidget {
                 begin: 0.04, end: 0, curve: Curves.easeOut),
           ],
           // ─── end Purchases tile ─────────────────────────────────────
-          // ─── Daily tile — iOS / PWA / Web only, hidden on Android ───
-          if (kIsWeb || Platform.isIOS) ...[
-            const SizedBox(height: 8),
-            _SettingsTile(
-              icon: Icons.bolt_rounded,
-              iconColor: const Color(0xFF8B5CF6),
-              title: 'Daily',
-              subtitle: 'Personal income & expense manager',
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DailyScreen()),
-                );
-              },
-              trailing: const _ChevronIcon(),
-            ).animate().fadeIn(delay: 235.ms, duration: 220.ms).slideX(
-                begin: 0.04, end: 0, curve: Curves.easeOut),
-          ],
-          // ─── end Daily tile ─────────────────────────────────────────
           if (kIsWeb) ...[
             const SizedBox(height: 8),
             _SettingsTile(

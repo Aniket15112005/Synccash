@@ -1,10 +1,14 @@
 // lib/features/daily/presentation/screens/daily_history_screen.dart
 //
 // "View all" screen for Daily entries — mirrors transaction_history_screen.dart's
-// structure (type chips, summary strip, grouped-by-day list) but reads only
-// from dailyFilteredEntriesProvider, never from any transaction provider.
+// structure (type chips, summary strip, grouped-by-day list, toggleable inline
+// search bar) but reads only from dailyFilteredEntriesProvider, never from any
+// transaction provider. The search box here filters purely client-side by
+// creator name / description — it is local UI state, not wired to the shared
+// transaction search/filter providers.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:synccash/core/utils/currency_formatter.dart';
@@ -28,6 +32,35 @@ class DailyHistoryScreen extends ConsumerStatefulWidget {
 
 class _DailyHistoryScreenState extends ConsumerState<DailyHistoryScreen> {
   _TypeFilter _typeFilter = _TypeFilter.all;
+  bool _showSearch = false;
+  String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(() {
+      final t = _searchCtrl.text;
+      if (t != _searchQuery) setState(() => _searchQuery = t);
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _toggleSearch() {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _showSearch = !_showSearch;
+      if (!_showSearch) {
+        _searchCtrl.clear();
+        _searchQuery = '';
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,14 +83,48 @@ class _DailyHistoryScreenState extends ConsumerState<DailyHistoryScreen> {
       appBar: AppBar(
         backgroundColor: _kDailyBg,
         elevation: 0,
+        toolbarHeight: _showSearch ? 0 : kToolbarHeight,
         title: const Text('Daily History',
             style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
-        actions: const [
+        actions: [
           Padding(
-            padding: EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.only(right: 8),
             child: DailyFilterPanel(),
           ),
+          GestureDetector(
+            onTap: _toggleSearch,
+            child: Container(
+              width: 38,
+              height: 38,
+              margin: const EdgeInsets.only(right: 16),
+              decoration: BoxDecoration(
+                color: _showSearch
+                    ? _kDailyAccent.withValues(alpha: 0.18)
+                    : Colors.white.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(
+                  color: _showSearch
+                      ? _kDailyAccent.withValues(alpha: 0.4)
+                      : Colors.white.withValues(alpha: 0.10),
+                ),
+              ),
+              child: Icon(
+                _showSearch ? Icons.close_rounded : Icons.search_rounded,
+                size: 17,
+                color: _showSearch ? _kDailyAccent : Colors.white70,
+              ),
+            ),
+          ),
         ],
+        bottom: PreferredSize(
+          preferredSize: Size.fromHeight(_showSearch ? 66 : 0),
+          child: _showSearch
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                  child: _SearchField(controller: _searchCtrl),
+                )
+              : const SizedBox.shrink(),
+        ),
       ),
       body: asyncEntries.when(
         loading: () => const Center(
@@ -66,15 +133,21 @@ class _DailyHistoryScreenState extends ConsumerState<DailyHistoryScreen> {
           child: Text('Error: $e', style: const TextStyle(color: Colors.white54)),
         ),
         data: (entries) {
+          final query = _searchQuery.toLowerCase().trim();
           final filtered = entries.where((e) {
             switch (_typeFilter) {
               case _TypeFilter.income:
-                return e.type.toLowerCase() == 'income';
+                if (e.type.toLowerCase() != 'income') return false;
+                break;
               case _TypeFilter.expense:
-                return e.type.toLowerCase() == 'expense';
+                if (e.type.toLowerCase() != 'expense') return false;
+                break;
               case _TypeFilter.all:
-                return true;
+                break;
             }
+            if (query.isEmpty) return true;
+            return e.creatorName.toLowerCase().contains(query) ||
+                e.description.toLowerCase().contains(query);
           }).toList();
 
           double income = 0;
@@ -123,9 +196,13 @@ class _DailyHistoryScreenState extends ConsumerState<DailyHistoryScreen> {
               const SizedBox(height: 8),
               Expanded(
                 child: filtered.isEmpty
-                    ? const Center(
-                        child: Text('No entries yet',
-                            style: TextStyle(color: Colors.white38)),
+                    ? Center(
+                        child: Text(
+                          query.isNotEmpty || _typeFilter != _TypeFilter.all
+                              ? 'No matching entries'
+                              : 'No entries yet',
+                          style: const TextStyle(color: Colors.white38),
+                        ),
                       )
                     : _buildGroupedList(filtered, currentUserId),
               ),
@@ -163,6 +240,50 @@ class _DailyHistoryScreenState extends ConsumerState<DailyHistoryScreen> {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: items,
+    );
+  }
+}
+
+class _SearchField extends StatelessWidget {
+  final TextEditingController controller;
+  const _SearchField({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Row(children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 13),
+          child: Icon(Icons.search_rounded, size: 17, color: Colors.white54),
+        ),
+        Expanded(
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+            decoration: InputDecoration(
+              hintText: 'Search by name or description…',
+              hintStyle: TextStyle(
+                color: Colors.white.withValues(alpha: 0.35),
+                fontSize: 14,
+              ),
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        ),
+      ]),
     );
   }
 }
