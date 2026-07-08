@@ -699,7 +699,7 @@ class _AddPurchaseClientBillSheetState
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return 'Required';
                   final n = double.tryParse(v.trim());
-                  if (n == null || n <= 0) return 'Enter a valid amount';
+                  if (n == null || n < 0) return 'Enter a valid amount';
                   return null;
                 },
               ),

@@ -18,8 +18,14 @@ final purchaseBillRepositoryProvider =
 
 /// Streams every purchase bill in the active cashbook — used to build the
 /// party-name suggestion union on the Add Transaction screen.
+///
+/// FIX (Android party-picker loading delay): was StreamProvider.autoDispose,
+/// so the Firestore listener was disposed right after each one-off `.future`
+/// read in _resolveAllPartyNames() and had to reconnect from scratch on the
+/// next picker open. See purchase_client_provider.dart's purchaseClientsProvider
+/// for the full explanation — same fix, same reasoning.
 final allPurchaseBillsProvider =
-    StreamProvider.autoDispose<List<PurchaseBillEntity>>((ref) {
+    StreamProvider<List<PurchaseBillEntity>>((ref) {
   final cashbookId = ref.watch(currentCashbookIdProvider);
   if (cashbookId == null) return const Stream.empty();
   return ref.read(purchaseBillRepositoryProvider).watchAllBills(cashbookId);

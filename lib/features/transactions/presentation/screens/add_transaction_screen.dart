@@ -132,8 +132,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       if (tx.linkedSaleBillId != null && tx.linkedSaleBillId!.isNotEmpty) {
         _loadExistingBill(tx.cashbookId, tx.linkedSaleBillId!);
       }
-      // ADDED: load the existing linked purchase bill (mirror of above)
-      if (tx.linkedPurchaseBillId != null && tx.linkedPurchaseBillId!.isNotEmpty) {
+      // ADDED: load the existing linked purchase bill (mirror of above).
+      // Gated behind _purchaseFeatureEnabled — Android has no purchase
+      // feature, so it never fetches this even for a legacy/edited tx.
+      if (_purchaseFeatureEnabled &&
+          tx.linkedPurchaseBillId != null && tx.linkedPurchaseBillId!.isNotEmpty) {
         _loadExistingPurchaseBill(tx.cashbookId, tx.linkedPurchaseBillId!);
       }
       // Editing: description is already a confirmed party name
@@ -274,6 +277,20 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       cached: ref.read(allSaleBillsProvider).asData?.value,
       load: () => ref.read(allSaleBillsProvider.future),
     );
+
+    // ADDED: Android has no purchase feature, so purchaseClientsProvider /
+    // allPurchaseBillsProvider are never read there at all — not even a
+    // background read. That's the whole fix: those two Firestore streams
+    // are simply never opened on Android.
+    if (!_purchaseFeatureEnabled) {
+      final savedParties = await partiesFuture;
+      final allBills     = await billsFuture;
+      return <String>{
+        ...savedParties.map((p) => p.partyName),
+        ...allBills.map((b) => b.partyName.trim()),
+      }.toList()..sort();
+    }
+
     final purchaseClientsFuture = _resolveAsync(
       cached: ref.read(purchaseClientsProvider).asData?.value,
       load: () => ref.read(purchaseClientsProvider.future),
@@ -466,6 +483,15 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     }
   }
 
+  // ADDED: Android users don't get the purchase feature (purchase bills /
+  // purchase clients). This also means _resolveAllPartyNames() and the
+  // pre-warm in build() never touch purchaseClientsProvider /
+  // allPurchaseBillsProvider on Android, so those two Firestore streams are
+  // never opened at all there — removing the ~2s reconnect delay entirely
+  // for Android instead of just hiding it behind a spinner.
+  bool get _purchaseFeatureEnabled =>
+      kIsWeb || defaultTargetPlatform != TargetPlatform.android;
+
   Color get _accentColor => _type == 'income' ? _C.income : _C.expense;
 
   void _switchType(String type) {
@@ -604,8 +630,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdByName: tx.creatorName,
           createdAt:     tx.createdAt,
         );
-      } else if (_type == 'expense' && _selectedPurchaseBill != null) {
+      } else if (_purchaseFeatureEnabled && _type == 'expense' && _selectedPurchaseBill != null) {
         // ADDED: purchase-side mirror of the sales bill payment branch above.
+        // Gated behind _purchaseFeatureEnabled: Android never has a
+        // _selectedPurchaseBill (the dropdown is hidden there), but this
+        // guard also protects against ever reading purchaseClientsProvider
+        // on Android below.
         await ref.read(purchaseBillActionsProvider.notifier).recordPaymentWithOverflow(
           cashbookId:     tx.cashbookId,
           selectedBillId: _selectedPurchaseBill!.purchaseBillId,
@@ -617,7 +647,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdByName:  tx.creatorName,
           createdAt:      tx.createdAt,
         );
-      } else if (_type == 'expense' && _isPurchaseObPayment) {
+      } else if (_purchaseFeatureEnabled && _type == 'expense' && _isPurchaseObPayment) {
         // ADDED: purchase-side mirror of the sales OB payment branch above.
         await ref.read(purchaseBillActionsProvider.notifier).recordObPaymentWithOverflow(
           cashbookId:    tx.cashbookId,
@@ -629,11 +659,13 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdByName: tx.creatorName,
           createdAt:     tx.createdAt,
         );
-      } else if (_type == 'expense' &&
+      } else if (_purchaseFeatureEnabled &&
+          _type == 'expense' &&
           _partyConfirmed &&
           (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI') &&
           // Gate: only auto-route when the confirmed party is a known purchase client.
           // purchaseClientsProvider is pre-warmed in build(), so this is a sync read.
+          // Never reached on Android — _purchaseFeatureEnabled short-circuits first.
           (ref.read(purchaseClientsProvider).asData?.value ?? []).any(
             (c) => c.clientName.trim().toLowerCase() ==
                 _descCtrl.text.trim().toLowerCase(),
@@ -683,8 +715,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     // Pre-warm all party sources so data is cached before the picker opens.
     ref.watch(partiesProvider);
     ref.watch(allSaleBillsProvider);
-    ref.watch(purchaseClientsProvider);
-    ref.watch(allPurchaseBillsProvider);
+    // ADDED: Android has no purchase feature — never watch (never open) the
+    // purchase-clients/purchase-bills Firestore streams there at all.
+    if (_purchaseFeatureEnabled) {
+      ref.watch(purchaseClientsProvider);
+      ref.watch(allPurchaseBillsProvider);
+    }
 
     return Scaffold(
       backgroundColor: _C.bg,
@@ -821,7 +857,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                           // Mirrors the sales bill dropdown above; the two never render
                           // together since one requires _type == 'income' and the other
                           // requires _type == 'expense'.
-                          if (_type == 'expense' && _partyConfirmed && (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI')) ...[
+                          // Gated behind _purchaseFeatureEnabled — Android has no purchase
+                          // feature at all, so this section never renders there.
+                          if (_purchaseFeatureEnabled && _type == 'expense' && _partyConfirmed && (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI')) ...[
                             if (_loadingPurchaseBill)
                               Padding(
                                 padding: const EdgeInsets.only(top: 12),

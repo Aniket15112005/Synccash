@@ -179,8 +179,24 @@ final purchaseClientRepositoryProvider =
     Provider<PurchaseClientRepository>((ref) => PurchaseClientRepository());
 
 /// Streams all saved purchase clients for the active cashbook.
+///
+/// FIX (Android party-picker loading delay): this used to be
+/// StreamProvider.autoDispose, which meant the underlying Firestore
+/// listener was torn down the instant nothing was watching it (i.e. right
+/// after _resolveAllPartyNames() finished its one-off `.future` read on the
+/// Add Transaction screen). The next time the picker opened, this stream
+/// had to reconnect to Firestore from scratch — negotiate a fresh
+/// gRPC/HTTP2 channel, re-auth, then wait for the first snapshot. Android's
+/// Firestore SDK is consistently slower than iOS's to complete that cold
+/// channel setup (a well-known cross-platform gap, not an app bug), which is
+/// exactly the ~2s "Loading suggestions…" spinner reported on Android while
+/// iOS opened instantly. Removing autoDispose keeps this stream's
+/// connection alive for the app's lifetime after first use, so subsequent
+/// picker opens read an already-warm cached value instantly on both
+/// platforms — matching partiesProvider/allSaleBillsProvider, which never
+/// had this problem because they were already non-autoDispose.
 final purchaseClientsProvider =
-    StreamProvider.autoDispose<List<PurchaseClientEntity>>((ref) {
+    StreamProvider<List<PurchaseClientEntity>>((ref) {
   final cashbookId = ref.watch(currentCashbookIdProvider);
   if (cashbookId == null) return const Stream.empty();
   return ref.read(purchaseClientRepositoryProvider).watchClients(cashbookId);

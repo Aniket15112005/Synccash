@@ -22,6 +22,15 @@ class PurchaseBillNoDropdownField extends ConsumerStatefulWidget {
   final bool                 isObSelected;
   final VoidCallback?        onObSelected;
 
+  /// Called whenever a specific bill is tapped, BEFORE [onBillSelected].
+  /// The parent MUST use this to force `isObSelected = false`, so the two
+  /// selection modes can never both be true at once. Previously a payment
+  /// could be written with both `isObPayment: true` AND a stale/leftover
+  /// `linkedPurchaseBillId`, which made it count against that bill (so the
+  /// bill screen updated) instead of the opening balance (so the client
+  /// screen's due amount silently stayed the same).
+  final VoidCallback?        onObCleared;
+
   const PurchaseBillNoDropdownField({
     super.key,
     required this.clientName,
@@ -29,6 +38,7 @@ class PurchaseBillNoDropdownField extends ConsumerStatefulWidget {
     this.selectedBill,
     this.isObSelected = false,
     this.onObSelected,
+    this.onObCleared,
   });
 
   @override
@@ -387,6 +397,7 @@ class _PurchaseBillNoDropdownFieldState
                   GestureDetector(
                     onTap: () {
                       widget.onBillSelected(null);
+                      if (widget.isObSelected) widget.onObCleared?.call();
                       setState(() => _isExpanded = false);
                     },
                     child: const Text('Clear',
@@ -407,6 +418,13 @@ class _PurchaseBillNoDropdownFieldState
           if (hasOb) ...[
             GestureDetector(
               onTap: () {
+                // Clear any (possibly stale) bill selection FIRST so a
+                // payment can never end up tagged as both isObPayment AND
+                // linked to a bill — that combination is what silently
+                // breaks the opening-balance total on the client screen.
+                if (widget.selectedBill != null) {
+                  widget.onBillSelected(null);
+                }
                 widget.onObSelected?.call();
                 setState(() => _isExpanded = false);
               },
@@ -474,6 +492,13 @@ class _PurchaseBillNoDropdownFieldState
 
                   return GestureDetector(
                     onTap: () {
+                      // Symmetric guard: picking a bill must clear OB mode
+                      // in the parent, or the same cross-tagging bug can
+                      // happen in reverse (bill payment silently also
+                      // flagged as an OB payment).
+                      if (widget.isObSelected) {
+                        widget.onObCleared?.call();
+                      }
                       widget.onBillSelected(isSelected ? null : bill);
                       if (!isSelected) setState(() => _isExpanded = false);
                     },
