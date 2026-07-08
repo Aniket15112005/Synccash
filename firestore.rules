@@ -159,6 +159,23 @@ service cloud.firestore {
                       && isIosUser(database);
       }
 
+      // ── Daily Entries ─────────────────────────────────────────────────────
+      // The entire Daily feature is iOS/PWA/web-only.
+      // Android users are blocked from all operations at the Firestore level,
+      // mirroring the purchase_bills / purchase_clients restriction. This
+      // collection is fully isolated from /transactions and never touches
+      // the parent cashbook's totals.
+      match /daily_entries/{entryId} {
+        allow read:   if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+        allow create: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+        allow update: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+        allow delete: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+      }
+
       // ── Parties (Opening Balances) ────────────────────────────────────────
       match /parties/{partyId} {
         allow read:   if isCashbookMember(database, cashbookId);
