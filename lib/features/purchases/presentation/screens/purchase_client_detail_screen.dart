@@ -5,7 +5,10 @@
 // Bills are now tappable — tapping opens PurchaseClientBillDetailScreen.
 
 import 'dart:async';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +19,12 @@ import '../../domain/entities/purchase_bill_entity.dart';
 import '../providers/purchase_client_provider.dart';
 import '../providers/purchase_bill_provider.dart';
 import 'purchase_client_bill_detail_screen.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:http/http.dart' as http;
+import 'package:share_plus/share_plus.dart';
+import 'web_invoice_viewer_stub.dart'
+    if (dart.library.html) 'web_invoice_viewer_web.dart';
 
 class _T {
   static const bg      = Color(0xFF0F1011);
@@ -42,13 +51,51 @@ class PurchaseClientDetailScreen extends ConsumerStatefulWidget {
 class _PurchaseClientDetailScreenState
     extends ConsumerState<PurchaseClientDetailScreen> {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _txSub;
-  Map<String, double> _paidPerBill = {};
-  double _obPaid = 0.0;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _attachmentSub;
+  Map<String, double>  _paidPerBill          = {};
+  double               _obPaid               = 0.0;
+  Map<String, String>  _attachmentUrlPerBill  = {};
+  Map<String, String>  _attachmentTypePerBill = {};
+  bool                 _uploadingBillId_      = false;
+  String?              _processingBillId;
 
   @override
   void initState() {
     super.initState();
     _startTxStream();
+    if (kIsWeb || defaultTargetPlatform == TargetPlatform.iOS) {
+      _startAttachmentStream();
+    }
+  }
+
+  void _startAttachmentStream() {
+    final cashbookId = ref.read(currentCashbookIdProvider);
+    if (cashbookId == null) return;
+    _attachmentSub = FirebaseFirestore.instance
+        .collection('cashbooks')
+        .doc(cashbookId)
+        .collection('purchase_bills')
+        .where('clientName', isEqualTo: widget.clientName)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      final urls  = <String, String>{};
+      final types = <String, String>{};
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final id   = data['purchaseBillId'] as String? ?? doc.id;
+        final url  = data['billAttachmentUrl']  as String?;
+        final type = data['billAttachmentType'] as String?;
+        if (url != null && url.isNotEmpty) {
+          urls[id]  = url;
+          types[id] = type ?? 'image';
+        }
+      }
+      setState(() {
+        _attachmentUrlPerBill  = urls;
+        _attachmentTypePerBill = types;
+      });
+    });
   }
 
   void _startTxStream() {
@@ -90,7 +137,237 @@ class _PurchaseClientDetailScreenState
   @override
   void dispose() {
     _txSub?.cancel();
+    _attachmentSub?.cancel();
     super.dispose();
+  }
+
+  // ── Attachment helpers ───────────────────────────────────────────────────────
+
+  void _showAttachmentOptions(PurchaseBillEntity bill) {
+    HapticFeedback.mediumImpact();
+    final hasAttachment =
+        _attachmentUrlPerBill.containsKey(bill.purchaseBillId);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _BillAttachOptionsSheet(
+        billNumber:    bill.billNumber,
+        hasAttachment: hasAttachment,
+        onAttach:  () { Navigator.pop(context); _pickAndUpload(bill, replace: false); },
+        onReplace: () { Navigator.pop(context); _pickAndUpload(bill, replace: true);  },
+        onDelete:  () { Navigator.pop(context); _removeAttachment(bill); },
+      ),
+    );
+  }
+
+  Future<void> _pickAndUpload(PurchaseBillEntity bill,
+      {required bool replace}) async {
+    final cashbookId = ref.read(currentCashbookIdProvider);
+    if (cashbookId == null) return;
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FileTypePickerSheet(billNumber: bill.billNumber),
+    );
+    if (choice == null || !mounted) return;
+
+    FilePickerResult? picked;
+    try {
+      if (choice == 'image') {
+        picked = await FilePicker.platform.pickFiles(
+            type: FileType.image,
+            allowMultiple: false,
+            withData: kIsWeb);
+      } else {
+        picked = await FilePicker.platform.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: ['pdf'],
+            allowMultiple: false,
+            withData: kIsWeb);
+      }
+    } catch (_) {}
+
+    if (picked == null || picked.files.isEmpty) return;
+    final file = picked.files.first;
+    // On web, accessing file.path throws — only check bytes.
+    // On native, check path (bytes may be null when withData is false).
+    if (kIsWeb) {
+      if (file.bytes == null || file.bytes!.isEmpty) return;
+    } else {
+      if (file.path == null || file.path!.isEmpty) return;
+    }
+
+    setState(() => _processingBillId = bill.purchaseBillId);
+    try {
+      // Delete old file from Storage if replacing
+      if (replace) {
+        final oldUrl = _attachmentUrlPerBill[bill.purchaseBillId];
+        if (oldUrl != null) {
+          try { await FirebaseStorage.instance.refFromURL(oldUrl).delete(); }
+          catch (_) {}
+        }
+      }
+
+      final ext  = file.extension ?? (choice == 'image' ? 'jpg' : 'pdf');
+      final path =
+          'purchase_bills/$cashbookId/${bill.purchaseBillId}/attachment.$ext';
+      final storageRef = FirebaseStorage.instance.ref(path);
+      try {
+        if (kIsWeb) {
+          await storageRef.putData(file.bytes!).timeout(
+            const Duration(seconds: 30),
+            onTimeout: () => throw TimeoutException(
+                'Upload timed out. Check Firebase Storage CORS settings for web.'),
+          );
+        } else {
+          await storageRef.putFile(File(file.path!)).timeout(
+            const Duration(seconds: 60),
+            onTimeout: () => throw TimeoutException('Upload timed out.'),
+          );
+        }
+      } on TimeoutException catch (e) {
+        throw Exception(e.message ?? 'Upload timed out');
+      }
+      final url  = await storageRef.getDownloadURL().timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw Exception('Could not get download URL — check Firebase Storage rules.'),
+      );
+
+      await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('purchase_bills')
+          .doc(bill.purchaseBillId)
+          .update({'billAttachmentUrl': url, 'billAttachmentType': choice});
+
+      if (mounted) {
+        _showSnack('Bill attachment saved', success: true);
+      }
+    } catch (e) {
+      if (mounted) _showSnack('Upload failed: $e', success: false);
+    } finally {
+      if (mounted) setState(() => _processingBillId = null);
+    }
+  }
+
+  Future<void> _removeAttachment(PurchaseBillEntity bill) async {
+    final cashbookId = ref.read(currentCashbookIdProvider);
+    if (cashbookId == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _T.card2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Remove Attachment?',
+            style: TextStyle(
+                color: _T.text, fontWeight: FontWeight.w700, fontSize: 16)),
+        content: const Text(
+            'The attached bill image / PDF will be permanently removed.',
+            style: TextStyle(color: _T.muted, fontSize: 13, height: 1.5)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel',
+                  style: TextStyle(color: _T.muted))),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Remove',
+                  style: TextStyle(
+                      color: _T.red, fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _processingBillId = bill.purchaseBillId);
+    try {
+      final url = _attachmentUrlPerBill[bill.purchaseBillId];
+      if (url != null) {
+        try { await FirebaseStorage.instance.refFromURL(url).delete(); }
+        catch (_) {}
+      }
+      await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('purchase_bills')
+          .doc(bill.purchaseBillId)
+          .update({
+        'billAttachmentUrl':  FieldValue.delete(),
+        'billAttachmentType': FieldValue.delete(),
+      });
+      if (mounted) _showSnack('Attachment removed', success: true);
+    } catch (e) {
+      if (mounted) _showSnack('Failed to remove: $e', success: false);
+    } finally {
+      if (mounted) setState(() => _processingBillId = null);
+    }
+  }
+
+  Future<void> _viewAttachment(PurchaseBillEntity bill) async {
+    final url  = _attachmentUrlPerBill[bill.purchaseBillId];
+    final type = _attachmentTypePerBill[bill.purchaseBillId] ?? 'image';
+    if (url == null) return;
+    HapticFeedback.selectionClick();
+
+    // ── Web: show in-app (iframe for PDF, pinch-zoom viewer for images) ──────
+    if (kIsWeb) {
+      if (type == 'pdf') {
+        openPdfInApp(context, url, bill.billNumber, bill.clientName);
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => _InvoiceImageViewer(
+              imageUrl:   url,
+              billNumber: bill.billNumber,
+              clientName: bill.clientName,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    // ── iOS: PDF → share sheet (iOS Quick Look), Image → full-screen viewer ─
+    if (type == 'pdf') {
+      setState(() => _processingBillId = bill.purchaseBillId);
+      try {
+        final response = await http.get(Uri.parse(url));
+        await Share.shareXFiles([
+          XFile.fromData(response.bodyBytes,
+              name:     'bill_${bill.billNumber}.pdf',
+              mimeType: 'application/pdf'),
+        ]);
+      } catch (e) {
+        if (mounted) _showSnack('Could not open PDF: $e', success: false);
+      } finally {
+        if (mounted) setState(() => _processingBillId = null);
+      }
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _InvoiceImageViewer(
+            imageUrl:   url,
+            billNumber: bill.billNumber,
+            clientName: bill.clientName,
+          ),
+        ),
+      );
+    }
+  }
+
+  void _showSnack(String msg, {required bool success}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+      backgroundColor: success ? _T.green : _T.red,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    ));
   }
 
   Future<void> _editOpeningBalance(double currentOb) async {
@@ -327,6 +604,13 @@ class _PurchaseClientDetailScreenState
                                 : 'PENDING';
 
                         // Tappable bill row — opens PurchaseClientBillDetailScreen
+                        final hasAttachment =
+                            (kIsWeb || defaultTargetPlatform == TargetPlatform.iOS) &&
+                            _attachmentUrlPerBill
+                                .containsKey(bill.purchaseBillId);
+                        final isProcessing =
+                            _processingBillId == bill.purchaseBillId;
+
                         return InkWell(
                           onTap: () => _openBillDetail(bill, bills),
                           borderRadius: BorderRadius.circular(14),
@@ -335,78 +619,199 @@ class _PurchaseClientDetailScreenState
                             decoration: BoxDecoration(
                               color: _T.card,
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: _T.border),
+                              border: Border.all(
+                                color: hasAttachment
+                                    ? _T.accent.withValues(alpha: 0.3)
+                                    : _T.border,
+                              ),
                             ),
-                            child: Row(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text('Bill #${bill.billNumber}',
-                                          style: const TextStyle(
-                                              color: _T.text,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w600)),
-                                      const SizedBox(height: 2),
-                                      Text(dateFmt.format(bill.billDate),
-                                          style: const TextStyle(
-                                              color: _T.muted, fontSize: 12)),
-                                      if (bill.billNote != null &&
-                                          bill.billNote!.trim().isNotEmpty) ...[
-                                        const SizedBox(height: 4),
-                                        Text(bill.billNote!,
-                                            style: const TextStyle(
-                                                color: _T.muted, fontSize: 12),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                Row(
                                   children: [
-                                    Text(
-                                        '₹${bill.billAmount.toStringAsFixed(0)}',
-                                        style: const TextStyle(
-                                            color: _T.text,
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w700)),
-                                    if (!isSettled) ...[
-                                      const SizedBox(height: 2),
-                                      Text(
-                                          '₹${pendingOnBill.toStringAsFixed(0)} pending',
-                                          style: const TextStyle(
-                                              color: _T.amber,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600)),
-                                    ],
-                                    const SizedBox(height: 4),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: statusColor.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(20),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text('Bill #${bill.billNumber}',
+                                              style: const TextStyle(
+                                                  color: _T.text,
+                                                  fontSize: 14,
+                                                  fontWeight:
+                                                      FontWeight.w600)),
+                                          const SizedBox(height: 2),
+                                          Text(dateFmt.format(bill.billDate),
+                                              style: const TextStyle(
+                                                  color: _T.muted,
+                                                  fontSize: 12)),
+                                          if (bill.billNote != null &&
+                                              bill.billNote!
+                                                  .trim()
+                                                  .isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Text(bill.billNote!,
+                                                style: const TextStyle(
+                                                    color: _T.muted,
+                                                    fontSize: 12),
+                                                maxLines: 2,
+                                                overflow:
+                                                    TextOverflow.ellipsis),
+                                          ],
+                                        ],
                                       ),
-                                      child: Text(statusLabel,
-                                          style: TextStyle(
-                                              color: statusColor,
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.w700)),
+                                    ),
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                            '₹${bill.billAmount.toStringAsFixed(0)}',
+                                            style: const TextStyle(
+                                                color: _T.text,
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w700)),
+                                        if (!isSettled) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                              '₹${pendingOnBill.toStringAsFixed(0)} pending',
+                                              style: const TextStyle(
+                                                  color: _T.amber,
+                                                  fontSize: 11,
+                                                  fontWeight:
+                                                      FontWeight.w600)),
+                                        ],
+                                        const SizedBox(height: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: statusColor.withValues(
+                                                alpha: 0.12),
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                          ),
+                                          child: Text(statusLabel,
+                                              style: TextStyle(
+                                                  color: statusColor,
+                                                  fontSize: 10,
+                                                  fontWeight:
+                                                      FontWeight.w700)),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(width: 4),
+                                    // ── iOS / web: attach icon ───────────
+                                    if (kIsWeb || defaultTargetPlatform ==
+                                        TargetPlatform.iOS)
+                                      isProcessing
+                                          ? const SizedBox(
+                                              width: 20,
+                                              height: 20,
+                                              child:
+                                                  CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: _T.accent,
+                                              ),
+                                            )
+                                          : GestureDetector(
+                                              onTap: () =>
+                                                  _showAttachmentOptions(
+                                                      bill),
+                                              child: Container(
+                                                width: 30,
+                                                height: 30,
+                                                margin: const EdgeInsets.only(
+                                                    right: 2),
+                                                decoration: BoxDecoration(
+                                                  color: hasAttachment
+                                                      ? _T.accent.withValues(
+                                                          alpha: 0.12)
+                                                      : Colors.transparent,
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                  border: hasAttachment
+                                                      ? Border.all(
+                                                          color: _T.accent
+                                                              .withValues(
+                                                                  alpha: 0.3))
+                                                      : null,
+                                                ),
+                                                child: Icon(
+                                                  hasAttachment
+                                                      ? Icons
+                                                          .attach_file_rounded
+                                                      : Icons
+                                                          .attach_file_rounded,
+                                                  color: hasAttachment
+                                                      ? _T.accent
+                                                      : _T.muted
+                                                          .withValues(
+                                                              alpha: 0.5),
+                                                  size: 16,
+                                                ),
+                                              ),
+                                            ),
+                                    const Icon(Icons.chevron_right_rounded,
+                                        color: _T.muted, size: 18),
+                                    _BillRowMenu(
+                                      onEdit:   () => _editBill(bill),
+                                      onDelete: () => _deleteBill(bill),
                                     ),
                                   ],
                                 ),
-                                // Chevron indicator (tap hint) + ⋮ menu
-                                const SizedBox(width: 4),
-                                const Icon(Icons.chevron_right_rounded,
-                                    color: _T.muted, size: 18),
-                                _BillRowMenu(
-                                  onEdit:   () => _editBill(bill),
-                                  onDelete: () => _deleteBill(bill),
-                                ),
+
+                                // ── View Invoice button (iOS/web, attachment exists)
+                                if ((kIsWeb || defaultTargetPlatform ==
+                                        TargetPlatform.iOS) &&
+                                    hasAttachment) ...[
+                                  const SizedBox(height: 10),
+                                  GestureDetector(
+                                    onTap: () => _viewAttachment(bill),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 9),
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            _T.accent.withValues(alpha: 0.1),
+                                            _T.accent.withValues(alpha: 0.05),
+                                          ],
+                                        ),
+                                        borderRadius:
+                                            BorderRadius.circular(10),
+                                        border: Border.all(
+                                            color: _T.accent
+                                                .withValues(alpha: 0.25)),
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            _attachmentTypePerBill[
+                                                        bill.purchaseBillId] ==
+                                                    'pdf'
+                                                ? Icons
+                                                    .picture_as_pdf_rounded
+                                                : Icons.visibility_rounded,
+                                            color: _T.accent,
+                                            size: 14,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          const Text('View Invoice',
+                                              style: TextStyle(
+                                                  color: _T.accent,
+                                                  fontSize: 12,
+                                                  fontWeight:
+                                                      FontWeight.w700,
+                                                  letterSpacing: 0.3)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -679,6 +1084,431 @@ class _EditBillSheetState extends ConsumerState<_EditBillSheet> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Attachment Options Sheet  (iOS only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BillAttachOptionsSheet extends StatelessWidget {
+  final String       billNumber;
+  final bool         hasAttachment;
+  final VoidCallback onAttach;
+  final VoidCallback onReplace;
+  final VoidCallback onDelete;
+
+  const _BillAttachOptionsSheet({
+    required this.billNumber,
+    required this.hasAttachment,
+    required this.onAttach,
+    required this.onReplace,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF0D1018),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              width: 36, height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                  color: _T.border, borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          // Title
+          Row(
+            children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: _T.accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border:
+                      Border.all(color: _T.accent.withValues(alpha: 0.2)),
+                ),
+                child: const Icon(Icons.attach_file_rounded,
+                    color: _T.accent, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Bill Attachment',
+                      style: TextStyle(
+                          color: _T.text,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 17)),
+                  Text('Bill #$billNumber',
+                      style: const TextStyle(
+                          color: _T.muted, fontSize: 12)),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // Attach (shown when no attachment)
+          if (!hasAttachment)
+            _OptionTile(
+              icon:    Icons.upload_rounded,
+              label:   'Attach Bill',
+              sub:     'Upload a photo or PDF of this bill',
+              color:   _T.accent,
+              onTap:   onAttach,
+            ),
+
+          // Replace (shown when attachment exists)
+          if (hasAttachment) ...[
+            _OptionTile(
+              icon:  Icons.swap_horiz_rounded,
+              label: 'Replace Attachment',
+              sub:   'Upload a new file to replace the existing one',
+              color: _T.accent,
+              onTap: onReplace,
+            ),
+            const SizedBox(height: 8),
+            _OptionTile(
+              icon:  Icons.delete_outline_rounded,
+              label: 'Delete Attachment',
+              sub:   'Permanently remove the attached bill',
+              color: _T.red,
+              onTap: onDelete,
+            ),
+          ],
+
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(context),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _T.muted,
+              side: BorderSide(color: _T.border),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: const Text('Cancel',
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 14)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OptionTile extends StatelessWidget {
+  final IconData     icon;
+  final String       label;
+  final String       sub;
+  final Color        color;
+  final VoidCallback onTap;
+  const _OptionTile({
+    required this.icon,
+    required this.label,
+    required this.sub,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _T.card,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: color.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42, height: 42,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: TextStyle(
+                            color: color,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14)),
+                    const SizedBox(height: 2),
+                    Text(sub,
+                        style: const TextStyle(
+                            color: _T.muted, fontSize: 11, height: 1.3)),
+                  ],
+                ),
+              ),
+              Icon(Icons.arrow_forward_ios_rounded,
+                  color: color.withValues(alpha: 0.5), size: 13),
+            ],
+          ),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  File type picker (Image vs PDF)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _FileTypePickerSheet extends StatelessWidget {
+  final String billNumber;
+  const _FileTypePickerSheet({required this.billNumber});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF0D1018),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                margin: const EdgeInsets.only(bottom: 22),
+                decoration: BoxDecoration(
+                    color: _T.border,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const Text('Choose File Type',
+                style: TextStyle(
+                    color: _T.text,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 17)),
+            Text('Bill #$billNumber',
+                style: const TextStyle(color: _T.muted, fontSize: 12)),
+            const SizedBox(height: 20),
+            _OptionTile(
+              icon:  Icons.image_rounded,
+              label: 'Photo / Image',
+              sub:   'JPG or PNG — shown as HD image inside the app',
+              color: _T.accent,
+              onTap: () => Navigator.pop(context, 'image'),
+            ),
+            const SizedBox(height: 10),
+            _OptionTile(
+              icon:  Icons.picture_as_pdf_rounded,
+              label: 'PDF Document',
+              sub:   'Opens via iOS Quick Look for full PDF view',
+              color: const Color(0xFFEF4444),
+              onTap: () => Navigator.pop(context, 'pdf'),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _T.muted,
+                side: BorderSide(color: _T.border),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Cancel',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 14)),
+            ),
+          ],
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Full-screen HD Invoice Image Viewer
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _InvoiceImageViewer extends StatefulWidget {
+  final String imageUrl;
+  final String billNumber;
+  final String clientName;
+  const _InvoiceImageViewer({
+    required this.imageUrl,
+    required this.billNumber,
+    required this.clientName,
+  });
+
+  @override
+  State<_InvoiceImageViewer> createState() => _InvoiceImageViewerState();
+}
+
+class _InvoiceImageViewerState extends State<_InvoiceImageViewer>
+    with SingleTickerProviderStateMixin {
+  final _transformCtrl = TransformationController();
+  bool _showControls   = true;
+
+  @override
+  void dispose() {
+    _transformCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // ── HD image with pinch-to-zoom ───────────────────────────────────
+          GestureDetector(
+            onTap: () => setState(() => _showControls = !_showControls),
+            child: InteractiveViewer(
+              transformationController: _transformCtrl,
+              minScale: 0.5,
+              maxScale: 8.0,
+              child: Center(
+                child: CachedNetworkImage(
+                  imageUrl: widget.imageUrl,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  placeholder: (_, __) => const Center(
+                    child: SizedBox(
+                      width: 36, height: 36,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Color(0xFFF59E0B)),
+                    ),
+                  ),
+                  errorWidget: (_, __, ___) => const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.broken_image_outlined,
+                            color: Color(0xFF4A5568), size: 48),
+                        SizedBox(height: 12),
+                        Text('Could not load image',
+                            style: TextStyle(
+                                color: Color(0xFF4A5568), fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Top bar ───────────────────────────────────────────────────────
+          AnimatedOpacity(
+            opacity: _showControls ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 200),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.8),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 20),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded,
+                            color: Colors.white, size: 22),
+                        style: IconButton.styleFrom(
+                          backgroundColor:
+                              Colors.white.withValues(alpha: 0.15),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(widget.clientName,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14)),
+                            Text('Invoice  #${widget.billNumber}',
+                                style: TextStyle(
+                                    color: Colors.white
+                                        .withValues(alpha: 0.55),
+                                    fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                      // Reset zoom
+                      IconButton(
+                        onPressed: () => _transformCtrl.value =
+                            Matrix4.identity(),
+                        icon: const Icon(Icons.fit_screen_rounded,
+                            color: Colors.white, size: 20),
+                        style: IconButton.styleFrom(
+                          backgroundColor:
+                              Colors.white.withValues(alpha: 0.15),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Bottom hint ───────────────────────────────────────────────────
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 200),
+            bottom: _showControls ? 0 : -60,
+            left: 0, right: 0,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(0, 24, 0, 40),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.7),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+              child: const Center(
+                child: Text('Pinch to zoom  ·  Tap to hide controls',
+                    style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

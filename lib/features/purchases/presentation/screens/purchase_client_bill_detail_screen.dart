@@ -5,8 +5,11 @@
 // Expense payments go OUT (money leaving); accent colour is amber.
 
 import 'dart:async';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -19,6 +22,9 @@ import '../providers/purchase_bill_provider.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:http/http.dart' as http;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Theme  (amber = purchase-feature accent, mirrors _T in purchases_screen.dart)
@@ -98,13 +104,20 @@ class _PurchaseClientBillDetailScreenState
     extends ConsumerState<PurchaseClientBillDetailScreen>
     with TickerProviderStateMixin {
 
-  StreamSubscription<QuerySnapshot>? _txSub;
-  ProviderSubscription<String?>?     _idSub;
-  String?                            _cashbookId;
+  StreamSubscription<QuerySnapshot>?    _txSub;
+  StreamSubscription<DocumentSnapshot>? _billDocSub;
+  ProviderSubscription<String?>?        _idSub;
+  String?                               _cashbookId;
 
   List<_TxItem> _transactions = [];
-  bool          _loading      = true;
-  bool          _isGeneratingShare = false;
+  bool          _loading            = true;
+  bool          _isGeneratingShare  = false;
+
+  // ── Bill attachment state (iOS only) ────────────────────────────────────────
+  String? _attachmentUrl;
+  String? _attachmentType;   // 'image' | 'pdf'
+  bool    _uploading          = false;
+  bool    _removingAttachment = false;
 
   @override
   void initState() {
@@ -120,6 +133,9 @@ class _PurchaseClientBillDetailScreenState
               _cashbookId = next;
               _txSub?.cancel();
               _startStream(next);
+              if (defaultTargetPlatform == TargetPlatform.iOS) {
+                _startBillDocStream(next);
+              }
             }
           },
           fireImmediately: true,
@@ -185,7 +201,196 @@ class _PurchaseClientBillDetailScreenState
   void dispose() {
     _idSub?.close();
     _txSub?.cancel();
+    _billDocSub?.cancel();
     super.dispose();
+  }
+
+  // ── Bill doc stream (attachment URL) ────────────────────────────────────────
+
+  void _startBillDocStream(String cashbookId) {
+    _billDocSub?.cancel();
+    _billDocSub = FirebaseFirestore.instance
+        .collection('cashbooks')
+        .doc(cashbookId)
+        .collection('purchase_bills')
+        .doc(widget.bill.purchaseBillId)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      final data = snap.data() as Map<String, dynamic>?;
+      setState(() {
+        _attachmentUrl  = data?['billAttachmentUrl']  as String?;
+        _attachmentType = data?['billAttachmentType'] as String?;
+      });
+    });
+  }
+
+  // ── Attachment actions ───────────────────────────────────────────────────────
+
+  Future<void> _pickAndUploadAttachment() async {
+    if (_cashbookId == null) return;
+    HapticFeedback.mediumImpact();
+
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _AttachmentPickerSheet(),
+    );
+    if (choice == null || !mounted) return;
+
+    FilePickerResult? picked;
+    try {
+      if (choice == 'image') {
+        picked = await FilePicker.platform.pickFiles(
+          type: FileType.image,
+          allowMultiple: false,
+        );
+      } else {
+        picked = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+          allowMultiple: false,
+        );
+      }
+    } catch (_) {}
+
+    if (picked == null || picked.files.isEmpty) return;
+    final file = picked.files.first;
+    if (file.path == null) return;
+
+    setState(() => _uploading = true);
+    try {
+      final ext  = file.extension ?? (choice == 'image' ? 'jpg' : 'pdf');
+      final path =
+          'purchase_bills/$_cashbookId/${widget.bill.purchaseBillId}/attachment.$ext';
+      final storageRef = FirebaseStorage.instance.ref(path);
+      await storageRef.putFile(File(file.path!));
+      final url = await storageRef.getDownloadURL();
+
+      await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(_cashbookId)
+          .collection('purchase_bills')
+          .doc(widget.bill.purchaseBillId)
+          .update({
+        'billAttachmentUrl':  url,
+        'billAttachmentType': choice,
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(_snackBar('Bill attachment saved', success: true));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(_snackBar('Upload failed: $e', success: false));
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _viewAttachment() async {
+    if (_attachmentUrl == null) return;
+    HapticFeedback.selectionClick();
+
+    if (_attachmentType == 'pdf') {
+      setState(() => _uploading = true);
+      try {
+        final response = await http.get(Uri.parse(_attachmentUrl!));
+        final bytes    = response.bodyBytes;
+        await Share.shareXFiles([
+          XFile.fromData(bytes,
+              name:     'bill_${widget.bill.billNumber}.pdf',
+              mimeType: 'application/pdf'),
+        ]);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(_snackBar('Could not open PDF: $e', success: false));
+        }
+      } finally {
+        if (mounted) setState(() => _uploading = false);
+      }
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _BillImageViewer(
+            imageUrl:   _attachmentUrl!,
+            billNumber: widget.bill.billNumber,
+            clientName: widget.bill.clientName,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _removeAttachment() async {
+    if (_cashbookId == null) return;
+    HapticFeedback.mediumImpact();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: _T.card2,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Remove Attachment?',
+            style: TextStyle(
+                color: _T.text, fontWeight: FontWeight.w700, fontSize: 16)),
+        content: const Text(
+          'The attached bill image/PDF will be permanently removed.',
+          style: TextStyle(color: _T.muted, fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: _T.muted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove',
+                style: TextStyle(
+                    color: _T.red, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _removingAttachment = true);
+    try {
+      if (_attachmentUrl != null) {
+        try {
+          await FirebaseStorage.instance
+              .refFromURL(_attachmentUrl!)
+              .delete();
+        } catch (_) {}
+      }
+      await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(_cashbookId)
+          .collection('purchase_bills')
+          .doc(widget.bill.purchaseBillId)
+          .update({
+        'billAttachmentUrl':  FieldValue.delete(),
+        'billAttachmentType': FieldValue.delete(),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(_snackBar('Attachment removed', success: true));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(_snackBar('Failed to remove: $e', success: false));
+      }
+    } finally {
+      if (mounted) setState(() => _removingAttachment = false);
+    }
   }
 
   // ── Computed values ─────────────────────────────────────────────────────────
@@ -458,6 +663,24 @@ class _PurchaseClientBillDetailScreenState
                     .animate()
                     .fadeIn(delay: 60.ms, duration: 300.ms)
                     .slideY(begin: 0.05, end: 0, curve: Curves.easeOutCubic),
+
+                // ── Bill Attachment (iOS only) ─────────────────────────────
+                if (defaultTargetPlatform == TargetPlatform.iOS) ...[
+                  const SizedBox(height: 12),
+                  _BillAttachmentCard(
+                    attachmentUrl:  _attachmentUrl,
+                    attachmentType: _attachmentType,
+                    uploading:      _uploading || _removingAttachment,
+                    cashbookReady:  _cashbookId != null,
+                    onAttach:       _pickAndUploadAttachment,
+                    onView:         _viewAttachment,
+                    onRemove:       _removeAttachment,
+                  )
+                      .animate()
+                      .fadeIn(delay: 80.ms, duration: 300.ms)
+                      .slideY(begin: 0.05, end: 0, curve: Curves.easeOutCubic),
+                ],
+
                 const SizedBox(height: 22),
 
                 // Payment history label
@@ -1812,4 +2035,694 @@ class _ShareRow extends StatelessWidget {
           ],
         ),
       );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Bill Attachment Card  (iOS only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BillAttachmentCard extends StatelessWidget {
+  final String?      attachmentUrl;
+  final String?      attachmentType;
+  final bool         uploading;
+  final bool         cashbookReady;
+  final VoidCallback onAttach;
+  final VoidCallback onView;
+  final VoidCallback onRemove;
+
+  const _BillAttachmentCard({
+    required this.attachmentUrl,
+    required this.attachmentType,
+    required this.uploading,
+    required this.cashbookReady,
+    required this.onAttach,
+    required this.onView,
+    required this.onRemove,
+  });
+
+  bool get _hasAttachment =>
+      attachmentUrl != null && attachmentUrl!.isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Section label
+        Row(
+          children: [
+            Container(
+              width: 3, height: 14,
+              decoration: BoxDecoration(
+                color: _T.accent,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text('BILL ATTACHMENT',
+                style: TextStyle(
+                    color: _T.muted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2)),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // Card
+        Container(
+          decoration: BoxDecoration(
+            color: _T.card,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: _hasAttachment
+                  ? _T.accent.withValues(alpha: 0.25)
+                  : _T.border,
+            ),
+          ),
+          child: uploading
+              ? _buildLoadingState()
+              : _hasAttachment
+                  ? _buildAttachedState(context)
+                  : _buildEmptyState(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoadingState() => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 28),
+        child: Column(
+          children: [
+            SizedBox(
+              width: 28, height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: _T.accent,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('Please wait…',
+                style: TextStyle(color: _T.muted, fontSize: 12)),
+          ],
+        ),
+      );
+
+  Widget _buildEmptyState() => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Container(
+              width: 56, height: 56,
+              decoration: BoxDecoration(
+                color: _T.accent.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                    color: _T.accent.withValues(alpha: 0.15)),
+              ),
+              child: const Icon(Icons.attach_file_rounded,
+                  color: _T.accent, size: 26),
+            ),
+            const SizedBox(height: 12),
+            const Text('No bill attached',
+                style: TextStyle(
+                    color: _T.text,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13)),
+            const SizedBox(height: 4),
+            const Text('Attach a photo or PDF of the original bill.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: _T.muted, fontSize: 11, height: 1.4)),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton.icon(
+                onPressed: cashbookReady ? onAttach : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _T.accent,
+                  foregroundColor: Colors.black,
+                  disabledBackgroundColor:
+                      _T.accent.withValues(alpha: 0.3),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                ),
+                icon: const Icon(Icons.upload_rounded, size: 16),
+                label: const Text('Attach Bill',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 14)),
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _buildAttachedState(BuildContext context) => Column(
+        children: [
+          // Preview area
+          GestureDetector(
+            onTap: onView,
+            child: Container(
+              height: 160,
+              decoration: BoxDecoration(
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(16)),
+                color: const Color(0xFF0A0D14),
+              ),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(16)),
+                child: attachmentType == 'image'
+                    ? Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          CachedNetworkImage(
+                            imageUrl: attachmentUrl!,
+                            fit: BoxFit.cover,
+                            placeholder: (_, __) => const Center(
+                              child: SizedBox(
+                                width: 24, height: 24,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: _T.accent),
+                              ),
+                            ),
+                            errorWidget: (_, __, ___) => const Center(
+                              child: Icon(Icons.broken_image_outlined,
+                                  color: _T.muted, size: 32),
+                            ),
+                          ),
+                          // Tap overlay
+                          Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.55),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const Positioned(
+                            bottom: 12, left: 0, right: 0,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.zoom_in_rounded,
+                                    color: Colors.white70, size: 14),
+                                SizedBox(width: 4),
+                                Text('Tap to view HD',
+                                    style: TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      )
+                    : _PdfPlaceholder(onTap: onView),
+              ),
+            ),
+          ),
+
+          // Action row
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            child: Row(
+              children: [
+                // Attachment type badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _T.accent.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: _T.accent.withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        attachmentType == 'pdf'
+                            ? Icons.picture_as_pdf_rounded
+                            : Icons.image_rounded,
+                        color: _T.accent, size: 12,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        attachmentType == 'pdf' ? 'PDF' : 'IMAGE',
+                        style: const TextStyle(
+                            color: _T.accent,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+
+                // View button
+                _AttachmentActionBtn(
+                  icon:  attachmentType == 'pdf'
+                      ? Icons.open_in_new_rounded
+                      : Icons.visibility_rounded,
+                  label: 'View Bill',
+                  color: _T.accent,
+                  onTap: onView,
+                ),
+                const SizedBox(width: 8),
+
+                // Replace button
+                _AttachmentActionBtn(
+                  icon:  Icons.swap_horiz_rounded,
+                  label: 'Replace',
+                  color: _T.muted,
+                  onTap: onAttach,
+                ),
+                const SizedBox(width: 8),
+
+                // Remove button
+                _AttachmentActionBtn(
+                  icon:  Icons.delete_outline_rounded,
+                  label: 'Remove',
+                  color: _T.red,
+                  onTap: onRemove,
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+}
+
+class _AttachmentActionBtn extends StatelessWidget {
+  final IconData     icon;
+  final String       label;
+  final Color        color;
+  final VoidCallback onTap;
+  const _AttachmentActionBtn({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: color.withValues(alpha: 0.18)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color, size: 13),
+              const SizedBox(width: 4),
+              Text(label,
+                  style: TextStyle(
+                      color: color,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      );
+}
+
+class _PdfPlaceholder extends StatelessWidget {
+  final VoidCallback onTap;
+  const _PdfPlaceholder({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 64, height: 64,
+                decoration: BoxDecoration(
+                  color: _T.accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                      color: _T.accent.withValues(alpha: 0.22)),
+                ),
+                child: const Icon(Icons.picture_as_pdf_rounded,
+                    color: _T.accent, size: 30),
+              ),
+              const SizedBox(height: 10),
+              const Text('PDF Attached',
+                  style: TextStyle(
+                      color: _T.text,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13)),
+              const SizedBox(height: 4),
+              const Text('Tap "View Bill" to open',
+                  style: TextStyle(color: _T.muted, fontSize: 11)),
+            ],
+          ),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Attachment Type Picker Sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AttachmentPickerSheet extends StatelessWidget {
+  const _AttachmentPickerSheet();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF0D1018),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                margin: const EdgeInsets.only(bottom: 24),
+                decoration: BoxDecoration(
+                    color: _T.border,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const Text('Attach Bill',
+                style: TextStyle(
+                    color: _T.text,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18)),
+            const SizedBox(height: 4),
+            const Text('Choose the type of file to attach',
+                style: TextStyle(color: _T.muted, fontSize: 13)),
+            const SizedBox(height: 24),
+
+            // Image option
+            _PickerOption(
+              icon:        Icons.image_rounded,
+              title:       'Photo / Image',
+              subtitle:    'JPG, PNG — shows as HD image in-app',
+              accentColor: _T.accent,
+              onTap:       () => Navigator.pop(context, 'image'),
+            ),
+            const SizedBox(height: 10),
+
+            // PDF option
+            _PickerOption(
+              icon:        Icons.picture_as_pdf_rounded,
+              title:       'PDF Document',
+              subtitle:    'Opens with iOS Quick Look for full PDF view',
+              accentColor: const Color(0xFFEF4444),
+              onTap:       () => Navigator.pop(context, 'pdf'),
+            ),
+            const SizedBox(height: 16),
+
+            OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _T.muted,
+                side: BorderSide(color: _T.border),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: const Text('Cancel',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 14)),
+            ),
+          ],
+        ),
+      );
+}
+
+class _PickerOption extends StatelessWidget {
+  final IconData     icon;
+  final String       title;
+  final String       subtitle;
+  final Color        accentColor;
+  final VoidCallback onTap;
+  const _PickerOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.accentColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: _T.card,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: accentColor.withValues(alpha: 0.2)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 48, height: 48,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                      color: accentColor.withValues(alpha: 0.2)),
+                ),
+                child: Icon(icon, color: accentColor, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            color: _T.text,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14)),
+                    const SizedBox(height: 3),
+                    Text(subtitle,
+                        style: const TextStyle(
+                            color: _T.muted, fontSize: 11, height: 1.3)),
+                  ],
+                ),
+              ),
+              Icon(Icons.arrow_forward_ios_rounded,
+                  color: _T.muted.withValues(alpha: 0.5), size: 14),
+            ],
+          ),
+        ),
+      );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Full-screen HD Image Viewer
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BillImageViewer extends StatefulWidget {
+  final String imageUrl;
+  final String billNumber;
+  final String clientName;
+  const _BillImageViewer({
+    required this.imageUrl,
+    required this.billNumber,
+    required this.clientName,
+  });
+
+  @override
+  State<_BillImageViewer> createState() => _BillImageViewerState();
+}
+
+class _BillImageViewerState extends State<_BillImageViewer>
+    with SingleTickerProviderStateMixin {
+  final _transformCtrl = TransformationController();
+  bool _showControls   = true;
+  late AnimationController _fadeCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _fadeCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 250));
+    _fadeCtrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _transformCtrl.dispose();
+    _fadeCtrl.dispose();
+    super.dispose();
+  }
+
+  void _toggleControls() {
+    setState(() => _showControls = !_showControls);
+  }
+
+  void _resetZoom() {
+    _transformCtrl.value = Matrix4.identity();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // ── Image viewer ──────────────────────────────────────────────────
+          GestureDetector(
+            onTap: _toggleControls,
+            child: InteractiveViewer(
+              transformationController: _transformCtrl,
+              minScale: 0.5,
+              maxScale: 8.0,
+              panEnabled: true,
+              child: Center(
+                child: CachedNetworkImage(
+                  imageUrl: widget.imageUrl,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  placeholder: (_, __) => const Center(
+                    child: SizedBox(
+                      width: 36, height: 36,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: _T.accent),
+                    ),
+                  ),
+                  errorWidget: (_, __, ___) => Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(Icons.broken_image_outlined,
+                          color: _T.muted, size: 48),
+                      SizedBox(height: 12),
+                      Text('Could not load image',
+                          style: TextStyle(color: _T.muted, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Top controls ─────────────────────────────────────────────────
+          AnimatedOpacity(
+            opacity: _showControls ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 200),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.75),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 1.0],
+                ),
+              ),
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 20),
+                  child: Row(
+                    children: [
+                      // Close
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded,
+                            color: Colors.white, size: 22),
+                        style: IconButton.styleFrom(
+                          backgroundColor:
+                              Colors.white.withValues(alpha: 0.12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Title
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(widget.clientName,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14)),
+                            Text('Bill  ${widget.billNumber}',
+                                style: TextStyle(
+                                    color:
+                                        Colors.white.withValues(alpha: 0.6),
+                                    fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                      // Reset zoom
+                      IconButton(
+                        onPressed: _resetZoom,
+                        icon: const Icon(Icons.fit_screen_rounded,
+                            color: Colors.white, size: 20),
+                        tooltip: 'Reset zoom',
+                        style: IconButton.styleFrom(
+                          backgroundColor:
+                              Colors.white.withValues(alpha: 0.12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // ── Bottom hint ───────────────────────────────────────────────────
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 200),
+            bottom: _showControls ? 0 : -80,
+            left: 0, right: 0,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.7),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(0, 24, 0, 40),
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('Pinch to zoom  ·  Tap to hide controls',
+                      style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

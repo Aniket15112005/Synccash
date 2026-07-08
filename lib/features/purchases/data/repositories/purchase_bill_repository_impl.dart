@@ -114,6 +114,22 @@ class PurchaseBillRepositoryImpl {
     await _col(cashbookId).doc(billId).update({'billStatus': status});
   }
 
+  /// Saves (or clears) the Firebase Storage download URL for a bill's
+  /// attached invoice image/PDF. Pass [imageUrl] as null to remove.
+  Future<void> updateBillImageUrl(
+    String cashbookId,
+    String billId,
+    String? imageUrl,
+  ) async {
+    if (imageUrl == null) {
+      await _col(cashbookId).doc(billId).update({
+        'billImageUrl': FieldValue.delete(),
+      });
+    } else {
+      await _col(cashbookId).doc(billId).update({'billImageUrl': imageUrl});
+    }
+  }
+
   Future<void> deleteBill(String cashbookId, String billId) async {
     await _col(cashbookId).doc(billId).delete();
   }
