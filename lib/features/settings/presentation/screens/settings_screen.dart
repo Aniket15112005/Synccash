@@ -797,12 +797,97 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
         );
       }).toList();
 
+      // ── Purchase bills (always full) ─────────────────────────────────
+      final purchaseBillsSnap = await db
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('purchase_bills')
+          .get();
+      final purchaseBills = purchaseBillsSnap.docs.map((doc) {
+        final d = doc.data();
+        return PurchaseBillBackup(
+          purchaseBillId:    d['purchaseBillId']    as String?  ?? doc.id,
+          clientName:        d['clientName']        as String?  ?? '',
+          billNumber:        d['billNumber']        as String?  ?? '',
+          billAmount:        (d['billAmount']  as num?)?.toDouble() ?? 0.0,
+          billDate:          (d['billDate']    as Timestamp?)?.toDate() ?? DateTime.now(),
+          billNote:          d['billNote']          as String?,
+          billCreatedAt:     (d['billCreatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          billCreatedBy:     d['billCreatedBy']     as String?  ?? '',
+          billCreatedByName: d['billCreatedByName'] as String?  ?? '',
+          billStatus:        d['billStatus']        as String?  ?? 'pending',
+        );
+      }).toList();
+
+      // ── Daily entries (always full) ─────────────────────────────────
+      final dailyEntriesSnap = await db
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('daily_entries')
+          .get();
+      final dailyEntries = dailyEntriesSnap.docs.map((doc) {
+        final d = doc.data();
+        return DailyEntryBackup(
+          entryId:     doc.id,
+          cashbookId:  d['cashbookId']  as String?  ?? cashbookId,
+          createdBy:   d['createdBy']   as String?  ?? '',
+          creatorName: d['creatorName'] as String?  ?? '',
+          createdAt:   (d['createdAt']  as Timestamp?)?.toDate() ?? DateTime.now(),
+          amount:      (d['amount']     as num?)?.toDouble() ?? 0.0,
+          type:        d['type']        as String?  ?? 'expense',
+          description: d['description'] as String?  ?? '',
+        );
+      }).toList();
+
+      // ── Daily cards + their transactions (always full) ─────────────────
+      final dailyCardsSnap = await db
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('daily_cards')
+          .get();
+      final dailyCards = await Future.wait(
+        dailyCardsSnap.docs.map((cardDoc) async {
+          final cd = cardDoc.data();
+          final txSnap = await cardDoc.reference
+              .collection('transactions')
+              .get();
+          final txList = txSnap.docs.map((txDoc) {
+            final td = txDoc.data();
+            return DailyCardTxBackup(
+              txId:        txDoc.id,
+              cardId:      cardDoc.id,
+              createdBy:   td['createdBy']   as String?  ?? '',
+              creatorName: td['creatorName'] as String?  ?? '',
+              createdAt:   (td['createdAt']  as Timestamp?)?.toDate() ?? DateTime.now(),
+              amount:      (td['amount']     as num?)?.toDouble() ?? 0.0,
+              type:        td['type']        as String?  ?? 'expense',
+              description: td['description'] as String?  ?? '',
+            );
+          }).toList();
+          return DailyCardBackup(
+            cardId:      cardDoc.id,
+            cashbookId:  cd['cashbookId']  as String?  ?? cashbookId,
+            name:        cd['name']        as String?  ?? 'Card',
+            number:      cd['number']      as String?,
+            bankName:    cd['bankName']    as String?,
+            colorIndex:  (cd['colorIndex'] as num?)?.toInt() ?? 0,
+            createdBy:   cd['createdBy']   as String?  ?? '',
+            creatorName: cd['creatorName'] as String?  ?? '',
+            createdAt:   (cd['createdAt']  as Timestamp?)?.toDate() ?? DateTime.now(),
+            transactions: txList,
+          );
+        }),
+      );
+
       await BackupService.createBackup(
-        context:      context,
-        cashbook:     cashbook,
-        transactions: transactions,
-        saleBills:    saleBills,
-        parties:      parties,
+        context:       context,
+        cashbook:      cashbook,
+        transactions:  transactions,
+        saleBills:     saleBills,
+        parties:       parties,
+        purchaseBills: purchaseBills,
+        dailyEntries:  dailyEntries,
+        dailyCards:    dailyCards,
       );
 
       await BackupFrequencyService.recordBackup();
@@ -810,7 +895,10 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
       if (mounted) {
         final parts = <String>[
           '${transactions.length} transaction${transactions.length == 1 ? '' : 's'}',
-          '${saleBills.length} bill${saleBills.length == 1 ? '' : 's'}',
+          '${saleBills.length} sale bill${saleBills.length == 1 ? '' : 's'}',
+          '${purchaseBills.length} purchase bill${purchaseBills.length == 1 ? '' : 's'}',
+          '${dailyEntries.length} daily entr${dailyEntries.length == 1 ? 'y' : 'ies'}',
+          '${dailyCards.length} card${dailyCards.length == 1 ? '' : 's'}',
           '${parties.length} part${parties.length == 1 ? 'y' : 'ies'}',
         ];
         final msg = auto
@@ -862,8 +950,9 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
           const _InfoBanner(
             icon: Icons.shield_outlined,
             text:
-                'Creates a .synccash backup of your transactions, sale bills, and '
-                'party opening balances. Use the date range to filter transactions only.',
+                'Creates a .synccash backup of your transactions, sale bills, '
+                'purchase bills, daily entries, daily cards, and party opening balances. '
+                'Use the date range to filter cashbook transactions only.',
             color: Color(0xFF10B981),
           ),
           const SizedBox(height: 20),
@@ -897,6 +986,18 @@ class _BackupSheetState extends ConsumerState<_BackupSheet> {
             _PartiesStatTile(cashbookId: cashbookId)
                 .animate()
                 .fadeIn(delay: 100.ms, duration: 220.ms),
+            const SizedBox(height: 8),
+            _PurchaseBillsStatTile(cashbookId: cashbookId)
+                .animate()
+                .fadeIn(delay: 120.ms, duration: 220.ms),
+            const SizedBox(height: 8),
+            _DailyEntriesStatTile(cashbookId: cashbookId)
+                .animate()
+                .fadeIn(delay: 140.ms, duration: 220.ms),
+            const SizedBox(height: 8),
+            _DailyCardsStatTile(cashbookId: cashbookId)
+                .animate()
+                .fadeIn(delay: 160.ms, duration: 220.ms),
             const SizedBox(height: 8),
           ],
           const SizedBox(height: 8),
@@ -981,6 +1082,81 @@ class _PartiesStatTile extends StatelessWidget {
   }
 }
 
+
+class _PurchaseBillsStatTile extends StatelessWidget {
+  final String cashbookId;
+  const _PurchaseBillsStatTile({required this.cashbookId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('purchase_bills')
+          .snapshots()
+          .map((s) => s.size),
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        return _StatTile(
+          icon: Icons.shopping_cart_rounded,
+          label: 'Purchase bills (always full backup)',
+          value: '$count',
+        );
+      },
+    );
+  }
+}
+
+class _DailyEntriesStatTile extends StatelessWidget {
+  final String cashbookId;
+  const _DailyEntriesStatTile({required this.cashbookId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('daily_entries')
+          .snapshots()
+          .map((s) => s.size),
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        return _StatTile(
+          icon: Icons.bolt_rounded,
+          label: 'Daily entries (always full backup)',
+          value: '$count',
+        );
+      },
+    );
+  }
+}
+
+class _DailyCardsStatTile extends StatelessWidget {
+  final String cashbookId;
+  const _DailyCardsStatTile({required this.cashbookId});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('daily_cards')
+          .snapshots()
+          .map((s) => s.size),
+      builder: (context, snapshot) {
+        final count = snapshot.data ?? 0;
+        return _StatTile(
+          icon: Icons.credit_card_rounded,
+          label: 'Daily cards + transactions (always full backup)',
+          value: '$count',
+        );
+      },
+    );
+  }
+}
 // ─────────────────────────────────────────────────────────────────────────────
 //  Backup Frequency page
 // ─────────────────────────────────────────────────────────────────────────────

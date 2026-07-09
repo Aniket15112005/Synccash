@@ -99,10 +99,214 @@ class PartyBackup {
   );
 }
 
+
+// ── Purchase bill snapshot (for backup only) ─────────────────────────────────
+
+class PurchaseBillBackup {
+  final String   purchaseBillId;
+  final String   clientName;
+  final String   billNumber;
+  final double   billAmount;
+  final DateTime billDate;
+  final String?  billNote;
+  final DateTime billCreatedAt;
+  final String   billCreatedBy;
+  final String   billCreatedByName;
+  final String   billStatus;
+
+  const PurchaseBillBackup({
+    required this.purchaseBillId,
+    required this.clientName,
+    required this.billNumber,
+    required this.billAmount,
+    required this.billDate,
+    this.billNote,
+    required this.billCreatedAt,
+    required this.billCreatedBy,
+    required this.billCreatedByName,
+    required this.billStatus,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'purchaseBillId':    purchaseBillId,
+    'clientName':        clientName,
+    'billNumber':        billNumber,
+    'billAmount':        billAmount,
+    'billDate':          billDate.toIso8601String(),
+    'billNote':          billNote,
+    'billCreatedAt':     billCreatedAt.toIso8601String(),
+    'billCreatedBy':     billCreatedBy,
+    'billCreatedByName': billCreatedByName,
+    'billStatus':        billStatus,
+  };
+
+  factory PurchaseBillBackup.fromJson(Map<String, dynamic> j) => PurchaseBillBackup(
+    purchaseBillId:    j['purchaseBillId']    as String?  ?? '',
+    clientName:        j['clientName']        as String?  ?? '',
+    billNumber:        j['billNumber']        as String?  ?? '',
+    billAmount:        (j['billAmount']  as num?)?.toDouble() ?? 0.0,
+    billDate:          DateTime.parse(j['billDate']      as String),
+    billNote:          j['billNote']          as String?,
+    billCreatedAt:     DateTime.parse(j['billCreatedAt'] as String),
+    billCreatedBy:     j['billCreatedBy']     as String?  ?? '',
+    billCreatedByName: j['billCreatedByName'] as String?  ?? '',
+    billStatus:        j['billStatus']        as String?  ?? 'pending',
+  );
+}
+
+// ── Daily entry snapshot (for backup only) ────────────────────────────────────
+
+class DailyEntryBackup {
+  final String   entryId;
+  final String   cashbookId;
+  final String   createdBy;
+  final String   creatorName;
+  final DateTime createdAt;
+  final double   amount;
+  final String   type;
+  final String   description;
+
+  const DailyEntryBackup({
+    required this.entryId,
+    required this.cashbookId,
+    required this.createdBy,
+    required this.creatorName,
+    required this.createdAt,
+    required this.amount,
+    required this.type,
+    required this.description,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'entryId':     entryId,
+    'cashbookId':  cashbookId,
+    'createdBy':   createdBy,
+    'creatorName': creatorName,
+    'createdAt':   createdAt.toIso8601String(),
+    'amount':      amount,
+    'type':        type,
+    'description': description,
+  };
+
+  factory DailyEntryBackup.fromJson(Map<String, dynamic> j) => DailyEntryBackup(
+    entryId:     j['entryId']     as String?  ?? '',
+    cashbookId:  j['cashbookId']  as String?  ?? '',
+    createdBy:   j['createdBy']   as String?  ?? '',
+    creatorName: j['creatorName'] as String?  ?? '',
+    createdAt:   DateTime.parse(j['createdAt'] as String),
+    amount:      (j['amount'] as num?)?.toDouble() ?? 0.0,
+    type:        j['type']        as String?  ?? 'expense',
+    description: j['description'] as String?  ?? '',
+  );
+}
+
+// ── Daily card transaction snapshot (for backup only) ─────────────────────────
+
+class DailyCardTxBackup {
+  final String   txId;
+  final String   cardId;
+  final String   createdBy;
+  final String   creatorName;
+  final DateTime createdAt;
+  final double   amount;
+  final String   type;
+  final String   description;
+
+  const DailyCardTxBackup({
+    required this.txId,
+    required this.cardId,
+    required this.createdBy,
+    required this.creatorName,
+    required this.createdAt,
+    required this.amount,
+    required this.type,
+    required this.description,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'txId':        txId,
+    'cardId':      cardId,
+    'createdBy':   createdBy,
+    'creatorName': creatorName,
+    'createdAt':   createdAt.toIso8601String(),
+    'amount':      amount,
+    'type':        type,
+    'description': description,
+  };
+
+  factory DailyCardTxBackup.fromJson(Map<String, dynamic> j) => DailyCardTxBackup(
+    txId:        j['txId']        as String?  ?? '',
+    cardId:      j['cardId']      as String?  ?? '',
+    createdBy:   j['createdBy']   as String?  ?? '',
+    creatorName: j['creatorName'] as String?  ?? '',
+    createdAt:   DateTime.parse(j['createdAt'] as String),
+    amount:      (j['amount'] as num?)?.toDouble() ?? 0.0,
+    type:        j['type']        as String?  ?? 'expense',
+    description: j['description'] as String?  ?? '',
+  );
+}
+
+// ── Daily card snapshot (for backup only) ─────────────────────────────────────
+
+class DailyCardBackup {
+  final String                  cardId;
+  final String                  cashbookId;
+  final String                  name;
+  final String?                 number;
+  final String?                 bankName;
+  final int                     colorIndex;
+  final String                  createdBy;
+  final String                  creatorName;
+  final DateTime                createdAt;
+  final List<DailyCardTxBackup> transactions;
+
+  const DailyCardBackup({
+    required this.cardId,
+    required this.cashbookId,
+    required this.name,
+    this.number,
+    this.bankName,
+    required this.colorIndex,
+    required this.createdBy,
+    required this.creatorName,
+    required this.createdAt,
+    this.transactions = const [],
+  });
+
+  Map<String, dynamic> toJson() => {
+    'cardId':       cardId,
+    'cashbookId':   cashbookId,
+    'name':         name,
+    if (number   != null && number!.isNotEmpty)   'number':   number,
+    if (bankName != null && bankName!.isNotEmpty) 'bankName': bankName,
+    'colorIndex':   colorIndex,
+    'createdBy':    createdBy,
+    'creatorName':  creatorName,
+    'createdAt':    createdAt.toIso8601String(),
+    'transactions': transactions.map((t) => t.toJson()).toList(),
+  };
+
+  factory DailyCardBackup.fromJson(Map<String, dynamic> j) => DailyCardBackup(
+    cardId:      j['cardId']      as String?  ?? '',
+    cashbookId:  j['cashbookId']  as String?  ?? '',
+    name:        j['name']        as String?  ?? 'Card',
+    number:      j['number']      as String?,
+    bankName:    j['bankName']    as String?,
+    colorIndex:  (j['colorIndex'] as num?)?.toInt() ?? 0,
+    createdBy:   j['createdBy']   as String?  ?? '',
+    creatorName: j['creatorName'] as String?  ?? '',
+    createdAt:   DateTime.parse(j['createdAt'] as String),
+    transactions: (j['transactions'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>()
+        .map((t) => DailyCardTxBackup.fromJson(t))
+        .toList(),
+  );
+}
+
 // ── Main backup envelope ──────────────────────────────────────────────────────
 
 class SyncCashBackup {
-  static const String currentVersion = '2.0.0';
+  static const String currentVersion = '3.0.0';
   static const String fileExtension  = 'synccash';
   static const String mimeType       = 'application/octet-stream';
 
@@ -110,9 +314,12 @@ class SyncCashBackup {
   final DateTime exportedAt;
   final String cashbookId;
   final String cashbookName;
-  final List<TransactionEntity> transactions;
-  final List<SaleBillBackup>    saleBills;
-  final List<PartyBackup>       parties;
+  final List<TransactionEntity>  transactions;
+  final List<SaleBillBackup>     saleBills;
+  final List<PartyBackup>        parties;
+  final List<PurchaseBillBackup> purchaseBills;
+  final List<DailyEntryBackup>   dailyEntries;
+  final List<DailyCardBackup>    dailyCards;
 
   const SyncCashBackup({
     required this.version,
@@ -120,8 +327,11 @@ class SyncCashBackup {
     required this.cashbookId,
     required this.cashbookName,
     required this.transactions,
-    this.saleBills = const [],
-    this.parties   = const [],
+    this.saleBills     = const [],
+    this.parties       = const [],
+    this.purchaseBills = const [],
+    this.dailyEntries  = const [],
+    this.dailyCards    = const [],
   });
 
   Map<String, dynamic> toJson() => {
@@ -129,9 +339,12 @@ class SyncCashBackup {
     'exportedAt':       exportedAt.toIso8601String(),
     'cashbookId':       cashbookId,
     'cashbookName':     cashbookName,
-    'transactionCount': transactions.length,
-    'saleBillCount':    saleBills.length,
-    'partyCount':       parties.length,
+    'transactionCount':  transactions.length,
+    'saleBillCount':     saleBills.length,
+    'partyCount':        parties.length,
+    'purchaseBillCount': purchaseBills.length,
+    'dailyEntryCount':   dailyEntries.length,
+    'dailyCardCount':    dailyCards.length,
     'transactions': transactions.map((t) => {
       'transactionId': t.transactionId,
       'cashbookId':    t.cashbookId,
@@ -143,8 +356,11 @@ class SyncCashBackup {
       'category':      t.category,
       'description':   t.description,
     }).toList(),
-    'saleBills': saleBills.map((b) => b.toJson()).toList(),
-    'parties':   parties.map((p) => p.toJson()).toList(),
+    'saleBills':     saleBills.map((b) => b.toJson()).toList(),
+    'parties':       parties.map((p) => p.toJson()).toList(),
+    'purchaseBills': purchaseBills.map((b) => b.toJson()).toList(),
+    'dailyEntries':  dailyEntries.map((e) => e.toJson()).toList(),
+    'dailyCards':    dailyCards.map((c) => c.toJson()).toList(),
   };
 
   factory SyncCashBackup.fromJson(Map<String, dynamic> json) {
@@ -182,8 +398,20 @@ class SyncCashBackup {
         category:      t['category']      as String,
         description:   t['description']   as String? ?? '',
       )).toList(),
-      saleBills: billList.map((b) => SaleBillBackup.fromJson(b)).toList(),
-      parties:   partyList.map((p) => PartyBackup.fromJson(p)).toList(),
+      saleBills:     billList.map((b) => SaleBillBackup.fromJson(b)).toList(),
+      parties:       partyList.map((p) => PartyBackup.fromJson(p)).toList(),
+      purchaseBills: (json['purchaseBills'] as List<dynamic>? ?? [])
+          .cast<Map<String, dynamic>>()
+          .map((b) => PurchaseBillBackup.fromJson(b))
+          .toList(),
+      dailyEntries: (json['dailyEntries'] as List<dynamic>? ?? [])
+          .cast<Map<String, dynamic>>()
+          .map((e) => DailyEntryBackup.fromJson(e))
+          .toList(),
+      dailyCards: (json['dailyCards'] as List<dynamic>? ?? [])
+          .cast<Map<String, dynamic>>()
+          .map((card) => DailyCardBackup.fromJson(card))
+          .toList(),
     );
   }
 }
@@ -211,17 +439,23 @@ class BackupService {
     required BuildContext            context,
     required CashbookEntity          cashbook,
     required List<TransactionEntity> transactions,
-    List<SaleBillBackup>             saleBills = const [],
-    List<PartyBackup>                parties   = const [],
+    List<SaleBillBackup>             saleBills     = const [],
+    List<PartyBackup>                parties       = const [],
+    List<PurchaseBillBackup>         purchaseBills = const [],
+    List<DailyEntryBackup>           dailyEntries  = const [],
+    List<DailyCardBackup>            dailyCards    = const [],
   }) async {
     final backup = SyncCashBackup(
       version:      SyncCashBackup.currentVersion,
       exportedAt:   DateTime.now(),
       cashbookId:   cashbook.id,
       cashbookName: 'Cashbook ${cashbook.inviteCode}',
-      transactions: transactions,
-      saleBills:    saleBills,
-      parties:      parties,
+      transactions:  transactions,
+      saleBills:     saleBills,
+      parties:       parties,
+      purchaseBills: purchaseBills,
+      dailyEntries:  dailyEntries,
+      dailyCards:    dailyCards,
     );
 
     final json   = const JsonEncoder.withIndent('  ').convert(backup.toJson());
