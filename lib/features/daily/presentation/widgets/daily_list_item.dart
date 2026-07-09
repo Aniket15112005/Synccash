@@ -126,113 +126,115 @@ class DailyListItem extends ConsumerWidget {
       child: GestureDetector(
         onTap: () => _showActions(context, ref),
         behavior: HitTestBehavior.opaque,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (showTimeline)
-              SizedBox(
-                width: 28,
-                child: Column(children: [
-                  const SizedBox(height: 18),
-                  Container(
-                    width: 7,
-                    height: 7,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isIncome
-                          ? _kDailyAccent.withValues(alpha: 0.75)
-                          : const Color(0x70828FA0),
-                      border: Border.all(
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (showTimeline)
+                SizedBox(
+                  width: 28,
+                  child: Column(children: [
+                    const SizedBox(height: 18),
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
                         color: isIncome
-                            ? _kDailyAccent.withValues(alpha: 0.35)
-                            : const Color(0x3C828FA0),
-                        width: 1,
-                      ),
-                    ),
-                  ),
-                  if (!isLastInGroup)
-                    Expanded(
-                      child: Container(
-                        width: 1,
-                        margin: const EdgeInsets.symmetric(vertical: 2),
-                        color: const Color(0x0DFFFFFF),
-                      ),
-                    ),
-                ]),
-              ),
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: showTimeline ? 4 : 0,
-                  top: 10,
-                  bottom: isLastInGroup ? 0 : 2,
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            _DailyTag(
-                              label: isIncome ? 'INCOME' : 'EXPENSE',
-                              color: isIncome
-                                  ? const Color(0xFF5CB87A)
-                                  : const Color(0xFFD96C6C),
-                            ),
-                            const SizedBox(width: 5),
-                            _DailyTag(
-                              label: entry.creatorName.toUpperCase(),
-                              highlight: isMe,
-                            ),
-                          ]),
-                          const SizedBox(height: 5),
-                          Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w500,
-                              height: 1.3,
-                              color: isIncome
-                                  ? const Color(0xEDD7E1EE)
-                                  : const Color(0xD0A5B0C0),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${_dateFmt.format(entry.createdAt)}  ·  $timeStr',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF4B5563),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        amountStr,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'monospace',
-                          letterSpacing: -0.3,
+                            ? _kDailyAccent.withValues(alpha: 0.75)
+                            : const Color(0x70828FA0),
+                        border: Border.all(
                           color: isIncome
-                              ? const Color(0xF0E1EBF8)
-                              : const Color(0xCCA0AEBE),
+                              ? _kDailyAccent.withValues(alpha: 0.35)
+                              : const Color(0x3C828FA0),
+                          width: 1,
                         ),
                       ),
                     ),
-                  ],
+                    if (!isLastInGroup)
+                      Expanded(
+                        child: Container(
+                          width: 1,
+                          margin: const EdgeInsets.symmetric(vertical: 2),
+                          color: const Color(0x0DFFFFFF),
+                        ),
+                      ),
+                  ]),
+                ),
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: showTimeline ? 4 : 0,
+                    top: 10,
+                    bottom: isLastInGroup ? 0 : 2,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              _DailyTag(
+                                label: isIncome ? 'INCOME' : 'EXPENSE',
+                                color: isIncome
+                                    ? const Color(0xFF5CB87A)
+                                    : const Color(0xFFD96C6C),
+                              ),
+                              const SizedBox(width: 5),
+                              _DailyTag(
+                                label: entry.creatorName.toUpperCase(),
+                                highlight: isMe,
+                              ),
+                            ]),
+                            const SizedBox(height: 5),
+                            Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                                height: 1.3,
+                                color: isIncome
+                                    ? const Color(0xEDD7E1EE)
+                                    : const Color(0xD0A5B0C0),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${_dateFmt.format(entry.createdAt)}  ·  $timeStr',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF4B5563),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          amountStr,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'monospace',
+                            letterSpacing: -0.3,
+                            color: isIncome
+                                ? const Color(0xF0E1EBF8)
+                                : const Color(0xCCA0AEBE),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
