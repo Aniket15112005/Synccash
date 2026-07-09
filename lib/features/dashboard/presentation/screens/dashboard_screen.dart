@@ -93,8 +93,57 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ),
       ),
-      floatingActionButton: _AddFAB(
-        onTap: () => context.push(RouteConstants.addTransaction),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          _ChatFAB(
+            onTap: () => context.push(RouteConstants.chat),
+          ),
+          const SizedBox(height: 12),
+          _AddFAB(
+            onTap: () => context.push(RouteConstants.addTransaction),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
+class _ChatFAB extends StatelessWidget {
+  final VoidCallback onTap;
+  const _ChatFAB({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        onTap();
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppColors.border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.22),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Icon(
+          Icons.chat_bubble_outline_rounded,
+          size: 20,
+          color: AppColors.textPrimary,
+        ),
       ),
     );
   }

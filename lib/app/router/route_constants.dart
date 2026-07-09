@@ -6,4 +6,5 @@ class RouteConstants {
   static const String dashboard = '/dashboard';
   static const String addTransaction = '/add-transaction';
   static const String history = '/history';
+  static const String chat = '/chat';
 }

@@ -12,6 +12,7 @@ import 'package:synccash/features/cashbook/presentation/screens/splash_screen.da
 import 'package:synccash/features/dashboard/presentation/screens/dashboard_screen.dart';
 import 'package:synccash/features/transactions/presentation/screens/add_transaction_screen.dart';
 import 'package:synccash/features/transactions/presentation/screens/transaction_history_screen.dart';
+import 'package:synccash/features/chatbot/presentation/screens/chat_screen.dart';
 
 // ── Page transition helper ────────────────────────────────────────────────────
 
@@ -157,6 +158,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) =>
             _fadePage(state: state, child: const DashboardScreen()),
       ),
+      GoRoute(
+  path: RouteConstants.chat,
+  builder: (context, state) => const ChatScreen(),
+),
       GoRoute(
         path: RouteConstants.addTransaction,
         pageBuilder: (context, state) =>

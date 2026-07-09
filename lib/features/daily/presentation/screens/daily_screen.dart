@@ -10,6 +10,7 @@ import 'package:synccash/features/cashbook/presentation/providers/cashbook_provi
 import 'package:synccash/features/daily/domain/entities/daily_entry_entity.dart';
 import 'package:synccash/features/daily/presentation/providers/daily_provider.dart';
 import 'package:synccash/features/daily/presentation/screens/daily_add_screen.dart';
+import 'package:synccash/features/daily/cards/presentation/screens/daily_cards_screen.dart';
 import 'package:synccash/features/daily/presentation/screens/daily_history_screen.dart';
 import 'package:synccash/features/daily/presentation/widgets/daily_filter_sheet.dart';
 import 'package:synccash/features/daily/presentation/widgets/daily_list_item.dart'
@@ -65,6 +66,14 @@ class DailyScreen extends ConsumerWidget {
                     // ── Header ────────────────────────────────────────
                     SliverToBoxAdapter(
                       child: _DailyHeader(),
+                    ),
+
+                    // ── Cards entry button ─────────────────────────────
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                      sliver: SliverToBoxAdapter(
+                        child: _CardsButton(),
+                      ),
                     ),
 
                     // ── Balance card ──────────────────────────────────
@@ -211,6 +220,77 @@ class _DailyHeader extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Cards entry button
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CardsButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const DailyCardsScreen()),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF6D5DFB), Color(0xFF2E1F8F)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF6D5DFB).withValues(alpha: 0.35),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.credit_card_rounded,
+                  color: Colors.white, size: 20),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Cards',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.2)),
+                  SizedBox(height: 2),
+                  Text('Track income & expenses per card',
+                      style: TextStyle(
+                          color: Color(0xCCFFFFFF), fontSize: 12)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                color: Colors.white, size: 20),
+          ],
+        ),
       ),
     );
   }

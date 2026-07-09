@@ -176,6 +176,32 @@ service cloud.firestore {
                       && isIosUser(database);
       }
 
+      // ── Daily Cards ────────────────────────────────────────────────────────
+      // Sub-feature of Daily, fully isolated from /daily_entries and
+      // /transactions. iOS/PWA/web-only, same restriction as Daily itself.
+      match /daily_cards/{cardId} {
+        allow read:   if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+        allow create: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+        allow update: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+        allow delete: if isCashbookMember(database, cashbookId)
+                      && isIosUser(database);
+
+        // Each card's own transactions — scoped to this card only.
+        match /transactions/{txId} {
+          allow read:   if isCashbookMember(database, cashbookId)
+                        && isIosUser(database);
+          allow create: if isCashbookMember(database, cashbookId)
+                        && isIosUser(database);
+          allow update: if isCashbookMember(database, cashbookId)
+                        && isIosUser(database);
+          allow delete: if isCashbookMember(database, cashbookId)
+                        && isIosUser(database);
+        }
+      }
+
       // ── Parties (Opening Balances) ────────────────────────────────────────
       match /parties/{partyId} {
         allow read:   if isCashbookMember(database, cashbookId);
