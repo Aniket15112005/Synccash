@@ -49,6 +49,8 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
         ..style.border = 'none'
         ..style.width = '100%'
         ..style.height = '100%'
+        ..style.setProperty('touch-action', 'auto')
+        ..style.setProperty('-webkit-overflow-scrolling', 'touch')
         ..allow = 'fullscreen';
     });
   }

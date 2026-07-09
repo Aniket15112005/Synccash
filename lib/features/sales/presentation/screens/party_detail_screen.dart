@@ -17,6 +17,10 @@ import 'bill_detail_screen.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:http/http.dart' as http;
+import 'web_invoice_viewer_stub.dart'
+    if (dart.library.html) 'web_invoice_viewer_web.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Design tokens — minimalist grey aesthetic (matches sales_screen)
@@ -329,6 +333,11 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
   ProviderSubscription<String?>?        _idSub;
   String?                               _cashbookId;
 
+  StreamSubscription<QuerySnapshot>?    _attachmentSub;
+  Map<String, String>                   _attachmentUrlPerBill  = {};
+  Map<String, String>                   _attachmentTypePerBill = {};
+  String?                               _processingBillId;
+
   List<SaleBillEntity>       _bills    = [];
   Map<String, double>        _received = {};
   List<_PaymentRecord>       _payments = [];
@@ -370,6 +379,7 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
     _billsSub?.cancel();
     _txSub?.cancel();
     _partySub?.cancel();
+    _attachmentSub?.cancel();
   }
 
   void _start(String cashbookId) {
@@ -441,6 +451,101 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
         _recomputeReceived();
       });
     }, onError: (_) {});
+
+    if (kIsWeb) {
+      _startAttachmentStream(cashbookId);
+    }
+  }
+
+  void _startAttachmentStream(String cashbookId) {
+    _attachmentSub?.cancel();
+    _attachmentSub = FirebaseFirestore.instance
+        .collection('cashbooks')
+        .doc(cashbookId)
+        .collection('sale_bills')
+        .where('partyName', isEqualTo: widget.partyName.trim())
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      final urls  = <String, String>{};
+      final types = <String, String>{};
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final id   = data['saleBillId'] as String? ?? doc.id;
+        final url  = data['billAttachmentUrl']  as String?;
+        final type = data['billAttachmentType'] as String?;
+        if (url != null && url.isNotEmpty) {
+          urls[id]  = url;
+          types[id] = type ?? 'image';
+        }
+      }
+      setState(() {
+        _attachmentUrlPerBill  = urls;
+        _attachmentTypePerBill = types;
+      });
+    }, onError: (_) {});
+  }
+
+  Future<void> _viewAttachment(SaleBillEntity bill) async {
+    final url  = _attachmentUrlPerBill[bill.saleBillId];
+    final type = _attachmentTypePerBill[bill.saleBillId] ?? 'image';
+    if (url == null) return;
+    HapticFeedback.selectionClick();
+
+    if (kIsWeb) {
+      if (type == 'pdf') {
+        openPdfInApp(context, url, bill.billNumber, bill.partyName);
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => _InvoiceImageViewer(
+              imageUrl:   url,
+              billNumber: bill.billNumber,
+              partyName:  bill.partyName,
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Native iOS: PDF → share sheet, image → full-screen viewer
+    if (type == 'pdf') {
+      setState(() => _processingBillId = bill.saleBillId);
+      try {
+        final response = await http.get(Uri.parse(url));
+        await Share.shareXFiles([
+          XFile.fromData(response.bodyBytes,
+              name:     'bill_${bill.billNumber}.pdf',
+              mimeType: 'application/pdf'),
+        ]);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not open PDF: $e',
+                style: const TextStyle(color: Colors.white, fontSize: 13)),
+            backgroundColor: _T.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          ));
+        }
+      } finally {
+        if (mounted) setState(() => _processingBillId = null);
+      }
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _InvoiceImageViewer(
+            imageUrl:   url,
+            billNumber: bill.billNumber,
+            partyName:  bill.partyName,
+          ),
+        ),
+      );
+    }
   }
 
   // Recompute received amounts and payment records from stored raw snapshots.
@@ -1842,6 +1947,11 @@ class _PartyDetailState extends ConsumerState<PartyDetailScreen> {
                         },
                         onEdit:   () => _editBill(bill),
                         onDelete: () => _deleteBill(bill),
+                        onViewInvoice: kIsWeb &&
+                                _attachmentUrlPerBill.containsKey(bill.saleBillId)
+                            ? () => _viewAttachment(bill)
+                            : null,
+                        attachmentType: _attachmentTypePerBill[bill.saleBillId],
                       ),
                     );
                   },
@@ -2074,6 +2184,8 @@ class _BillRow extends StatelessWidget {
   final VoidCallback   onTap;
   final VoidCallback?  onEdit;
   final VoidCallback?  onDelete;
+  final VoidCallback?  onViewInvoice;
+  final String?        attachmentType;
 
   const _BillRow({
     required this.bill,
@@ -2084,6 +2196,8 @@ class _BillRow extends StatelessWidget {
     required this.onTap,
     this.onEdit,
     this.onDelete,
+    this.onViewInvoice,
+    this.attachmentType,
   });
 
   @override
@@ -2096,7 +2210,10 @@ class _BillRow extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: GestureDetector(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+        GestureDetector(
         onTap: onTap,
         child: Container(
           decoration: BoxDecoration(
@@ -2216,6 +2333,42 @@ class _BillRow extends StatelessWidget {
           ),
         ),
       ),
+      // ── View Invoice button (web, attachment exists) ────────────────────
+      if (onViewInvoice != null) ...[
+        const SizedBox(height: 6),
+        GestureDetector(
+          onTap: onViewInvoice,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 9),
+            decoration: BoxDecoration(
+              color: _T.accent2.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _T.accent2.withValues(alpha: 0.25)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  attachmentType == 'pdf'
+                      ? Icons.picture_as_pdf_rounded
+                      : Icons.visibility_rounded,
+                  color: _T.accent2,
+                  size: 14,
+                ),
+                const SizedBox(width: 6),
+                const Text('View Invoice',
+                    style: TextStyle(
+                        color: _T.accent2,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.3)),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ],
+  ),
     );
   }
 }
@@ -4078,6 +4231,56 @@ Future<bool?> _confirmDialog(
         ],
       ),
     );
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Invoice image viewer (pinch-zoom) — shown when attachment type is image
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _InvoiceImageViewer extends StatelessWidget {
+  final String imageUrl;
+  final String billNumber;
+  final String partyName;
+  const _InvoiceImageViewer({
+    required this.imageUrl,
+    required this.billNumber,
+    required this.partyName,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Bill #$billNumber',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            Text(partyName,
+                style: const TextStyle(fontSize: 11, color: Colors.white70)),
+          ],
+        ),
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 5.0,
+          boundaryMargin: EdgeInsets.all(double.infinity),
+          child: CachedNetworkImage(
+            imageUrl: imageUrl,
+            fit: BoxFit.contain,
+            placeholder: (_, __) => const CircularProgressIndicator(
+                color: Colors.white, strokeWidth: 2),
+            errorWidget: (_, __, ___) => const Icon(Icons.broken_image,
+                color: Colors.white54, size: 64),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 void _snack(BuildContext context, String msg, {required bool ok}) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(

@@ -1352,6 +1352,7 @@ class _BillImageViewerState extends State<_BillImageViewer>
             onTap: _toggleControls,
             child: InteractiveViewer(
               transformationController: _transformCtrl,
+              boundaryMargin: EdgeInsets.all(double.infinity),
               minScale: 0.5,
               maxScale: 8.0,
               panEnabled: true,

@@ -136,7 +136,7 @@ class _PurchaseClientBillDetailScreenState
               _cashbookId = next;
               _txSub?.cancel();
               _startStream(next);
-              if (defaultTargetPlatform == TargetPlatform.iOS) {
+              if (kIsWeb) {
                 _startBillDocStream(next);
               }
             }
@@ -692,8 +692,8 @@ class _PurchaseClientBillDetailScreenState
                     .fadeIn(delay: 60.ms, duration: 300.ms)
                     .slideY(begin: 0.05, end: 0, curve: Curves.easeOutCubic),
 
-                // ── Bill Attachment (iOS only) ─────────────────────────────
-                if (defaultTargetPlatform == TargetPlatform.iOS) ...[
+                // ── Bill Attachment (web + iOS PWA) ───────────────────────
+                if (kIsWeb) ...[
                   const SizedBox(height: 12),
                   _BillAttachmentCard(
                     attachmentUrl:  _attachmentUrl,
@@ -2617,6 +2617,7 @@ class _BillImageViewerState extends State<_BillImageViewer>
             onTap: _toggleControls,
             child: InteractiveViewer(
               transformationController: _transformCtrl,
+              boundaryMargin: EdgeInsets.all(double.infinity),
               minScale: 0.5,
               maxScale: 8.0,
               panEnabled: true,
