@@ -480,7 +480,7 @@ class _Chip extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight:
-                  isSelected ? FontWeight.w700 : FontWeight.w500,
+                  isSelected ? FontWeight.w700 : FontWeight.w600,
               color: isSelected ? Colors.white : _kTextSub,
             )),
       ),

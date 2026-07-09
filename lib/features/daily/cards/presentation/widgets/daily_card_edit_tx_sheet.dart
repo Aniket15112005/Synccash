@@ -178,13 +178,13 @@ class _DailyCardEditTxSheetState extends ConsumerState<_DailyCardEditTxSheet> {
                 style: TextStyle(
                     color: accentColor,
                     fontSize: 26,
-                    fontWeight: FontWeight.w800),
+                    fontWeight: FontWeight.w900),
                 decoration: InputDecoration(
                   prefixText: '₹ ',
                   prefixStyle: TextStyle(
-                      color: accentColor.withValues(alpha: 0.45),
+                      color: accentColor.withValues(alpha: 0.55),
                       fontSize: 26,
-                      fontWeight: FontWeight.w800),
+                      fontWeight: FontWeight.w900),
                   hintText: '0',
                   border: InputBorder.none,
                 ),

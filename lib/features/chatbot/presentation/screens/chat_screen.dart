@@ -17,20 +17,29 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
+  int _lastMessageCount = 0;
+  bool _lastBusy = false;
 
   void _send() {
     final text = _controller.text;
     if (text.trim().isEmpty) return;
     _controller.clear();
     ref.read(chatControllerProvider.notifier).send(text);
-    Future.delayed(const Duration(milliseconds: 150), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
+    _scrollToBottomSoon();
+  }
+
+  /// Waits for the frame in which the new bubble/spinner actually lays out
+  /// before animating, instead of a fixed guessed delay -- keeps the scroll
+  /// glued to the latest message with no jump or lag regardless of device
+  /// speed.
+  void _scrollToBottomSoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
     });
   }
 
@@ -45,6 +54,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget build(BuildContext context) {
     final messages = ref.watch(chatControllerProvider);
     final busy = ref.watch(chatBusyProvider);
+
+    // Auto-scroll whenever a new message arrives or the busy indicator
+    // appears/disappears (e.g. the bot's reply just replaced the spinner),
+    // so the user never has to scroll manually while chatting.
+    if (messages.length != _lastMessageCount || busy != _lastBusy) {
+      _lastMessageCount = messages.length;
+      _lastBusy = busy;
+      _scrollToBottomSoon();
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -75,7 +93,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       ),
                     );
                   }
-                  return ChatMessageBubble(message: messages[index]);
+                  return AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: ChatMessageBubble(
+                      key: ValueKey(index),
+                      message: messages[index],
+                    ),
+                  );
                 },
               ),
             ),

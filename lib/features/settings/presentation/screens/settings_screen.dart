@@ -348,6 +348,16 @@ class _ExportSheetState extends ConsumerState<_ExportSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // Keep allTransactionsStreamProvider alive for the lifetime of this sheet.
+    // Without this watch, Riverpod auto-disposes the provider once the share
+    // sheet closes and other listeners drop off. On the second export attempt
+    // ref.read() then finds the provider in AsyncLoading (no cached data),
+    // returns [] and shows "No transactions to export".
+    final watchedCashbookId = ref.watch(currentCashbookIdProvider);
+    if (watchedCashbookId != null) {
+      ref.watch(allTransactionsStreamProvider(watchedCashbookId));
+    }
+
     return _SheetScaffold(
       title: 'Export',
       onBack: widget.onBack,

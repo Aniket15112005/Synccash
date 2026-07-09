@@ -22,7 +22,7 @@ class ChatMessage {
 /// field wasn't mentioned.
 class ChatIntent {
   /// One of: "payment_lookup", "pending_bills", "settled_bills",
-  /// "party_summary", "general".
+  /// "party_summary", "date_totals", "general".
   final String intent;
 
   /// Party/person name mentioned in the question, if any (e.g. "A", "Ramesh").
@@ -36,11 +36,23 @@ class ChatIntent {
   /// not relevant to the question.
   final String? direction;
 
+  /// Start/end of a date range mentioned in the question (inclusive), for
+  /// intent == "date_totals" (e.g. "on 8th July" -> dateFrom == dateTo).
+  final DateTime? dateFrom;
+  final DateTime? dateTo;
+
+  /// For intent == "date_totals": "income" | "expense" | "total" | null
+  /// (null/"total" means both income and expense).
+  final String? metric;
+
   const ChatIntent({
     required this.intent,
     this.partyName,
     this.amount,
     this.direction,
+    this.dateFrom,
+    this.dateTo,
+    this.metric,
   });
 
   factory ChatIntent.fromJson(Map<String, dynamic> json) {
@@ -53,6 +65,40 @@ class ChatIntent {
           : json['partyName'] as String?,
       amount: json['amount'] is num ? (json['amount'] as num).toDouble() : null,
       direction: json['direction'] as String?,
+      dateFrom: _parseDate(json['dateFrom']),
+      dateTo: _parseDate(json['dateTo']),
+      metric: (json['metric'] as String?)?.trim().isEmpty == true
+          ? null
+          : json['metric'] as String?,
+    );
+  }
+
+  static DateTime? _parseDate(dynamic v) {
+    if (v is! String || v.trim().isEmpty) return null;
+    try {
+      return DateTime.parse(v.trim());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  ChatIntent copyWith({
+    String? intent,
+    String? partyName,
+    double? amount,
+    String? direction,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? metric,
+  }) {
+    return ChatIntent(
+      intent: intent ?? this.intent,
+      partyName: partyName ?? this.partyName,
+      amount: amount ?? this.amount,
+      direction: direction ?? this.direction,
+      dateFrom: dateFrom ?? this.dateFrom,
+      dateTo: dateTo ?? this.dateTo,
+      metric: metric ?? this.metric,
     );
   }
 }
