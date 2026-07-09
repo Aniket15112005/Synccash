@@ -1,10 +1,4 @@
 // lib/features/daily/presentation/screens/daily_add_screen.dart
-//
-// Deliberately named DailyAddScreen (not AddTransactionScreen) so it never
-// gets confused with, or accidentally wired into, the main app's add-
-// transaction flow. Mirrors AddTransactionScreen's basic fields (type,
-// amount, description, date) but drops everything category-driven:
-// no category selector, no bill linking, no party picker, no voice input.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,9 +9,13 @@ import 'package:synccash/features/daily/domain/entities/daily_entry_entity.dart'
 import 'package:synccash/features/daily/presentation/providers/daily_provider.dart';
 
 const _kDailyAccent = Color(0xFF8B5CF6);
-const _kDailyBg = Color(0xFF111113);
-const _kIncome = Color(0xFF5CB87A);
-const _kExpense = Color(0xFFD96C6C);
+const _kDailyBg     = Color(0xFFE8E7E4); // warm greige
+const _kIncome      = Color(0xFF16A34A);
+const _kExpense     = Color(0xFFDC2626);
+const _kText        = Color(0xFF1C1C1A); // warm charcoal
+const _kTextSub     = Color(0xFF8A8882); // warm muted gray
+const _kCard        = Color(0xFFF5F4F1); // frosted off-white
+const _kCardBorder  = Color(0xFFF0EFED); // very subtle warm border
 
 class DailyAddScreen extends ConsumerStatefulWidget {
   const DailyAddScreen({super.key});
@@ -28,10 +26,10 @@ class DailyAddScreen extends ConsumerStatefulWidget {
 
 class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
   final _amountCtrl = TextEditingController();
-  final _descCtrl = TextEditingController();
-  String _type = 'expense';
+  final _descCtrl   = TextEditingController();
+  String   _type         = 'expense';
   DateTime _selectedDate = DateTime.now();
-  bool _saving = false;
+  bool     _saving       = false;
 
   @override
   void dispose() {
@@ -49,7 +47,7 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
 
   Future<void> _pickDate() async {
     HapticFeedback.selectionClick();
-    final now = DateTime.now();
+    final now    = DateTime.now();
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
@@ -57,14 +55,14 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
       lastDate: now,
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
-          colorScheme: const ColorScheme.dark(
+          colorScheme: const ColorScheme.light(
             primary: _kDailyAccent,
             onPrimary: Colors.white,
-            surface: Color(0xFF161922),
-            onSurface: Color(0xFFD1D9E6),
+            surface: Color(0xFFF5F4F1),
+            onSurface: _kText,
           ),
           dialogTheme: const DialogThemeData(
-            backgroundColor: Color(0xFF111316),
+            backgroundColor: Color(0xFFF5F4F1),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.all(Radius.circular(20))),
           ),
@@ -74,14 +72,8 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
     );
     if (picked != null && mounted) {
       setState(() {
-        _selectedDate = DateTime(
-          picked.year,
-          picked.month,
-          picked.day,
-          _selectedDate.hour,
-          _selectedDate.minute,
-          _selectedDate.second,
-        );
+        _selectedDate = DateTime(picked.year, picked.month, picked.day,
+            _selectedDate.hour, _selectedDate.minute, _selectedDate.second);
       });
     }
   }
@@ -95,7 +87,7 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
       return;
     }
 
-    final user = ref.read(authProvider).value;
+    final user       = ref.read(authProvider).value;
     final cashbookId = user?.currentCashbookId;
     if (user == null || cashbookId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -107,13 +99,13 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
     setState(() => _saving = true);
     try {
       final entry = DailyEntryEntity(
-        entryId: '',
-        cashbookId: cashbookId,
-        createdBy: user.uid,
+        entryId:     '',
+        cashbookId:  cashbookId,
+        createdBy:   user.uid,
         creatorName: user.displayName.isEmpty ? 'Partner' : user.displayName,
-        createdAt: _selectedDate,
-        amount: amount,
-        type: _type,
+        createdAt:   _selectedDate,
+        amount:      amount,
+        type:        _type,
         description: _descCtrl.text.trim(),
       );
       await ref.read(dailyRepositoryProvider).addEntry(entry);
@@ -124,7 +116,7 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error saving: $e'),
-            backgroundColor: const Color(0xFF991b1b),
+            backgroundColor: _kExpense,
           ),
         );
       }
@@ -135,16 +127,22 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
   Widget build(BuildContext context) {
     final dateLabel =
         _isToday ? 'Today' : DateFormat('dd MMM yyyy').format(_selectedDate);
-    final isIncome = _type == 'income';
-    final accent = isIncome ? _kIncome : _kExpense;
+    final isIncome    = _type == 'income';
+    final accentColor = isIncome ? _kIncome : _kExpense;
 
     return Scaffold(
       backgroundColor: _kDailyBg,
       appBar: AppBar(
         backgroundColor: _kDailyBg,
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        iconTheme: const IconThemeData(color: _kText),
         title: const Text('Add Daily Entry',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+            style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 17,
+                color: _kText,
+                letterSpacing: -0.3)),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -156,8 +154,16 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
               Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(14),
+                  color: _kCard,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _kCardBorder, width: 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF000000).withValues(alpha: 0.07),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
                 child: Row(children: [
                   Expanded(
@@ -178,81 +184,134 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
                   ),
                 ]),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 28),
 
               // ── Amount ──────────────────────────────────────────────
               const _FieldLabel('AMOUNT'),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _amountCtrl,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: TextStyle(
-                  color: accent,
-                  fontSize: 32,
-                  fontWeight: FontWeight.w800,
-                  fontFamily: 'monospace',
+              const SizedBox(height: 10),
+              Container(
+                decoration: BoxDecoration(
+                  color: _kCard,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _kCardBorder, width: 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF000000).withValues(alpha: 0.06),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                decoration: InputDecoration(
-                  prefixText: '₹ ',
-                  prefixStyle: TextStyle(
-                    color: accent.withValues(alpha: 0.6),
-                    fontSize: 32,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: TextField(
+                  controller: _amountCtrl,
+                  autofocus: true,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  style: TextStyle(
+                    color: accentColor,
+                    fontSize: 36,
                     fontWeight: FontWeight.w800,
+                    letterSpacing: -1,
                   ),
-                  hintText: '0',
-                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)),
-                  border: InputBorder.none,
+                  decoration: InputDecoration(
+                    prefixText: '₹ ',
+                    prefixStyle: TextStyle(
+                      color: accentColor.withValues(alpha: 0.45),
+                      fontSize: 36,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    hintText: '0',
+                    hintStyle: TextStyle(
+                        color: _kTextSub.withValues(alpha: 0.40),
+                        fontSize: 36,
+                        fontWeight: FontWeight.w800),
+                    border: InputBorder.none,
+                  ),
                 ),
               ),
-              Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
               // ── Description ─────────────────────────────────────────
               const _FieldLabel('DESCRIPTION (OPTIONAL)'),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _descCtrl,
-                maxLines: 3,
-                minLines: 1,
-                style: const TextStyle(color: Colors.white, fontSize: 15),
-                decoration: InputDecoration(
-                  hintText: "What's this for?",
-                  hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.25)),
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.05),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
+              const SizedBox(height: 10),
+              Container(
+                decoration: BoxDecoration(
+                  color: _kCard,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _kCardBorder, width: 1),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF000000).withValues(alpha: 0.05),
+                      blurRadius: 12,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: TextField(
+                  controller: _descCtrl,
+                  maxLines: 3,
+                  minLines: 1,
+                  style: const TextStyle(color: _kText, fontSize: 15),
+                  decoration: InputDecoration(
+                    hintText: "What's this for?",
+                    hintStyle:
+                        TextStyle(color: _kTextSub.withValues(alpha: 0.6)),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: BorderSide(
+                          color: _kDailyAccent.withValues(alpha: 0.35),
+                          width: 1.5),
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
               // ── Date ────────────────────────────────────────────────
               const _FieldLabel('DATE'),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               GestureDetector(
                 onTap: _pickDate,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 16),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(14),
+                    color: _kCard,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: _kCardBorder, width: 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF000000).withValues(alpha: 0.05),
+                        blurRadius: 12,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
                   child: Row(children: [
                     Icon(Icons.calendar_today_rounded,
-                        size: 16, color: Colors.white.withValues(alpha: 0.5)),
-                    const SizedBox(width: 10),
+                        size: 16,
+                        color: _kDailyAccent.withValues(alpha: 0.65)),
+                    const SizedBox(width: 12),
                     Text(dateLabel,
-                        style: const TextStyle(color: Colors.white, fontSize: 15)),
+                        style: const TextStyle(
+                            color: _kText,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500)),
+                    const Spacer(),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 18,
+                        color: _kTextSub.withValues(alpha: 0.50)),
                   ]),
                 ),
               ),
-              const SizedBox(height: 36),
+              const SizedBox(height: 40),
 
               // ── Save button ─────────────────────────────────────────
               SizedBox(
@@ -262,9 +321,9 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
                   style: FilledButton.styleFrom(
                     backgroundColor: _kDailyAccent,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 17),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                        borderRadius: BorderRadius.circular(18)),
                     elevation: 0,
                   ),
                   child: _saving
@@ -275,8 +334,8 @@ class _DailyAddScreenState extends ConsumerState<DailyAddScreen> {
                               strokeWidth: 2, color: Colors.white),
                         )
                       : const Text('Save Entry',
-                          style:
-                              TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w700)),
                 ),
               ),
             ],
@@ -308,20 +367,22 @@ class _TypeSegment extends StatelessWidget {
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 13),
         decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.16) : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
+          color: selected ? color.withValues(alpha: 0.10) : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: selected ? color.withValues(alpha: 0.4) : Colors.transparent,
-            width: 1,
+            color: selected
+                ? color.withValues(alpha: 0.30)
+                : Colors.transparent,
+            width: 1.5,
           ),
         ),
         child: Center(
           child: Text(
             label,
             style: TextStyle(
-              color: selected ? color : Colors.white38,
+              color: selected ? color : _kTextSub,
               fontWeight: FontWeight.w700,
               fontSize: 14,
             ),
@@ -340,11 +401,11 @@ class _FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: TextStyle(
-        color: Colors.white.withValues(alpha: 0.4),
+      style: const TextStyle(
+        color: _kTextSub,
         fontWeight: FontWeight.w700,
         fontSize: 10.5,
-        letterSpacing: 0.8,
+        letterSpacing: 0.9,
       ),
     );
   }

@@ -1,9 +1,4 @@
 // lib/features/daily/presentation/widgets/daily_filter_sheet.dart
-//
-// Same visual style/interaction pattern as SyncCashFilterPanel, but bound
-// entirely to the isolated Daily filter providers (daily_provider.dart) —
-// no category chips (Daily entries have no category), and a type
-// (All/Income/Expense) chip row instead.
 
 import 'dart:async';
 
@@ -11,6 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:synccash/features/daily/presentation/providers/daily_provider.dart';
+
+const _kAccent      = Color(0xFF8B5CF6);
+const _kText        = Color(0xFF1C1C1A); // warm charcoal
+const _kTextSub     = Color(0xFF8A8882); // warm muted gray
+const _kCard        = Color(0xFFF5F4F1); // frosted off-white
+const _kCardBorder  = Color(0xFFF0EFED);
+const _kSheetBg     = Color(0xFFF2F1EE); // sheet slightly warmer than bg
 
 class DailyFilterPanel extends ConsumerWidget {
   const DailyFilterPanel({super.key});
@@ -22,7 +24,8 @@ class DailyFilterPanel extends ConsumerWidget {
     final descFilter = ref.watch(dailyDescriptionFilterProvider);
     final typeFilter = ref.watch(dailyTypeFilterProvider);
 
-    final activeCount = (dateFilter != null ? 1 : 0) +
+    final activeCount =
+        (dateFilter != null ? 1 : 0) +
         (nameFilter != null && nameFilter.isNotEmpty ? 1 : 0) +
         (descFilter != null && descFilter.isNotEmpty ? 1 : 0) +
         (typeFilter != null ? 1 : 0);
@@ -43,14 +46,14 @@ class DailyFilterPanel extends ConsumerWidget {
 }
 
 class _FilterIconButton extends StatelessWidget {
-  final int activeCount;
+  final int          activeCount;
   final VoidCallback onTap;
-  const _FilterIconButton({required this.activeCount, required this.onTap});
+  const _FilterIconButton(
+      {required this.activeCount, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final hasActive = activeCount > 0;
-    const accent = Color(0xFF8B5CF6);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -58,20 +61,28 @@ class _FilterIconButton extends StatelessWidget {
         curve: Curves.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: hasActive ? accent : Colors.white.withValues(alpha: 0.06),
+          color: hasActive ? _kAccent : _kCard,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: hasActive
-                ? Colors.transparent
-                : Colors.white.withValues(alpha: 0.10),
-            width: 0.5,
+            color: hasActive ? Colors.transparent : _kCardBorder,
+            width: 1,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: hasActive
+                  ? _kAccent.withValues(alpha: 0.22)
+                  : const Color(0xFF000000).withValues(alpha: 0.06),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.tune_rounded,
-                size: 18, color: hasActive ? Colors.white : Colors.white70),
+                size: 18,
+                color: hasActive ? Colors.white : _kTextSub),
             if (hasActive) ...[
               const SizedBox(width: 6),
               Container(
@@ -85,10 +96,9 @@ class _FilterIconButton extends StatelessWidget {
                   child: Text(
                     '$activeCount',
                     style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: accent,
-                    ),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: _kAccent),
                   ),
                 ),
               ),
@@ -104,7 +114,8 @@ class _DailyFilterSheet extends ConsumerStatefulWidget {
   const _DailyFilterSheet();
 
   @override
-  ConsumerState<_DailyFilterSheet> createState() => _DailyFilterSheetState();
+  ConsumerState<_DailyFilterSheet> createState() =>
+      _DailyFilterSheetState();
 }
 
 class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
@@ -113,8 +124,6 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
   Timer? _debounce;
   String _selectedDateLabel = '';
 
-  static const _accent = Color(0xFF8B5CF6);
-
   @override
   void initState() {
     super.initState();
@@ -122,7 +131,8 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
     final desc = ref.read(dailyDescriptionFilterProvider);
     if (name != null) _nameCtrl.text = name;
     if (desc != null) _descCtrl.text = desc;
-    _selectedDateLabel = _labelFromFilter(ref.read(dailyDateFilterProvider));
+    _selectedDateLabel =
+        _labelFromFilter(ref.read(dailyDateFilterProvider));
   }
 
   @override
@@ -135,11 +145,11 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
 
   String _labelFromFilter(DailyDateFilter? f) {
     if (f == null) return '';
-    final s = f.startDate;
-    final e = f.endDate;
+    final s   = f.startDate;
+    final e   = f.endDate;
     if (s == null || e == null) return '';
     final now = DateTime.now();
-    final ws = now.subtract(Duration(days: now.weekday - 1));
+    final ws  = now.subtract(Duration(days: now.weekday - 1));
     if (s == DateTime(now.year, now.month, now.day)) return 'Today';
     if (s == DateTime(ws.year, ws.month, ws.day)) return 'This Week';
     if (s == DateTime(now.year, now.month, 1)) return 'This Month';
@@ -161,27 +171,17 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
       ref.read(dailyDateFilterProvider.notifier).setFilter(null);
       return;
     }
-    if (label == 'Single Date') {
-      _pickSingleDate();
-      return;
-    }
-    if (label == 'Custom') {
-      _pickDateRange();
-      return;
-    }
+    if (label == 'Single Date') { _pickSingleDate(); return; }
+    if (label == 'Custom')      { _pickDateRange();  return; }
 
     setState(() => _selectedDateLabel = label);
     final now = DateTime.now();
-    final ws = now.subtract(Duration(days: now.weekday - 1));
+    final ws  = now.subtract(Duration(days: now.weekday - 1));
     final filterMap = {
-      'Today': DailyDateFilter(
-          startDate: DateTime(now.year, now.month, now.day), endDate: now),
-      'This Week': DailyDateFilter(
-          startDate: DateTime(ws.year, ws.month, ws.day), endDate: now),
-      'This Month': DailyDateFilter(
-          startDate: DateTime(now.year, now.month, 1), endDate: now),
-      'This Year':
-          DailyDateFilter(startDate: DateTime(now.year, 1, 1), endDate: now),
+      'Today':      DailyDateFilter(startDate: DateTime(now.year, now.month, now.day), endDate: now),
+      'This Week':  DailyDateFilter(startDate: DateTime(ws.year, ws.month, ws.day), endDate: now),
+      'This Month': DailyDateFilter(startDate: DateTime(now.year, now.month, 1), endDate: now),
+      'This Year':  DailyDateFilter(startDate: DateTime(now.year, 1, 1), endDate: now),
     };
     final f = filterMap[label];
     if (f != null) ref.read(dailyDateFilterProvider.notifier).setFilter(f);
@@ -192,7 +192,8 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
       context: context,
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 365)),
-      initialDate: ref.read(dailyDateFilterProvider)?.startDate ?? DateTime.now(),
+      initialDate:
+          ref.read(dailyDateFilterProvider)?.startDate ?? DateTime.now(),
     );
     if (!mounted || picked == null) return;
     setState(() => _selectedDateLabel = 'Single Date');
@@ -204,21 +205,22 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
   }
 
   Future<void> _pickDateRange() async {
-    final cur = ref.read(dailyDateFilterProvider);
+    final cur    = ref.read(dailyDateFilterProvider);
     final picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 365)),
-      initialDateRange: (cur?.startDate != null && cur?.endDate != null)
-          ? DateTimeRange(start: cur!.startDate!, end: cur.endDate!)
-          : null,
+      initialDateRange:
+          (cur?.startDate != null && cur?.endDate != null)
+              ? DateTimeRange(start: cur!.startDate!, end: cur.endDate!)
+              : null,
     );
     if (!mounted || picked == null) return;
     setState(() => _selectedDateLabel = 'Custom');
     ref.read(dailyDateFilterProvider.notifier).setFilter(DailyDateFilter(
           startDate: picked.start,
-          endDate: DateTime(
-              picked.end.year, picked.end.month, picked.end.day, 23, 59, 59),
+          endDate: DateTime(picked.end.year, picked.end.month,
+              picked.end.day, 23, 59, 59),
         ));
   }
 
@@ -253,29 +255,39 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
   @override
   Widget build(BuildContext context) {
     final typeFilter = ref.watch(dailyTypeFilterProvider);
-    final mq = MediaQuery.of(context);
+    final mq         = MediaQuery.of(context);
 
     return Padding(
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
       child: Container(
-        decoration: const BoxDecoration(
-          color: Color(0xFF161418),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        decoration: BoxDecoration(
+          color: _kSheetBg,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(28)),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF000000).withValues(alpha: 0.10),
+              blurRadius: 40,
+              offset: const Offset(0, -4),
+            ),
+          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // handle
             Padding(
-              padding: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.only(top: 14),
               child: Container(
                 width: 36,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: const Color(0xFF000000).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(4),
                 ),
               ),
             ),
+            // header
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               child: Row(
@@ -283,40 +295,41 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
                 children: [
                   const Text('Filter Daily Entries',
                       style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                          letterSpacing: -0.3,
-                          color: Colors.white)),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 17,
+                          letterSpacing: -0.4,
+                          color: _kText)),
                   TextButton(
                     onPressed: _clearAll,
                     style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFFD96C6C),
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      foregroundColor: const Color(0xFFDC2626),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                    child: const Text('Clear all', style: TextStyle(fontSize: 13)),
+                    child: const Text('Clear all',
+                        style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600)),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 20),
+
             const _Label('DATE RANGE'),
             const SizedBox(height: 10),
             _HChipRow(
               chips: const [
-                'Today',
-                'This Week',
-                'This Month',
-                'This Year',
-                'Single Date',
-                'Custom'
+                'Today', 'This Week', 'This Month',
+                'This Year', 'Single Date', 'Custom'
               ],
               selected: _selectedDateLabel,
-              onTap: (label) => _onDateChip(label, _selectedDateLabel != label),
+              onTap: (label) =>
+                  _onDateChip(label, _selectedDateLabel != label),
             ),
             const SizedBox(height: 20),
+
             const _Label('TYPE'),
             const SizedBox(height: 10),
             _HChipRow(
@@ -326,6 +339,7 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
               onTap: (t) => _onTypeChip(t, typeFilter != t),
             ),
             const SizedBox(height: 20),
+
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(
@@ -351,22 +365,24 @@ class _DailyFilterSheetState extends ConsumerState<_DailyFilterSheet> {
               ),
             ),
             const SizedBox(height: 24),
+
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 36),
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: _apply,
                   style: FilledButton.styleFrom(
-                    backgroundColor: _accent,
+                    backgroundColor: _kAccent,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape:
-                        RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(vertical: 17),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18)),
                     elevation: 0,
                   ),
                   child: const Text('Apply Filters',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
               ),
             ),
@@ -387,20 +403,19 @@ class _Label extends StatelessWidget {
         child: Align(
           alignment: Alignment.centerLeft,
           child: Text(text,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.4),
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.8,
-                fontSize: 10,
-              )),
+              style: const TextStyle(
+                  color: _kTextSub,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.9,
+                  fontSize: 10)),
         ),
       );
 }
 
 class _HChipRow extends StatelessWidget {
-  final List<String> chips;
+  final List<String>  chips;
   final List<String>? displayLabels;
-  final String selected;
+  final String        selected;
   final ValueChanged<String> onTap;
   const _HChipRow({
     required this.chips,
@@ -411,7 +426,7 @@ class _HChipRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-        height: 36,
+        height: 38,
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -430,35 +445,43 @@ class _HChipRow extends StatelessWidget {
 
 class _Chip extends StatelessWidget {
   final String label;
-  final bool isSelected;
+  final bool   isSelected;
   final VoidCallback onTap;
   const _Chip(
-      {required this.label, required this.isSelected, required this.onTap});
+      {required this.label,
+      required this.isSelected,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    const accent = Color(0xFF8B5CF6);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(
-          color: isSelected ? accent : Colors.white.withValues(alpha: 0.06),
+          color: isSelected ? _kAccent : _kCard,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected
-                ? Colors.transparent
-                : Colors.white.withValues(alpha: 0.10),
-            width: 0.5,
+            color: isSelected ? Colors.transparent : _kCardBorder,
+            width: 1,
           ),
+          boxShadow: [
+            if (!isSelected)
+              BoxShadow(
+                color: const Color(0xFF000000).withValues(alpha: 0.05),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+          ],
         ),
         child: Text(label,
             style: TextStyle(
               fontSize: 13,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-              color: isSelected ? Colors.white : Colors.white70,
+              fontWeight:
+                  isSelected ? FontWeight.w700 : FontWeight.w500,
+              color: isSelected ? Colors.white : _kTextSub,
             )),
       ),
     );
@@ -467,39 +490,43 @@ class _Chip extends StatelessWidget {
 
 class _Field extends StatelessWidget {
   final TextEditingController ctrl;
-  final String hint;
-  final IconData icon;
+  final String     hint;
+  final IconData   icon;
   final ValueChanged<String> onChanged;
-  const _Field(
-      {required this.ctrl,
-      required this.hint,
-      required this.icon,
-      required this.onChanged});
+  const _Field({
+    required this.ctrl,
+    required this.hint,
+    required this.icon,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: ctrl,
       onChanged: onChanged,
-      style: const TextStyle(color: Colors.white, fontSize: 14),
+      style: const TextStyle(color: _kText, fontSize: 14),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 14),
-        prefixIcon: Icon(icon, size: 18, color: Colors.white.withValues(alpha: 0.45)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        hintStyle: TextStyle(
+            color: _kTextSub.withValues(alpha: 0.7), fontSize: 14),
+        prefixIcon:
+            Icon(icon, size: 18, color: _kTextSub.withValues(alpha: 0.7)),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         filled: true,
-        fillColor: Colors.white.withValues(alpha: 0.05),
+        fillColor: _kCard,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08), width: 0.5),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _kCardBorder, width: 1),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08), width: 0.5),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _kCardBorder, width: 1),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF8B5CF6), width: 1.2),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _kAccent, width: 1.5),
         ),
       ),
     );
