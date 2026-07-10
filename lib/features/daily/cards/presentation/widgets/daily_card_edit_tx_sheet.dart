@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart';
 import 'package:synccash/features/daily/cards/domain/entities/daily_card_transaction_entity.dart';
 import 'package:synccash/features/daily/cards/presentation/providers/daily_card_provider.dart';
@@ -46,6 +47,7 @@ class _DailyCardEditTxSheetState extends ConsumerState<_DailyCardEditTxSheet> {
   late final TextEditingController _amountCtrl;
   late final TextEditingController _descCtrl;
   late String _type;
+  late DateTime _selectedDate;
   bool _saving = false;
 
   @override
@@ -55,6 +57,7 @@ class _DailyCardEditTxSheetState extends ConsumerState<_DailyCardEditTxSheet> {
         TextEditingController(text: _formatAmount(widget.tx.amount));
     _descCtrl = TextEditingController(text: widget.tx.description);
     _type = widget.tx.type.toLowerCase() == 'income' ? 'income' : 'expense';
+    _selectedDate = widget.tx.createdAt;
   }
 
   String _formatAmount(double v) =>
@@ -65,6 +68,43 @@ class _DailyCardEditTxSheetState extends ConsumerState<_DailyCardEditTxSheet> {
     _amountCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    HapticFeedback.selectionClick();
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2000),
+      lastDate: now,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: _kAccent,
+              onPrimary: Colors.white,
+              surface: Colors.white,
+              onSurface: _kText,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        // Preserve the original time, only change the date
+        _selectedDate = DateTime(
+          picked.year,
+          picked.month,
+          picked.day,
+          _selectedDate.hour,
+          _selectedDate.minute,
+          _selectedDate.second,
+        );
+      });
+    }
   }
 
   Future<void> _save() async {
@@ -83,6 +123,7 @@ class _DailyCardEditTxSheetState extends ConsumerState<_DailyCardEditTxSheet> {
         amount: amount,
         type: _type,
         description: _descCtrl.text.trim(),
+        createdAt: _selectedDate,
         lastEditedBy: user?.uid,
       );
       await ref.read(dailyCardRepositoryProvider).updateTransaction(updated);
@@ -104,6 +145,7 @@ class _DailyCardEditTxSheetState extends ConsumerState<_DailyCardEditTxSheet> {
   Widget build(BuildContext context) {
     final isIncome = _type == 'income';
     final accentColor = isIncome ? _kIncome : _kExpense;
+    final dateLabel = DateFormat('dd MMM yyyy').format(_selectedDate);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -212,6 +254,46 @@ class _DailyCardEditTxSheetState extends ConsumerState<_DailyCardEditTxSheet> {
                 ),
               ),
             ),
+            const SizedBox(height: 12),
+            // ── Date picker row ───────────────────────────────────────────
+            GestureDetector(
+              onTap: _pickDate,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _kCard,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _kCardBorder),
+                ),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 14),
+                child: Row(
+                  children: [
+                    const Icon(Icons.calendar_today_rounded,
+                        size: 18, color: _kAccent),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        dateLabel,
+                        style: const TextStyle(
+                          color: _kText,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      'Change',
+                      style: TextStyle(
+                        color: _kAccent.withValues(alpha: 0.8),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // ─────────────────────────────────────────────────────────────
             const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,

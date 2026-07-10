@@ -1355,7 +1355,7 @@ class _SheetScaffold extends StatelessWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: MainAxisSize.max,
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 12, bottom: 4),
@@ -1412,11 +1412,17 @@ class _SheetScaffold extends StatelessWidget {
 
           const SizedBox(height: 16),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: child,
+          Expanded(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                0,
+                16,
+                MediaQuery.of(context).padding.bottom + 16,
+              ),
+              child: child,
+            ),
           ),
-          SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
         ],
       ),
     );

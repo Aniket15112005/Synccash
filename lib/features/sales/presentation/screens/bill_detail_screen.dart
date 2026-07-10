@@ -19,9 +19,10 @@ import 'dart:ui' as ui;
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:http/http.dart' as http;
 import 'web_invoice_viewer_stub.dart'
     if (dart.library.html) 'web_invoice_viewer_web.dart';
+import 'native_pdf_viewer_stub.dart'
+    if (dart.library.io) 'native_pdf_viewer_native.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Theme
@@ -311,25 +312,14 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
       return;
     }
 
-    // ── Native Android / iOS ──────────────────────────────────────────────
+        // ── Native Android / iOS ─────────────────────────────────────────────
     if (_attachmentType == 'pdf') {
-      setState(() => _uploading = true);
-      try {
-        final response = await http.get(Uri.parse(_attachmentUrl!));
-        final bytes    = response.bodyBytes;
-        await Share.shareXFiles([
-          XFile.fromData(bytes,
-              name:     'sale_bill_${widget.bill.billNumber}.pdf',
-              mimeType: 'application/pdf'),
-        ]);
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(_snackBar('Could not open PDF: $e', success: false));
-        }
-      } finally {
-        if (mounted) setState(() => _uploading = false);
-      }
+      openNativePdfInApp(
+        context,
+        _attachmentUrl!,
+        widget.bill.billNumber,
+        widget.bill.partyName,
+      );
     } else {
       Navigator.push(
         context,

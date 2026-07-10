@@ -13,9 +13,9 @@ void openPdfInApp(BuildContext context, String url, String billNumber,
     context,
     MaterialPageRoute(
       builder: (_) => _WebInvoiceViewerPage(
-        url: url,
+        url:        url,
         billNumber: billNumber,
-        partyName: partyName,
+        partyName:  partyName,
       ),
     ),
   );
@@ -44,8 +44,13 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
     super.initState();
     _viewId = 'sale-invoice-pdf-${widget.billNumber}-${widget.url.hashCode}';
     ui_web.platformViewRegistry.registerViewFactory(_viewId, (int id) {
+      // Use Google Docs Viewer URL so iOS Safari can render the PDF inline.
+      // A raw PDF src is silently intercepted by Safari and opened outside the app.
+      final viewerSrc =
+          'https://docs.google.com/viewer?embedded=true&url='
+          '${Uri.encodeComponent(widget.url)}';
       return html.IFrameElement()
-        ..src = widget.url
+        ..src = viewerSrc
         ..style.border = 'none'
         ..style.width = '100%'
         ..style.height = '100%'
