@@ -111,7 +111,7 @@ firebase_options.dart.bak
 
 # Environment variables
 
-.env
+app.env
 .env.*
 .env.local
 .env.production
@@ -135,4 +135,4 @@ test_driver/screenshots/
 # Generated web build
 
 build/web/
-.env
+app.env
