@@ -134,7 +134,7 @@ class _InputBar extends StatelessWidget {
               onSubmitted: (_) => onSend(),
               textInputAction: TextInputAction.send,
               decoration: InputDecoration(
-                hintText: 'e.g. "when did I pay Ramesh 5000"',
+                hintText: '"',
                 filled: true,
                 fillColor: AppColors.background,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

@@ -1859,7 +1859,8 @@ enum _TypeFilter {
   income,
   expense,
   retail,
-  wholesale;
+  wholesale,
+  upi;
 
   String get label {
     switch (this) {
@@ -1868,6 +1869,7 @@ enum _TypeFilter {
       case _TypeFilter.expense:   return 'Expense';
       case _TypeFilter.retail:    return 'Retail';
       case _TypeFilter.wholesale: return 'Wholesale';
+      case _TypeFilter.upi:       return 'UPI';
     }
   }
 
@@ -1881,11 +1883,15 @@ enum _TypeFilter {
         return txs.where((tx) => tx.type.toLowerCase() != 'income').toList();
       case _TypeFilter.retail:
         return txs
-            .where((tx) => tx.category.toLowerCase().contains('retail'))
+            .where((tx) => tx.category.toLowerCase() == 'retail')
             .toList();
       case _TypeFilter.wholesale:
         return txs
-            .where((tx) => tx.category.toLowerCase().contains('wholesale'))
+            .where((tx) => tx.category.toLowerCase() == 'wholesale')
+            .toList();
+      case _TypeFilter.upi:
+        return txs
+            .where((tx) => tx.category.toLowerCase() == 'upi')
             .toList();
     }
   }

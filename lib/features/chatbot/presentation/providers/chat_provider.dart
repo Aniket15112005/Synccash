@@ -9,11 +9,9 @@ import 'package:synccash/features/auth/presentation/providers/auth_provider.dart
 import '../../data/chat_query_engine.dart';
 import '../../domain/chat_models.dart';
 
-final chatEngineProvider = Provider<ChatQueryEngine>((ref) {
+final chatEngineProvider = Provider<ChatQueryEngine?>((ref) {
   final apiKey = dotenv.env['GROQ_API_KEY'];
-  if (apiKey == null || apiKey.isEmpty) {
-    throw Exception('Missing GROQ_API_KEY');
-  }
+  if (apiKey == null || apiKey.isEmpty) return null;
   return ChatQueryEngine(groqApiKey: apiKey);
 });
 
@@ -60,6 +58,17 @@ class ChatController extends Notifier<List<ChatMessage>> {
 
     try {
       final engine = ref.read(chatEngineProvider);
+      if (engine == null) {
+        state = [
+          ...state,
+          ChatMessage(
+            role: ChatRole.bot,
+            text: "The AI assistant isn't configured yet. "
+                "Please add GROQ_API_KEY to the .env file and rebuild the app.",
+          ),
+        ];
+        return;
+      }
       final answer = await engine.answer(q, cashbookId: cashbookId);
       state = [...state, ChatMessage(role: ChatRole.bot, text: answer)];
     } catch (e) {
