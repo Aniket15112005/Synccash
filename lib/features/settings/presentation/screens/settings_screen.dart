@@ -27,6 +27,7 @@ import 'package:synccash/features/sales/presentation/sales_routes.dart';
 import 'package:synccash/features/sales/presentation/screens/sales_screen.dart';
 import 'package:synccash/features/sales/presentation/screens/billport_screen.dart';
 import 'package:synccash/features/daily/presentation/screens/daily_screen.dart';
+import 'package:synccash/features/bills/presentation/screens/bills_screen.dart';
 
 class SettingsSheet extends ConsumerStatefulWidget {
   const SettingsSheet({super.key});
@@ -204,6 +205,24 @@ class _MainSheet extends StatelessWidget {
           ).animate().fadeIn(delay: 210.ms, duration: 220.ms).slideX(
               begin: 0.04, end: 0, curve: Curves.easeOut),
           // ─── end Billport tile ──────────────────────────────────────
+          // ─── Bill tile ──────────────────────────────────────────────────
+          const SizedBox(height: 8),
+          _SettingsTile(
+            icon: Icons.receipt_outlined,
+            iconColor: const Color(0xFF10B981),
+            title: 'Bill',
+            subtitle: 'Create itemised bills & generate PDF invoices',
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                billsRoute(const BillsScreen()),
+              );
+            },
+            trailing: const _ChevronIcon(),
+          ).animate().fadeIn(delay: 220.ms, duration: 220.ms).slideX(
+              begin: 0.04, end: 0, curve: Curves.easeOut),
+          // ─── end Bill tile ───────────────────────────────────────────────
           // ─── Purchases tile — iOS / PWA / Web only, hidden on Android ──
           if (kIsWeb || Platform.isIOS) ...[
             const SizedBox(height: 8),
@@ -1859,8 +1878,7 @@ enum _TypeFilter {
   income,
   expense,
   retail,
-  wholesale,
-  upi;
+  wholesale;
 
   String get label {
     switch (this) {
@@ -1869,7 +1887,6 @@ enum _TypeFilter {
       case _TypeFilter.expense:   return 'Expense';
       case _TypeFilter.retail:    return 'Retail';
       case _TypeFilter.wholesale: return 'Wholesale';
-      case _TypeFilter.upi:       return 'UPI';
     }
   }
 
@@ -1883,15 +1900,11 @@ enum _TypeFilter {
         return txs.where((tx) => tx.type.toLowerCase() != 'income').toList();
       case _TypeFilter.retail:
         return txs
-            .where((tx) => tx.category.toLowerCase() == 'retail')
+            .where((tx) => tx.category.toLowerCase().contains('retail'))
             .toList();
       case _TypeFilter.wholesale:
         return txs
-            .where((tx) => tx.category.toLowerCase() == 'wholesale')
-            .toList();
-      case _TypeFilter.upi:
-        return txs
-            .where((tx) => tx.category.toLowerCase() == 'upi')
+            .where((tx) => tx.category.toLowerCase().contains('wholesale'))
             .toList();
     }
   }

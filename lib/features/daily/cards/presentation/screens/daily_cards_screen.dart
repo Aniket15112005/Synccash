@@ -30,19 +30,23 @@ class DailyCardsScreen extends ConsumerStatefulWidget {
 class _DailyCardsScreenState extends ConsumerState<DailyCardsScreen> {
   final PageController _pageController =
       PageController(viewportFraction: 0.78);
-  double _page = 0;
+  // Scoped listenable for the current page fraction. Only the small
+  // carousel subtree listens to this, so scrolling no longer forces a
+  // rebuild of the whole Scaffold/AppBar on every frame.
+  final ValueNotifier<double> _pageNotifier = ValueNotifier<double>(0);
 
   @override
   void initState() {
     super.initState();
     _pageController.addListener(() {
-      setState(() => _page = _pageController.page ?? 0);
+      _pageNotifier.value = _pageController.page ?? 0;
     });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _pageNotifier.dispose();
     super.dispose();
   }
 
@@ -98,7 +102,7 @@ class _DailyCardsScreenState extends ConsumerState<DailyCardsScreen> {
                     return _CardsCarousel(
                       cards: cards,
                       pageController: _pageController,
-                      page: _page,
+                      pageNotifier: _pageNotifier,
                       cashbookId: cashbookId,
                     );
                   },
@@ -168,12 +172,12 @@ class _EmptyState extends ConsumerWidget {
 class _CardsCarousel extends StatelessWidget {
   final List<DailyCardEntity> cards;
   final PageController pageController;
-  final double page;
+  final ValueNotifier<double> pageNotifier;
   final String cashbookId;
   const _CardsCarousel({
     required this.cards,
     required this.pageController,
-    required this.page,
+    required this.pageNotifier,
     required this.cashbookId,
   });
 
@@ -184,65 +188,85 @@ class _CardsCarousel extends StatelessWidget {
         const SizedBox(height: 12),
         SizedBox(
           height: 300,
-          child: PageView.builder(
-            controller: pageController,
-            itemCount: cards.length,
-            itemBuilder: (context, index) {
-              final card = cards[index];
-              final delta = (page - index).abs().clamp(0.0, 1.0);
-              final scale = 1 - (delta * 0.14);
-              final opacity = 1 - (delta * 0.35);
+          // Rebuilding just this ValueListenableBuilder (instead of the
+          // whole screen via setState) keeps the AppBar/scaffold static
+          // while scrolling and only touches the transform math below.
+          child: ValueListenableBuilder<double>(
+            valueListenable: pageNotifier,
+            builder: (context, page, _) {
+              return PageView.builder(
+                controller: pageController,
+                itemCount: cards.length,
+                itemBuilder: (context, index) {
+                  final card = cards[index];
+                  final delta = (page - index).abs().clamp(0.0, 1.0);
+                  final scale = 1 - (delta * 0.14);
+                  final opacity = 1 - (delta * 0.35);
 
-              return Transform.scale(
-                scale: scale,
-                child: Opacity(
-                  opacity: opacity,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 24),
-                    child: GestureDetector(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                DailyCardDetailScreen(card: card),
+                  return Transform.scale(
+                    scale: scale,
+                    child: Opacity(
+                      opacity: opacity,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 24),
+                        child: GestureDetector(
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    DailyCardDetailScreen(card: card),
+                              ),
+                            );
+                          },
+                          child: RepaintBoundary(
+                            child: DailyCreditCardWidget(
+                              name: card.name,
+                              number: card.number,
+                              bankName: card.bankName,
+                              colorIndex: card.colorIndex,
+                              expanded: true,
+                              // Only the centered card keeps its sheen
+                              // animation running; neighbours pause so we
+                              // aren't painting several gradient sweeps at
+                              // once while scrolling.
+                              isActive: delta < 0.5,
+                            ),
                           ),
-                        );
-                      },
-                      child: DailyCreditCardWidget(
-                        name: card.name,
-                        number: card.number,
-                        bankName: card.bankName,
-                        colorIndex: card.colorIndex,
-                        expanded: true,
+                        ),
                       ),
                     ),
-                  ),
-                ),
+                  );
+                },
               );
             },
           ),
         ),
         const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(cards.length, (i) {
-            final active = i == page.round();
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              width: active ? 18 : 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: active
-                    ? _kAccent
-                    : _kTextSub.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(4),
-              ),
+        ValueListenableBuilder<double>(
+          valueListenable: pageNotifier,
+          builder: (context, page, _) {
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(cards.length, (i) {
+                final active = i == page.round();
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: active ? 18 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: active
+                        ? _kAccent
+                        : _kTextSub.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                );
+              }),
             );
-          }),
+          },
         ),
         const SizedBox(height: 18),
         Text('Tap a card to open it',

@@ -210,6 +210,14 @@ service cloud.firestore {
         allow delete: if isCashbookMember(database, cashbookId);
       }
 
+      // ── Custom Bills (Bill Maker feature) ─────────────────────────────────
+      match /custom_bills/{billId} {
+        allow read:   if isCashbookMember(database, cashbookId);
+        allow create: if isCashbookMember(database, cashbookId);
+        allow update: if isCashbookMember(database, cashbookId);
+        allow delete: if isCashbookMember(database, cashbookId);
+      }
+
     }
 
   }

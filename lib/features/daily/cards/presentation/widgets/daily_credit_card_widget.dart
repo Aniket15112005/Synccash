@@ -27,6 +27,14 @@ class DailyCreditCardWidget extends StatefulWidget {
   /// compact version otherwise (chooser screen).
   final bool expanded;
 
+  /// When false, the perpetual sheen animation is paused (held on its
+  /// current frame) instead of ticking every frame. Used by carousels to
+  /// avoid animating several off-screen/neighbouring cards at once. The
+  /// visual result and animation itself are unchanged whenever this is
+  /// true (the default), so single-card usages (e.g. the detail screen)
+  /// behave exactly as before.
+  final bool isActive;
+
   const DailyCreditCardWidget({
     super.key,
     required this.name,
@@ -34,6 +42,7 @@ class DailyCreditCardWidget extends StatefulWidget {
     this.bankName,
     required this.colorIndex,
     this.expanded = false,
+    this.isActive = true,
   });
 
   @override
@@ -50,7 +59,21 @@ class _DailyCreditCardWidgetState extends State<DailyCreditCardWidget>
     _sheenController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 4),
-    )..repeat();
+    );
+    if (widget.isActive) {
+      _sheenController.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(DailyCreditCardWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive && !oldWidget.isActive) {
+      // Resume the sweep from wherever it left off — no visual jump.
+      _sheenController.repeat();
+    } else if (!widget.isActive && oldWidget.isActive) {
+      _sheenController.stop();
+    }
   }
 
   @override
