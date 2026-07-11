@@ -1,15 +1,18 @@
 // lib/features/bills/presentation/screens/bills_screen.dart
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
     show currentCashbookIdProvider;
 import '../../data/models/custom_bill_model.dart';
 import '../providers/bills_provider.dart';
 import 'create_bill_screen.dart';
+import 'bill_pdf_generator.dart';
 
 import 'package:synccash/features/sales/presentation/screens/web_invoice_viewer_stub.dart'
     if (dart.library.html) 'package:synccash/features/sales/presentation/screens/web_invoice_viewer_web.dart';
@@ -19,22 +22,22 @@ import 'package:synccash/features/sales/presentation/screens/native_pdf_viewer_s
 // ── Theme ─────────────────────────────────────────────────────────────────────
 
 class _T {
-  static const bg      = Color(0xFF080A0E);
-  static const card    = Color(0xFF0F1318);
-  static const card2   = Color(0xFF141921);
-  static const border  = Color(0xFF1C2130);
-  static const muted   = Color(0xFF4A5568);
-  static const muted2  = Color(0xFF8C8E9A);
-  static const accent  = Color(0xFF6C7FE4);
-  static const text    = Color(0xFFE8ECF4);
-  static const green   = Color(0xFF38D68A);
-  static const amber   = Color(0xFFF5A623);
-  static const red     = Color(0xFFE85C5C);
+  static const bg     = Color(0xFF080A0E);
+  static const card   = Color(0xFF0F1318);
+  static const card2  = Color(0xFF141921);
+  static const border = Color(0xFF1C2130);
+  static const muted  = Color(0xFF4A5568);
+  static const muted2 = Color(0xFF8C8E9A);
+  static const accent = Color(0xFF6C7FE4);
+  static const text   = Color(0xFFE8ECF4);
+  static const green  = Color(0xFF38D68A);
+  static const amber  = Color(0xFFF5A623);
+  static const red    = Color(0xFFE85C5C);
 }
 
 // ── Route helper ──────────────────────────────────────────────────────────────
 
-Route billsRoute(Widget page) => PageRouteBuilder(
+Route<void> billsRoute(Widget page) => PageRouteBuilder(
       pageBuilder: (_, a, __) => page,
       transitionsBuilder: (_, anim, __, child) {
         final slide = Tween<Offset>(
@@ -87,8 +90,26 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
           final slide = Tween<Offset>(
             begin: const Offset(0, 1.0),
             end: Offset.zero,
-          ).animate(
-              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic));
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic));
+          return SlideTransition(position: slide, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 320),
+        reverseTransitionDuration: const Duration(milliseconds: 260),
+      ),
+    );
+  }
+
+  void _openEdit(CustomBillModel bill) {
+    HapticFeedback.mediumImpact();
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (_, a, __) => CreateBillScreen(existingBill: bill),
+        transitionsBuilder: (_, anim, __, child) {
+          final slide = Tween<Offset>(
+            begin: const Offset(0, 1.0),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic));
           return SlideTransition(position: slide, child: child);
         },
         transitionDuration: const Duration(milliseconds: 320),
@@ -99,16 +120,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
 
   void _openPdf(CustomBillModel bill) {
     if (bill.pdfUrl == null || bill.pdfUrl!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('PDF not available for this bill'),
-          backgroundColor: _T.amber,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        ),
-      );
+      _showSnack('PDF not available for this bill', success: false);
       return;
     }
     HapticFeedback.selectionClick();
@@ -120,25 +132,89 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
     }
   }
 
+  // ── Share ─────────────────────────────────────────────────────────────────
+
+  Future<void> _shareBill(CustomBillModel bill) async {
+    HapticFeedback.selectionClick();
+    if (!mounted) return;
+
+    // Show "preparing" snack while PDF bytes are generated
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                  color: Colors.white, strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Text('Preparing PDF…',
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 13)),
+          ],
+        ),
+        backgroundColor: _T.accent,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        duration: const Duration(seconds: 30),
+      ),
+    );
+
+    try {
+      // Generate PDF bytes in memory — no disk I/O needed
+      final pdfBytes = await buildBillPdfFromModel(bill);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+      final fileName =
+          'Bill_${bill.billNumber}_${bill.clientName.replaceAll(' ', '_')}.pdf';
+
+      // XFile.fromData works on Android, iOS and web (no dart:io needed)
+      final xFile = XFile.fromData(
+        pdfBytes,
+        mimeType: 'application/pdf',
+        name: fileName,
+      );
+
+      await Share.shareXFiles(
+        [xFile],
+        subject: 'Bill #${bill.billNumber} – ${bill.clientName}',
+        text:
+            'Please find attached bill #${bill.billNumber} for ${bill.clientName}.',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        _showSnack('Could not share bill: $e', success: false);
+      }
+    }
+  }
+
+  // ── Delete ────────────────────────────────────────────────────────────────
+
   Future<void> _deleteBill(CustomBillModel bill) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: _T.card2,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text('Delete Bill',
-            style: TextStyle(
-                color: _T.text, fontWeight: FontWeight.w700)),
+            style: TextStyle(color: _T.text, fontWeight: FontWeight.w700)),
         content: Text(
-          'Delete bill #${bill.billNumber} for ${bill.clientName}?\nThis cannot be undone.',
-          style: const TextStyle(color: _T.muted2, fontSize: 14, height: 1.5),
+          'Delete bill #${bill.billNumber} for ${bill.clientName}?\n'
+          'This will also remove it from Sales. This cannot be undone.',
+          style: const TextStyle(
+              color: _T.muted2, fontSize: 14, height: 1.5),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child:
-                const Text('Cancel', style: TextStyle(color: _T.muted2)),
+            child: const Text('Cancel',
+                style: TextStyle(color: _T.muted2)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
@@ -150,12 +226,49 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+
     final cashbookId = ref.read(currentCashbookIdProvider);
     if (cashbookId == null) return;
-    await ref
-        .read(customBillActionsProvider.notifier)
-        .deleteBill(cashbookId: cashbookId, billId: bill.billId);
+
+    try {
+      // Delete from custom_bills
+      await ref
+          .read(customBillActionsProvider.notifier)
+          .deleteBill(cashbookId: cashbookId, billId: bill.billId);
+
+      // Also remove from sale_bills (same document ID set during create)
+      await FirebaseFirestore.instance
+          .collection('cashbooks')
+          .doc(cashbookId)
+          .collection('sale_bills')
+          .doc(bill.billId)
+          .delete()
+          .catchError((_) {
+        // If no matching sale_bill exists that's fine — custom_bill is gone.
+      });
+
+      if (mounted) _showSnack('Bill deleted', success: true);
+    } catch (e) {
+      if (mounted) _showSnack('Error deleting bill: $e', success: false);
+    }
   }
+
+  void _showSnack(String msg, {required bool success}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg,
+            style: const TextStyle(
+                fontWeight: FontWeight.w600, fontSize: 13)),
+        backgroundColor: success ? _T.green : _T.red,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      ),
+    );
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -169,12 +282,12 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+
             // ── Header ──────────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 8, 16, 0),
               child: Row(
                 children: [
-                  // Back
                   IconButton(
                     onPressed: () => Navigator.pop(context),
                     icon: const Icon(Icons.arrow_back_ios_rounded,
@@ -192,7 +305,6 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                       ),
                     ),
                   ),
-                  // New bill button
                   GestureDetector(
                     onTap: _openCreate,
                     child: Container(
@@ -231,8 +343,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 decoration: InputDecoration(
                   hintText: 'Search by client or bill number…',
                   hintStyle: TextStyle(
-                      color: _T.muted.withValues(alpha: 0.7),
-                      fontSize: 13),
+                      color: _T.muted.withValues(alpha: 0.7), fontSize: 13),
                   prefixIcon: const Icon(Icons.search_rounded,
                       color: _T.muted, size: 18),
                   suffixIcon: _search.isNotEmpty
@@ -244,8 +355,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                       : null,
                   filled: true,
                   fillColor: _T.card,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 12),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: const BorderSide(color: _T.border),
@@ -256,8 +366,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(
-                        color: _T.accent.withValues(alpha: 0.45)),
+                    borderSide:
+                        BorderSide(color: _T.accent.withValues(alpha: 0.45)),
                   ),
                 ),
               ),
@@ -299,8 +409,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
                     physics: const BouncingScrollPhysics(),
                     itemCount: filtered.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: 1),
+                    separatorBuilder: (_, __) => const SizedBox(height: 1),
                     itemBuilder: (ctx, i) {
                       final bill = filtered[i];
                       return _BillRow(
@@ -310,6 +419,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                         isFirst: i == 0,
                         isLast: i == filtered.length - 1,
                         onTap: () => _openPdf(bill),
+                        onEdit: () => _openEdit(bill),
+                        onShare: () => _shareBill(bill),
                         onDelete: () => _deleteBill(bill),
                       );
                     },
@@ -337,12 +448,14 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
 
 class _BillRow extends StatelessWidget {
   final CustomBillModel bill;
-  final NumberFormat amtFmt;
-  final DateFormat dateFmt;
-  final bool isFirst;
-  final bool isLast;
-  final VoidCallback onTap;
-  final VoidCallback onDelete;
+  final NumberFormat    amtFmt;
+  final DateFormat      dateFmt;
+  final bool            isFirst;
+  final bool            isLast;
+  final VoidCallback    onTap;
+  final VoidCallback    onEdit;
+  final VoidCallback    onShare;
+  final VoidCallback    onDelete;
 
   const _BillRow({
     required this.bill,
@@ -351,42 +464,42 @@ class _BillRow extends StatelessWidget {
     required this.isFirst,
     required this.isLast,
     required this.onTap,
+    required this.onEdit,
+    required this.onShare,
     required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Rounded corners only on first and last to give a grouped-list feel
     final radius = BorderRadius.vertical(
-      top: isFirst ? const Radius.circular(16) : Radius.zero,
-      bottom: isLast ? const Radius.circular(16) : Radius.zero,
+      top:    isFirst ? const Radius.circular(16) : Radius.zero,
+      bottom: isLast  ? const Radius.circular(16) : Radius.zero,
     );
 
-    // Initials avatar
     final initials = bill.clientName.trim().isNotEmpty
         ? bill.clientName.trim()[0].toUpperCase()
         : '#';
 
     return Material(
-      color: _T.card,
+      color: const Color(0xFF0F1318),
       borderRadius: radius,
       child: InkWell(
         onTap: onTap,
         borderRadius: radius,
-        splashColor: _T.accent.withValues(alpha: 0.06),
-        highlightColor: _T.accent.withValues(alpha: 0.03),
+        splashColor: const Color(0xFF6C7FE4).withValues(alpha: 0.06),
+        highlightColor: const Color(0xFF6C7FE4).withValues(alpha: 0.03),
         child: Container(
           decoration: BoxDecoration(
             borderRadius: radius,
             border: Border(
-              left: isFirst
-                  ? const BorderSide(color: _T.border)
+              left:   isFirst
+                  ? const BorderSide(color: Color(0xFF1C2130))
                   : BorderSide.none,
-              right: const BorderSide(color: _T.border),
-              top: isFirst
-                  ? const BorderSide(color: _T.border)
+              right:  const BorderSide(color: Color(0xFF1C2130)),
+              top:    isFirst
+                  ? const BorderSide(color: Color(0xFF1C2130))
                   : BorderSide.none,
-              bottom: const BorderSide(color: _T.border),
+              bottom: const BorderSide(color: Color(0xFF1C2130)),
             ),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
@@ -397,14 +510,14 @@ class _BillRow extends StatelessWidget {
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: _T.accent.withValues(alpha: 0.12),
+                  color: const Color(0xFF6C7FE4).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(11),
                 ),
                 child: Center(
                   child: Text(
                     initials,
                     style: const TextStyle(
-                      color: _T.accent,
+                      color: Color(0xFF6C7FE4),
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                     ),
@@ -423,7 +536,7 @@ class _BillRow extends StatelessWidget {
                           ? 'Unknown Client'
                           : bill.clientName,
                       style: const TextStyle(
-                        color: _T.text,
+                        color: Color(0xFFE8ECF4),
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
                         letterSpacing: -0.2,
@@ -437,14 +550,14 @@ class _BillRow extends StatelessWidget {
                         Text(
                           'Bill #${bill.billNumber}',
                           style: const TextStyle(
-                              color: _T.muted2, fontSize: 12),
+                              color: Color(0xFF8C8E9A), fontSize: 12),
                         ),
                         const SizedBox(width: 8),
                         Container(
                           width: 3,
                           height: 3,
                           decoration: const BoxDecoration(
-                            color: _T.muted,
+                            color: Color(0xFF4A5568),
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -452,7 +565,7 @@ class _BillRow extends StatelessWidget {
                         Text(
                           dateFmt.format(bill.billDate),
                           style: const TextStyle(
-                              color: _T.muted, fontSize: 12),
+                              color: Color(0xFF4A5568), fontSize: 12),
                         ),
                       ],
                     ),
@@ -461,28 +574,61 @@ class _BillRow extends StatelessWidget {
               ),
               const SizedBox(width: 12),
 
-              // Amount + delete
+              // Amount + three-dot menu
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '₹${amtFmt.format(bill.grandTotal)}',
+                    '\u20B9${amtFmt.format(bill.grandTotal)}',
                     style: const TextStyle(
-                      color: _T.text,
+                      color: Color(0xFFE8ECF4),
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                       letterSpacing: -0.3,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  GestureDetector(
-                    onTap: onDelete,
-                    behavior: HitTestBehavior.opaque,
-                    child: const Padding(
-                      padding: EdgeInsets.only(left: 8),
-                      child: Icon(Icons.delete_outline_rounded,
-                          color: _T.muted, size: 16),
+                  const SizedBox(height: 2),
+                  PopupMenuButton<_BillAction>(
+                    onSelected: (action) {
+                      HapticFeedback.selectionClick();
+                      switch (action) {
+                        case _BillAction.edit:
+                          onEdit();
+                        case _BillAction.share:
+                          onShare();
+                        case _BillAction.delete:
+                          onDelete();
+                      }
+                    },
+                    color: const Color(0xFF1C2130),
+                    elevation: 8,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    icon: const Icon(
+                      Icons.more_vert_rounded,
+                      color: Color(0xFF8C8E9A),
+                      size: 18,
                     ),
+                    itemBuilder: (_) => [
+                      _popupItem(
+                        value: _BillAction.edit,
+                        icon: Icons.edit_rounded,
+                        label: 'Edit',
+                        color: const Color(0xFF6C7FE4),
+                      ),
+                      _popupItem(
+                        value: _BillAction.share,
+                        icon: Icons.share_rounded,
+                        label: 'Share as PDF',
+                        color: const Color(0xFF38D68A),
+                      ),
+                      _popupItem(
+                        value: _BillAction.delete,
+                        icon: Icons.delete_outline_rounded,
+                        label: 'Delete',
+                        color: const Color(0xFFE85C5C),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -492,7 +638,31 @@ class _BillRow extends StatelessWidget {
       ),
     );
   }
+
+  PopupMenuItem<_BillAction> _popupItem({
+    required _BillAction value,
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) =>
+      PopupMenuItem<_BillAction>(
+        value: value,
+        height: 44,
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 17),
+            const SizedBox(width: 10),
+            Text(label,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
 }
+
+enum _BillAction { edit, share, delete }
 
 // ── Empty State ───────────────────────────────────────────────────────────────
 
@@ -515,19 +685,19 @@ class _EmptyState extends StatelessWidget {
               width: 68,
               height: 68,
               decoration: BoxDecoration(
-                color: _T.accent.withValues(alpha: 0.08),
+                color: const Color(0xFF6C7FE4).withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(22),
-                border:
-                    Border.all(color: _T.accent.withValues(alpha: 0.15)),
+                border: Border.all(
+                    color: const Color(0xFF6C7FE4).withValues(alpha: 0.15)),
               ),
               child: const Icon(Icons.receipt_long_rounded,
-                  color: _T.accent, size: 32),
+                  color: Color(0xFF6C7FE4), size: 32),
             ),
             const SizedBox(height: 18),
             Text(
               hasSearch ? 'No bills found' : 'No bills yet',
               style: const TextStyle(
-                  color: _T.text,
+                  color: Color(0xFFE8ECF4),
                   fontSize: 17,
                   fontWeight: FontWeight.w700),
             ),
@@ -536,7 +706,8 @@ class _EmptyState extends StatelessWidget {
               hasSearch
                   ? 'Try a different search term'
                   : 'Tap + to create your first bill',
-              style: const TextStyle(color: _T.muted2, fontSize: 13),
+              style: const TextStyle(
+                  color: Color(0xFF8C8E9A), fontSize: 13),
               textAlign: TextAlign.center,
             ),
             if (!hasSearch) ...[
@@ -547,7 +718,7 @@ class _EmptyState extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 20, vertical: 11),
                   decoration: BoxDecoration(
-                    color: _T.accent,
+                    color: const Color(0xFF6C7FE4),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Text('Create Bill',
