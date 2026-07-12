@@ -1,5 +1,7 @@
 // lib/features/bills/presentation/screens/bills_screen.dart
 
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -375,9 +377,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
             // ── List ─────────────────────────────────────────────────────────
             Expanded(
               child: billsAsync.when(
-                loading: () => const Center(
-                  child: CircularProgressIndicator(
-                      color: _T.accent, strokeWidth: 2),
+                loading: () => _LoadingWithRetry(
+                  onRetry: () => ref.invalidate(customBillsStreamProvider),
                 ),
                 error: (e, _) => Center(
                   child: Text('Error: $e',
@@ -661,6 +662,69 @@ class _BillRow extends StatelessWidget {
 }
 
 enum _BillAction { edit, share, delete }
+
+// ── Loading (with stuck-spinner escape hatch) ──────────────────────────────
+//
+// customBillsStreamProvider is a Firestore realtime stream. Under flaky
+// network conditions (very common in a PWA/mobile context — see
+// FirestoreReconnectService for the main fix) the very first snapshot can
+// be delayed indefinitely. Rather than leaving the user staring at a
+// spinner forever with no way out, we surface a manual retry after a few
+// seconds so they're never stuck.
+class _LoadingWithRetry extends StatefulWidget {
+  final VoidCallback onRetry;
+  const _LoadingWithRetry({required this.onRetry});
+
+  @override
+  State<_LoadingWithRetry> createState() => _LoadingWithRetryState();
+}
+
+class _LoadingWithRetryState extends State<_LoadingWithRetry> {
+  bool _showRetry = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(const Duration(seconds: 8), () {
+      if (mounted) setState(() => _showRetry = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(color: _T.accent, strokeWidth: 2),
+          if (_showRetry) ...[
+            const SizedBox(height: 20),
+            const Text(
+              "This is taking longer than usual",
+              style: TextStyle(color: _T.muted2, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: widget.onRetry,
+              icon: const Icon(Icons.refresh_rounded,
+                  color: _T.accent, size: 18),
+              label: const Text('Retry',
+                  style: TextStyle(
+                      color: _T.accent, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 // ── Empty State ───────────────────────────────────────────────────────────────
 

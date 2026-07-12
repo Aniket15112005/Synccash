@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'package:synccash/app/app.dart';
+import 'package:synccash/core/services/firestore_reconnect_service.dart';
 import 'package:synccash/core/services/notification_service.dart';
 import 'package:synccash/firebase_options.dart';
 
@@ -21,13 +22,31 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
-  // 3. Firestore offline persistence (mobile only)
+  // 3. Firestore settings.
   if (!kIsWeb) {
+    // Offline persistence (mobile only).
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
       cacheSizeBytes: 100 * 1024 * 1024,
     );
+  } else {
+    // Web/PWA: auto-detect when the browser needs long-polling instead of
+    // WebChannel streaming. Some networks (corporate proxies, some mobile
+    // carriers) and iOS Safari/PWA's WKWebView silently buffer or kill the
+    // streaming connection Firestore normally uses, which is one of the
+    // causes behind screens (like Bills) getting permanently stuck on
+    // their loading spinner. Auto-detect long-polling falls back
+    // automatically only when needed, so it's safe to always enable.
+    FirebaseFirestore.instance.settings = const Settings(
+      webExperimentalAutoDetectLongPolling: true,
+    );
   }
+
+  // 3b. Force Firestore to re-establish its realtime connection whenever
+  // the app returns to the foreground after being backgrounded — see
+  // FirestoreReconnectService for the full explanation. This is the other
+  // half of the fix for screens sometimes getting stuck on loading.
+  FirestoreReconnectService.instance.start();
 
   // 4. Lock to portrait (mobile only)
   if (!kIsWeb) {

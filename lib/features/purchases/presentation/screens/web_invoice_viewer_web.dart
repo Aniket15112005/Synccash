@@ -3,9 +3,21 @@
 //
 // Renders the PDF directly (no Google Docs Viewer round trip) so the
 // browser's own PDF engine handles it: faster (one network hop instead of
-// two) and supports native pinch-to-zoom. The app's global viewport lock
-// (user-scalable=no) is temporarily relaxed while this page is open so the
-// pinch gesture actually works, then restored on close.
+// two).
+//
+// IMPORTANT: zoom is handled entirely inside Flutter via InteractiveViewer.
+// A previous version of this screen temporarily rewrote the page's
+// <meta name="viewport"> tag to allow native browser pinch-zoom. That was
+// the root cause of two bugs:
+//   1. The close (X) button becoming unresponsive — changing the page
+//      viewport while an HtmlElementView (iframe) is mounted desyncs the
+//      DOM coordinates Flutter uses to position/hit-test that platform
+//      view, so taps could land in the wrong place.
+//   2. Zooming all the way out closing the app — with the page viewport
+//      unlocked, a large pinch-zoom-out on an iOS home-screen (standalone)
+//      PWA can be interpreted by iOS as a dismiss/back gesture.
+// Keeping the global viewport permanently locked and doing zoom with
+// InteractiveViewer avoids both: the browser viewport is never touched.
 
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
@@ -44,12 +56,11 @@ class _WebInvoiceViewerPage extends StatefulWidget {
 
 class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
   late final String _viewId;
-  String? _originalViewportContent;
+  final TransformationController _transformCtrl = TransformationController();
 
   @override
   void initState() {
     super.initState();
-    _relaxViewportZoomLock();
 
     _viewId = 'invoice-pdf-${widget.billNumber}-${widget.url.hashCode}';
     ui_web.platformViewRegistry.registerViewFactory(_viewId, (int id) {
@@ -64,27 +75,14 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
     });
   }
 
-  // The app locks the page viewport to prevent accidental zoom of the main
-  // UI. That lock also blocks pinch-zoom on embedded PDF content on some
-  // mobile browsers, so we relax it only while this viewer is on screen.
-  void _relaxViewportZoomLock() {
-    final meta = html.document.querySelector('meta[name="viewport"]');
-    if (meta == null) return;
-    _originalViewportContent = meta.getAttribute('content');
-    meta.setAttribute('content',
-        'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover');
-  }
-
-  void _restoreViewportZoomLock() {
-    final meta = html.document.querySelector('meta[name="viewport"]');
-    if (meta == null || _originalViewportContent == null) return;
-    meta.setAttribute('content', _originalViewportContent!);
-  }
-
   @override
   void dispose() {
-    _restoreViewportZoomLock();
+    _transformCtrl.dispose();
     super.dispose();
+  }
+
+  void _resetZoom() {
+    _transformCtrl.value = Matrix4.identity();
   }
 
   @override
@@ -113,8 +111,28 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
                     color: Colors.white54, fontSize: 11)),
           ],
         ),
+        actions: [
+          IconButton(
+            onPressed: _resetZoom,
+            icon: const Icon(Icons.zoom_out_map_rounded,
+                color: Colors.white70, size: 20),
+            tooltip: 'Reset zoom',
+          ),
+        ],
       ),
-      body: HtmlElementView(viewType: _viewId),
+      // Pinch-to-zoom is handled entirely by Flutter (InteractiveViewer),
+      // never by the browser page itself — see file header comment.
+      // panEnabled is off so a single-finger drag still scrolls the PDF
+      // inside the iframe normally; only a two-finger pinch is captured
+      // here to scale it.
+      body: InteractiveViewer(
+        transformationController: _transformCtrl,
+        panEnabled: false,
+        scaleEnabled: true,
+        minScale: 1.0,
+        maxScale: 4.0,
+        child: HtmlElementView(viewType: _viewId),
+      ),
     );
   }
 }
