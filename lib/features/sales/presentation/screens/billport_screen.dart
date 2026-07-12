@@ -1037,14 +1037,13 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
         XFile.fromData(bytes,
             name: '$safeName.pdf',
             mimeType: 'application/pdf'),
-      ], subject: 'Billport — Multi-party Statement');
+      ]);
     } else {
       final dir  = await getTemporaryDirectory();
       final file = File('${dir.path}/$safeName.pdf');
       await file.writeAsBytes(bytes);
       if (!mounted) return;
-      await Share.shareXFiles([XFile(file.path)],
-          subject: 'Billport — Multi-party Statement');
+      await Share.shareXFiles([XFile(file.path)]);
     }
   }
 
@@ -1230,14 +1229,13 @@ class _BillportScreenState extends ConsumerState<BillportScreen> {
             name: '$safeName.xlsx',
             mimeType:
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
-      ], subject: 'Billport — Multi-party Statement');
+      ]);
     } else {
       final dir  = await getTemporaryDirectory();
       final file = File('${dir.path}/$safeName.xlsx');
       await file.writeAsBytes(fileBytesTyped);
       if (!mounted) return;
-      await Share.shareXFiles([XFile(file.path)],
-          subject: 'Billport — Multi-party Statement');
+      await Share.shareXFiles([XFile(file.path)]);
     }
   }
 

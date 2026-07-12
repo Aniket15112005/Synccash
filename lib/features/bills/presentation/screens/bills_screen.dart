@@ -184,7 +184,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
 
       await Share.shareXFiles(
         [xFile],
-        subject: 'Bill #${bill.billNumber} – ${bill.clientName}',
+       
       );
     } catch (e) {
       if (mounted) {

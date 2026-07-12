@@ -10,29 +10,30 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Stream<UserEntity?> get authStateChanges {
-    return _auth.authStateChanges().asyncMap((firebaseUser) async {
-      if (firebaseUser == null) return null;
+    return _auth.authStateChanges().asyncExpand((firebaseUser) {
+      if (firebaseUser == null) return Stream.value(null);
 
-      final doc =
-          await _firestore.collection('users').doc(firebaseUser.uid).get();
-
-      // ✅ FIX 1: handle missing Firestore user safely (no crash, auto-create)
-      if (!doc.exists) {
-        final fallbackUser = UserModel(
-          uid: firebaseUser.uid,
-          email: firebaseUser.email ?? '',
-          displayName: '',
-        );
-
-        await _firestore
-            .collection('users')
-            .doc(firebaseUser.uid)
-            .set(fallbackUser.toJson());
-
-        return fallbackUser;
-      }
-
-      return UserModel.fromJson(doc.data()!);
+      // snapshots() serves from Firestore LOCAL CACHE instantly on first emit,
+      // then updates from server — no network wait before cashbookId is available.
+      return _firestore
+          .collection('users')
+          .doc(firebaseUser.uid)
+          .snapshots()
+          .asyncMap((doc) async {
+        if (!doc.exists) {
+          final fallbackUser = UserModel(
+            uid: firebaseUser.uid,
+            email: firebaseUser.email ?? '',
+            displayName: '',
+          );
+          await _firestore
+              .collection('users')
+              .doc(firebaseUser.uid)
+              .set(fallbackUser.toJson());
+          return fallbackUser as UserEntity?;
+        }
+        return UserModel.fromJson(doc.data()!) as UserEntity?;
+      });
     });
   }
 

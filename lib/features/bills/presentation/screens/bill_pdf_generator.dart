@@ -120,6 +120,10 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
   final tinyMuted = pw.TextStyle(
       fontSize: 7, color: PdfColor.fromHex('555555'));
 
+  // Balance row — larger and bold
+  final balanceStyle = pw.TextStyle(
+      fontSize: 9.5, fontWeight: pw.FontWeight.bold, color: cBlack);
+
   // ── Table border used throughout ───────────────────────────────────
   final fullBorder = pw.TableBorder.all(color: cBorder, width: 0.5);
 
@@ -236,7 +240,7 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
   pdf.addPage(
     pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.fromLTRB(24, 20, 24, 20),
+      margin: const pw.EdgeInsets.fromLTRB(12, 14, 12, 14),
       build: (ctx) => [
 
         // ── 1. TITLE: "Tax Invoice" centered ──────────────────────
@@ -575,14 +579,15 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                 ),
 
                 // Right: Totals
+                // horizontalInside removed — borders are applied per-row so
+                // we can drop the line before Balance and box it separately.
                 pw.Table(
                   border: pw.TableBorder(
                     top: pw.BorderSide.none,
                     bottom: pw.BorderSide.none,
                     left: pw.BorderSide.none,
                     right: pw.BorderSide.none,
-                    horizontalInside:
-                        pw.BorderSide(color: cBorder, width: 0.5),
+                    horizontalInside: pw.BorderSide.none,
                     verticalInside:
                         pw.BorderSide(color: cBorder, width: 0.5),
                   ),
@@ -592,16 +597,42 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                     2: pw.FlexColumnWidth(2),    // value
                   },
                   children: [
-                    // Sub Total
+                    // Sub Total (no top border — first row)
                     pw.TableRow(children: [
                       pad(pw.Text('Sub Total', style: small)),
                       pad(pw.Text(':', style: small)),
                       pad(pw.Text(fmt.format(bill.subtotal),
                           style: small, textAlign: pw.TextAlign.right)),
                     ]),
-                    // Total (bold)
+                    // Discount (only shown if > 0) — separator on top
+                    if (bill.discountAmount > 0)
+                      pw.TableRow(
+                        decoration: pw.BoxDecoration(
+                          border: pw.Border(
+                            top: pw.BorderSide(color: cBorder, width: 0.5),
+                          ),
+                        ),
+                        children: [
+                          pad(pw.Text(
+                            bill.discountType == 'percent'
+                                ? 'Discount (${bill.discountValue % 1 == 0 ? bill.discountValue.toInt() : bill.discountValue}%)'
+                                : 'Discount',
+                            style: small,
+                          )),
+                          pad(pw.Text(':', style: small)),
+                          pad(pw.Text(
+                              '- ${fmt.format(bill.discountAmount)}',
+                              style: small,
+                              textAlign: pw.TextAlign.right)),
+                        ],
+                      ),
+                    // Total (bold) — separator on top
                     pw.TableRow(
-                      decoration: pw.BoxDecoration(color: cWhite),
+                      decoration: pw.BoxDecoration(
+                        border: pw.Border(
+                          top: pw.BorderSide(color: cBorder, width: 0.5),
+                        ),
+                      ),
                       children: [
                         pad(pw.Text('Total', style: bodyBold)),
                         pad(pw.Text(':', style: bodyBold)),
@@ -610,21 +641,36 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                             textAlign: pw.TextAlign.right)),
                       ],
                     ),
-                    // Received
-                    pw.TableRow(children: [
-                      pad(pw.Text('Received', style: small)),
-                      pad(pw.Text(':', style: small)),
-                      pad(pw.Text(fmt.format(bill.receivedAmount),
-                          style: small, textAlign: pw.TextAlign.right)),
-                    ]),
-                    // Balance
-                    pw.TableRow(children: [
-                      pad(pw.Text('Balance', style: small)),
-                      pad(pw.Text(':', style: small)),
-                      pad(pw.Text(
-                          fmt.format(bill.grandTotal - bill.receivedAmount),
-                          style: small, textAlign: pw.TextAlign.right)),
-                    ]),
+                    // Received — separator on top, NO bottom border
+                    // (intentionally no line between Received and Balance)
+                    pw.TableRow(
+                      decoration: pw.BoxDecoration(
+                        border: pw.Border(
+                          top: pw.BorderSide(color: cBorder, width: 0.5),
+                        ),
+                      ),
+                      children: [
+                        pad(pw.Text('Received', style: small)),
+                        pad(pw.Text(':', style: small)),
+                        pad(pw.Text(fmt.format(bill.receivedAmount),
+                            style: small, textAlign: pw.TextAlign.right)),
+                      ],
+                    ),
+                    // Balance — full box, larger bold text, light grey bg
+                    pw.TableRow(
+                      decoration: pw.BoxDecoration(
+                        color: cBg,
+                        border: pw.Border.all(color: cBorder, width: 0.6),
+                      ),
+                      children: [
+                        pad(pw.Text('Balance', style: balanceStyle)),
+                        pad(pw.Text(':', style: balanceStyle)),
+                        pad(pw.Text(
+                            fmt.format(bill.grandTotal - bill.receivedAmount),
+                            style: balanceStyle,
+                            textAlign: pw.TextAlign.right)),
+                      ],
+                    ),
                   ],
                 ),
               ],

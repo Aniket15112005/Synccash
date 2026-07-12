@@ -18,8 +18,8 @@ final dailyCardRepositoryProvider = Provider<DailyCardRepositoryImpl>((ref) {
 /// `autoDispose` so the underlying Firestore listener is closed as soon as
 /// no screen is watching it anymore, instead of staying open in the
 /// background for the rest of the app session.
-final dailyCardsStreamProvider = StreamProvider.autoDispose
-    .family<List<DailyCardEntity>, String>((ref, cashbookId) {
+final dailyCardsStreamProvider =
+    StreamProvider.family<List<DailyCardEntity>, String>((ref, cashbookId) {
   final repo = ref.read(dailyCardRepositoryProvider);
   return repo.getCardsStream(cashbookId);
 });
@@ -48,8 +48,9 @@ class DailyCardKey {
 /// `autoDispose` so this listener closes once you leave the screen that
 /// needs it, instead of accumulating one live listener per card you've
 /// ever opened in a session.
-final dailyCardTransactionsStreamProvider = StreamProvider.autoDispose
-    .family<List<DailyCardTransactionEntity>, DailyCardKey>((ref, key) {
+final dailyCardTransactionsStreamProvider =
+    StreamProvider.family<List<DailyCardTransactionEntity>, DailyCardKey>(
+        (ref, key) {
   final repo = ref.read(dailyCardRepositoryProvider);
   return repo.getTransactionsStream(key.cashbookId, key.cardId);
 });
@@ -59,8 +60,9 @@ final dailyCardTransactionsStreamProvider = StreamProvider.autoDispose
 /// downloading the card's entire transaction history just to render a
 /// handful of preview rows. The full history remains available via
 /// [dailyCardTransactionsStreamProvider] on the card's History screen.
-final dailyCardRecentTransactionsStreamProvider = StreamProvider.autoDispose
-    .family<List<DailyCardTransactionEntity>, DailyCardKey>((ref, key) {
+final dailyCardRecentTransactionsStreamProvider =
+    StreamProvider.family<List<DailyCardTransactionEntity>, DailyCardKey>(
+        (ref, key) {
   final repo = ref.read(dailyCardRepositoryProvider);
   return repo.getTransactionsStream(key.cashbookId, key.cardId, limit: 8);
 });

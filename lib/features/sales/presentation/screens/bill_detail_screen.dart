@@ -495,7 +495,7 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
         [XFile.fromData(bytes,
             name: 'synccash_bill_$safeName.png',
             mimeType: 'image/png')],
-        subject: '${widget.bill.partyName}  ·  ${widget.bill.billNumber}',
+       
       );
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(

@@ -513,7 +513,6 @@ class _PurchaseClientBillDetailScreenState
         [XFile.fromData(bytes,
             name: 'synccash_purchase_bill_$safeName.png',
             mimeType: 'image/png')],
-        subject: '${widget.bill.clientName}  ·  ${widget.bill.billNumber}',
       );
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(

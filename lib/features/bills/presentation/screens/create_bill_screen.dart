@@ -475,29 +475,36 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
     final clientName = bill.clientName.trim();
     if (clientName.isEmpty) return;
 
-    final db      = FirebaseFirestore.instance;
-    final partyId = clientName.toLowerCase();
-
-    // Create party if it doesn't exist yet
-    final partyDoc = await db
+    final db       = FirebaseFirestore.instance;
+    final partyId  = clientName.toLowerCase();
+    final partyRef = db
         .collection('cashbooks').doc(cashbookId)
-        .collection('parties').doc(partyId)
-        .get();
+        .collection('parties').doc(partyId);
 
-    if (!partyDoc.exists) {
-      await db
-          .collection('cashbooks').doc(cashbookId)
-          .collection('parties').doc(partyId)
-          .set({
+    // Check LOCAL CACHE ONLY — instant, zero network cost.
+    // If not cached, assume new and create it below.
+    bool partyExists = false;
+    try {
+      final cached = await partyRef
+          .get(const GetOptions(source: Source.cache));
+      partyExists = cached.exists;
+    } catch (_) {
+      // Not in local cache — will create below.
+    }
+
+    if (!partyExists) {
+      // Fire-and-forget — party sync is background work.
+      // Not awaited so it never blocks the save flow.
+      partyRef.set({
         'partyName':      clientName,
         'openingBalance': 0.0,
         'description':    '',
         'place':          bill.clientAddress.trim(),
         'updatedAt':      FieldValue.serverTimestamp(),
-      });
+      }).catchError((_) {});
     }
 
-    // Create / update sale_bill and attach the PDF
+    // The only awaited write — attach PDF to sale_bill.
     final saleBillData = <String, dynamic>{
       'saleBillId':        bill.billId,
       'partyName':         clientName,

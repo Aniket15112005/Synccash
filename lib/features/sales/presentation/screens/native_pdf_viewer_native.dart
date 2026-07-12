@@ -135,7 +135,7 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
               enableSwipe: true,
               swipeHorizontal: false,
               autoSpacing: true,
-              pageFling: true,
+              pageFling: false,
               pageSnap: false,
               fitPolicy: FitPolicy.WIDTH,
               onRender: (pages) {

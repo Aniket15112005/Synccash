@@ -80,10 +80,13 @@ class DailyScreen extends ConsumerWidget {
                     SliverPadding(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
                       sliver: SliverToBoxAdapter(
-                        child: asyncCashbook.when(
-                          loading: () => _BalancePlaceholder(),
-                          error:   (_, __) => _BalancePlaceholder(),
-                          data: (cashbook) {
+                        child: Builder(
+                          builder: (context) {
+                            // Show balance immediately from summary — do NOT
+                            // block on asyncCashbook loading state. The
+                            // cashbook stream (which can be slow on first
+                            // listen) was previously gating this entire card,
+                            // causing it to show a frozen placeholder.
                             final summary =
                                 ref.watch(dailySummaryProvider(cashbookId));
                             final income = summary.whenOrNull(
@@ -93,10 +96,17 @@ class DailyScreen extends ConsumerWidget {
                                   data: (s) => s.totalExpense) ??
                                 0.0;
                             final balance = income - expense;
+                            // Use invite code when cashbook stream is ready;
+                            // fall back to cashbookId prefix instantly.
+                            final code = asyncCashbook.asData?.value
+                                        .inviteCode.isNotEmpty ==
+                                    true
+                                ? asyncCashbook.asData!.value.inviteCode
+                                : cashbookId
+                                    .substring(0, 6)
+                                    .toUpperCase();
                             return _BalanceCard(
-                              cashbookCode: cashbook.inviteCode.isNotEmpty
-                                  ? cashbook.inviteCode
-                                  : cashbook.id.substring(0, 6).toUpperCase(),
+                              cashbookCode: code,
                               balance: balance,
                               income: income,
                               expense: expense,

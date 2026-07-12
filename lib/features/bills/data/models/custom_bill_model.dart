@@ -67,6 +67,9 @@ class CustomBillModel {
   final double taxRate;
   final double subtotal;
   final double taxAmount;
+  final String discountType;   // 'percent' or 'amount'
+  final double discountValue;  // the number the user typed
+  final double discountAmount; // computed rupee value of discount
   final double grandTotal;
   final double receivedAmount;
   final String? pdfUrl;
@@ -86,6 +89,9 @@ class CustomBillModel {
     required this.taxRate,
     required this.subtotal,
     required this.taxAmount,
+    this.discountType   = 'percent',
+    this.discountValue  = 0.0,
+    this.discountAmount = 0.0,
     required this.grandTotal,
     this.receivedAmount = 0.0,
     this.pdfUrl,
@@ -106,6 +112,9 @@ class CustomBillModel {
         'taxRate':         taxRate,
         'subtotal':        subtotal,
         'taxAmount':       taxAmount,
+        'discountType':    discountType,
+        'discountValue':   discountValue,
+        'discountAmount':  discountAmount,
         'grandTotal':      grandTotal,
         'receivedAmount':  receivedAmount,
         'pdfUrl':          pdfUrl,
@@ -130,10 +139,13 @@ class CustomBillModel {
       clientName:      d['clientName']      as String?  ?? '',
       clientAddress:   d['clientAddress']   as String?  ?? '',
       items:           items,
-      taxRate:         (d['taxRate']    as num?)?.toDouble() ?? 0,
-      subtotal:        (d['subtotal']   as num?)?.toDouble() ?? 0,
-      taxAmount:       (d['taxAmount']  as num?)?.toDouble() ?? 0,
-      grandTotal:      (d['grandTotal'] as num?)?.toDouble() ?? 0,
+      taxRate:         (d['taxRate']        as num?)?.toDouble() ?? 0,
+      subtotal:        (d['subtotal']       as num?)?.toDouble() ?? 0,
+      taxAmount:       (d['taxAmount']      as num?)?.toDouble() ?? 0,
+      discountType:    (d['discountType']   as String?)          ?? 'percent',
+      discountValue:   (d['discountValue']  as num?)?.toDouble() ?? 0,
+      discountAmount:  (d['discountAmount'] as num?)?.toDouble() ?? 0,
+      grandTotal:      (d['grandTotal']     as num?)?.toDouble() ?? 0,
       receivedAmount:  (d['receivedAmount'] as num?)?.toDouble() ?? 0,
       pdfUrl:          d['pdfUrl']          as String?,
       createdAt:       (d['createdAt']  as Timestamp?)?.toDate() ?? DateTime.now(),

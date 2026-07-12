@@ -26,8 +26,8 @@ final dailyRepositoryProvider = Provider<DailyRepositoryImpl>((ref) {
 ///
 /// `autoDispose` so this listener closes once nothing is watching it,
 /// instead of staying open in the background for the rest of the session.
-final dailyEntriesStreamProvider = StreamProvider.autoDispose
-    .family<List<DailyEntryEntity>, String>((ref, cashbookId) {
+final dailyEntriesStreamProvider =
+    StreamProvider.family<List<DailyEntryEntity>, String>((ref, cashbookId) {
   final repo = ref.read(dailyRepositoryProvider);
   return repo.getEntriesStream(cashbookId, limit: 0);
 });
@@ -37,8 +37,8 @@ final dailyEntriesStreamProvider = StreamProvider.autoDispose
 /// entire Daily history just to render a handful of preview rows. The full
 /// history remains available via [dailyEntriesStreamProvider] on the
 /// dedicated History screen.
-final dailyRecentEntriesStreamProvider = StreamProvider.autoDispose
-    .family<List<DailyEntryEntity>, String>((ref, cashbookId) {
+final dailyRecentEntriesStreamProvider =
+    StreamProvider.family<List<DailyEntryEntity>, String>((ref, cashbookId) {
   final repo = ref.read(dailyRepositoryProvider);
   return repo.getEntriesStream(cashbookId, limit: 50);
 });
