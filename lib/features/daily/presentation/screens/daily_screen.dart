@@ -627,8 +627,11 @@ class _HomeEntriesSliver extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Capped "recent" window — this preview only ever shows 5 rows, so it
+    // doesn't need to pull the entire Daily history. Full, unbounded data
+    // is still available on the History screen.
     final asyncEntries =
-        ref.watch(dailyFilteredEntriesProvider(cashbookId));
+        ref.watch(dailyRecentFilteredEntriesProvider(cashbookId));
 
     return asyncEntries.when(
       loading: () => const SliverToBoxAdapter(

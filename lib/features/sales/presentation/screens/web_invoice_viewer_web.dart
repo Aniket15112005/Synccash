@@ -1,5 +1,11 @@
 // Web-only PDF/invoice viewer using iframe.
 // Imported conditionally via `if (dart.library.html)` in bill_detail_screen.dart
+//
+// Renders the PDF directly (no Google Docs Viewer round trip) so the
+// browser's own PDF engine handles it: faster (one network hop instead of
+// two) and supports native pinch-to-zoom. The app's global viewport lock
+// (user-scalable=no) is temporarily relaxed while this page is open so the
+// pinch gesture actually works, then restored on close.
 
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
@@ -38,19 +44,17 @@ class _WebInvoiceViewerPage extends StatefulWidget {
 
 class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
   late final String _viewId;
+  String? _originalViewportContent;
 
   @override
   void initState() {
     super.initState();
+    _relaxViewportZoomLock();
+
     _viewId = 'sale-invoice-pdf-${widget.billNumber}-${widget.url.hashCode}';
     ui_web.platformViewRegistry.registerViewFactory(_viewId, (int id) {
-      // Use Google Docs Viewer URL so iOS Safari can render the PDF inline.
-      // A raw PDF src is silently intercepted by Safari and opened outside the app.
-      final viewerSrc =
-          'https://docs.google.com/viewer?embedded=true&url='
-          '${Uri.encodeComponent(widget.url)}';
       return html.IFrameElement()
-        ..src = viewerSrc
+        ..src = widget.url
         ..style.border = 'none'
         ..style.width = '100%'
         ..style.height = '100%'
@@ -58,6 +62,29 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
         ..style.setProperty('-webkit-overflow-scrolling', 'touch')
         ..allow = 'fullscreen';
     });
+  }
+
+  // The app locks the page viewport to prevent accidental zoom of the main
+  // UI. That lock also blocks pinch-zoom on embedded PDF content on some
+  // mobile browsers, so we relax it only while this viewer is on screen.
+  void _relaxViewportZoomLock() {
+    final meta = html.document.querySelector('meta[name="viewport"]');
+    if (meta == null) return;
+    _originalViewportContent = meta.getAttribute('content');
+    meta.setAttribute('content',
+        'width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover');
+  }
+
+  void _restoreViewportZoomLock() {
+    final meta = html.document.querySelector('meta[name="viewport"]');
+    if (meta == null || _originalViewportContent == null) return;
+    meta.setAttribute('content', _originalViewportContent!);
+  }
+
+  @override
+  void dispose() {
+    _restoreViewportZoomLock();
+    super.dispose();
   }
 
   @override
@@ -71,6 +98,7 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
         leading: IconButton(
           onPressed: () => Navigator.pop(context),
           icon: const Icon(Icons.close_rounded, color: Colors.white),
+          tooltip: 'Close',
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

@@ -262,6 +262,23 @@ class SaleBillActionsNotifier extends AsyncNotifier<void> {
       // Step 2: delete from active sale_bills (throws on Firestore errors)
       await activeRef.delete();
 
+      // Step 3: also remove the matching Bills-feature copy, if one exists.
+      // Bills created via "Bill Maker" are mirrored into sale_bills using
+      // the same document ID, so a bill deleted from Sales must disappear
+      // from Bills too (and vice versa — bills_screen.dart already deletes
+      // the sale_bills copy when a bill is deleted from Bills).
+      try {
+        await db
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .collection('custom_bills')
+            .doc(billId)
+            .delete();
+      } catch (_) {
+        // Best-effort — a sale bill that was never created via Bill Maker
+        // simply has no matching custom_bills doc to delete.
+      }
+
       state = const AsyncData(null);
     } catch (e, st) {
       state = AsyncError(e, st);

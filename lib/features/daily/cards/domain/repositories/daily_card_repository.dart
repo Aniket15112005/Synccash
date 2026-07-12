@@ -15,7 +15,11 @@ abstract class DailyCardRepository {
   Future<void> deleteTransaction(
       String cashbookId, String cardId, String txId);
 
-  /// All transactions that belong to a single card, newest first.
+  /// Transactions that belong to a single card, newest first. When [limit]
+  /// is 0 (default) every transaction is returned — used by the full
+  /// History screen. A positive [limit] caps the query at the database
+  /// level (instead of downloading everything and truncating client-side)
+  /// — used by lightweight "recent" previews.
   Stream<List<DailyCardTransactionEntity>> getTransactionsStream(
-      String cashbookId, String cardId);
+      String cashbookId, String cardId, {int limit});
 }

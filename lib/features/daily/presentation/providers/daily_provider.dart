@@ -20,11 +20,27 @@ final dailyRepositoryProvider = Provider<DailyRepositoryImpl>((ref) {
   return DailyRepositoryImpl();
 });
 
-/// All Daily entries for a cashbook, newest first, no limit.
-final dailyEntriesStreamProvider =
-    StreamProvider.family<List<DailyEntryEntity>, String>((ref, cashbookId) {
+/// All Daily entries for a cashbook, newest first, no limit. Feeds the
+/// History screen (must show everything) and the balance/summary calc
+/// (must total every entry to be correct).
+///
+/// `autoDispose` so this listener closes once nothing is watching it,
+/// instead of staying open in the background for the rest of the session.
+final dailyEntriesStreamProvider = StreamProvider.autoDispose
+    .family<List<DailyEntryEntity>, String>((ref, cashbookId) {
   final repo = ref.read(dailyRepositoryProvider);
   return repo.getEntriesStream(cashbookId, limit: 0);
+});
+
+/// A capped preview (most recent ~50) of Daily entries — for the "Recent
+/// Entries" section on the Daily home screen. This avoids downloading the
+/// entire Daily history just to render a handful of preview rows. The full
+/// history remains available via [dailyEntriesStreamProvider] on the
+/// dedicated History screen.
+final dailyRecentEntriesStreamProvider = StreamProvider.autoDispose
+    .family<List<DailyEntryEntity>, String>((ref, cashbookId) {
+  final repo = ref.read(dailyRepositoryProvider);
+  return repo.getEntriesStream(cashbookId, limit: 50);
 });
 
 // ── Isolated filter notifiers (own state, own providers) ────────────────────
@@ -125,11 +141,40 @@ List<DailyEntryEntity> _applyDailyFilters(
   }).toList();
 }
 
-/// Entries with all Daily-only filters applied.
+/// Entries with all Daily-only filters applied, over the FULL history.
+/// Used by the History screen, which must be able to show/filter every
+/// entry that has ever been added.
 final dailyFilteredEntriesProvider =
     Provider.family<AsyncValue<List<DailyEntryEntity>>, String>(
   (ref, cashbookId) {
     final async = ref.watch(dailyEntriesStreamProvider(cashbookId));
+    final activeName = ref.watch(dailyNameFilterProvider);
+    final activeDescription = ref.watch(dailyDescriptionFilterProvider);
+    final activeDate = ref.watch(dailyDateFilterProvider);
+    final activeType = ref.watch(dailyTypeFilterProvider);
+
+    return async.whenData(
+      (data) => _applyDailyFilters(
+        data,
+        activeName: activeName,
+        activeDescription: activeDescription,
+        activeDate: activeDate,
+        activeType: activeType,
+      ),
+    );
+  },
+);
+
+/// Same filtering, but over the capped "recent" window instead of the full
+/// history — used only by the Daily home screen's "Recent Entries"
+/// preview, so opening the home screen doesn't have to download the whole
+/// history just to show a few rows. Filtering behaves identically to
+/// [dailyFilteredEntriesProvider]; only the underlying data window is
+/// smaller.
+final dailyRecentFilteredEntriesProvider =
+    Provider.family<AsyncValue<List<DailyEntryEntity>>, String>(
+  (ref, cashbookId) {
+    final async = ref.watch(dailyRecentEntriesStreamProvider(cashbookId));
     final activeName = ref.watch(dailyNameFilterProvider);
     final activeDescription = ref.watch(dailyDescriptionFilterProvider);
     final activeDate = ref.watch(dailyDateFilterProvider);

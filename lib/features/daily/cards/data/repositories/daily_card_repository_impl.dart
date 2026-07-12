@@ -110,13 +110,14 @@ class DailyCardRepositoryImpl implements DailyCardRepository {
 
   @override
   Stream<List<DailyCardTransactionEntity>> getTransactionsStream(
-      String cashbookId, String cardId) {
-    return _txCol(cashbookId, cardId)
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snap) => snap.docs
-            .map<DailyCardTransactionEntity>(
-                (d) => DailyCardTransactionModel.fromFirestore(d))
-            .toList());
+      String cashbookId, String cardId, {int limit = 0}) {
+    var query = _txCol(cashbookId, cardId)
+        .orderBy('createdAt', descending: true);
+    if (limit > 0) query = query.limit(limit);
+
+    return query.snapshots().map((snap) => snap.docs
+        .map<DailyCardTransactionEntity>(
+            (d) => DailyCardTransactionModel.fromFirestore(d))
+        .toList());
   }
 }

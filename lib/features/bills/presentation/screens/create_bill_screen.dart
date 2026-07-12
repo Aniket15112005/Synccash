@@ -126,6 +126,7 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
   late final TextEditingController _clientAddressCtrl;
   late final List<_ItemState> _items;
   late final TextEditingController _taxRateCtrl;
+  late final TextEditingController _receivedCtrl;
 
   // Inline autocomplete state
   final _clientFocusNode = FocusNode();
@@ -153,6 +154,10 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
           text: bill.taxRate == bill.taxRate.truncateToDouble()
               ? bill.taxRate.toStringAsFixed(0)
               : bill.taxRate.toStringAsFixed(1));
+      _receivedCtrl      = TextEditingController(
+          text: bill.receivedAmount == bill.receivedAmount.truncateToDouble()
+              ? bill.receivedAmount.toStringAsFixed(0)
+              : bill.receivedAmount.toStringAsFixed(2));
       _items = bill.items.map(_ItemState.fromBillItem).toList();
       if (_items.isEmpty) _items.add(_ItemState());
     } else {
@@ -164,6 +169,7 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
           text: widget.prefilledClientName ?? '');
       _clientAddressCtrl = TextEditingController();
       _taxRateCtrl       = TextEditingController(text: '0');
+      _receivedCtrl      = TextEditingController(text: '0');
       _items             = [_ItemState()];
     }
 
@@ -172,6 +178,7 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
       item.rateCtrl.addListener(_rebuildTotals);
     }
     _taxRateCtrl.addListener(_rebuildTotals);
+    _receivedCtrl.addListener(_rebuildTotals);
     _clientNameCtrl.addListener(_onClientTyped);
     _clientFocusNode.addListener(_onClientFocusChanged);
   }
@@ -187,6 +194,7 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
     _clientFocusNode.dispose();
     _clientAddressCtrl.dispose();
     _taxRateCtrl.dispose();
+    _receivedCtrl.dispose();
     _scrollCtrl.dispose();
     for (final item in _items) item.dispose();
     super.dispose();
@@ -245,6 +253,8 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
   double get _taxRate    => double.tryParse(_taxRateCtrl.text.trim()) ?? 0;
   double get _taxAmount  => _subtotal * _taxRate / 100;
   double get _grandTotal => _subtotal + _taxAmount;
+  double get _receivedAmount => double.tryParse(_receivedCtrl.text.trim()) ?? 0;
+  double get _balanceDue => _grandTotal - _receivedAmount;
 
   // ── Items ──────────────────────────────────────────────────────────────────
 
@@ -362,6 +372,7 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
         subtotal:        _subtotal,
         taxAmount:       _taxAmount,
         grandTotal:      _grandTotal,
+        receivedAmount:  _receivedAmount,
         pdfUrl:          null,
         createdAt:       _isEditing
             ? widget.existingBill!.createdAt
@@ -402,6 +413,7 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
         subtotal:        tempBill.subtotal,
         taxAmount:       tempBill.taxAmount,
         grandTotal:      tempBill.grandTotal,
+        receivedAmount:  tempBill.receivedAmount,
         pdfUrl:          pdfUrl,
         createdAt:       tempBill.createdAt,
         createdBy:       tempBill.createdBy,
@@ -828,6 +840,27 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
                 ),
                 const SizedBox(height: 20),
 
+                // ── Advance / Received ────────────────────────────────────
+                _SectionHeader(
+                    icon: Icons.payments_rounded,
+                    label: 'Advance Received',
+                    color: const Color(0xFF22C55E)),
+                const SizedBox(height: 10),
+                _FieldCard(
+                  child: _buildField(
+                      controller: _receivedCtrl,
+                      label: 'Received Amount (\u20B9)',
+                      icon: Icons.payments_rounded,
+                      hint: '0.00',
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                            RegExp(r'^\d*\.?\d*'))
+                      ]),
+                ),
+                const SizedBox(height: 20),
+
                 // ── Totals ─────────────────────────────────────────────────
                 Container(
                   padding: const EdgeInsets.all(18),
@@ -860,6 +893,20 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
                         labelFontSize: 15,
                         valueFontSize: 18,
                       ),
+                      if (_receivedAmount > 0) ...[
+                        const SizedBox(height: 8),
+                        _TotalRow(
+                          label: 'Received',
+                          value: '\u20B9${fmt.format(_receivedAmount)}',
+                        ),
+                        const SizedBox(height: 8),
+                        _TotalRow(
+                          label: 'Balance Due',
+                          value: '\u20B9${fmt.format(_balanceDue)}',
+                          isBold: true,
+                          valueColor: const Color(0xFFE85C5C),
+                        ),
+                      ],
                     ],
                   ),
                 ),

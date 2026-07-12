@@ -1,9 +1,16 @@
 // In-app PDF viewer for native Android & iOS.
-// Uses WebView + Google Docs viewer so PDFs render inside the app with
-// pinch-to-zoom and no OS hand-off.
+//
+// Renders the PDF locally with flutter_pdfview instead of round-tripping
+// through Google Docs Viewer. This gives real native pinch-to-zoom and is
+// much faster: the file is downloaded once (and cached) and rendered
+// on-device, with no dependency on an external conversion service.
+
+import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_pdfview/flutter_pdfview.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 void openNativePdfInApp(
   BuildContext context,
@@ -41,33 +48,45 @@ class _NativePdfViewerPage extends StatefulWidget {
 }
 
 class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
-  late final WebViewController _controller;
+  static const _accent = Color(0xFF6C63FF);
+
   bool _loading = true;
   bool _errored = false;
-
-  static const _accent = Color(0xFF6C63FF);
+  String? _filePath;
+  int _pages = 0;
 
   @override
   void initState() {
     super.initState();
+    _loadPdf();
+  }
 
-    // Google Docs Viewer renders the PDF as HTML — works on every platform
-    // that has a WebView and supports pinch-to-zoom natively.
-    final viewerUrl =
-        'https://docs.google.com/viewer?embedded=true&url='
-        '${Uri.encodeComponent(widget.url)}';
+  Future<void> _loadPdf() async {
+    if (mounted) setState(() { _loading = true; _errored = false; });
+    try {
+      // Cache by URL hash so re-opening the same invoice is instant.
+      final dir  = await getTemporaryDirectory();
+      final hash = widget.url.hashCode.toUnsigned(32).toRadixString(16);
+      final file = File('${dir.path}/pdf_cache_$hash.pdf');
 
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageFinished: (_) {
-          if (mounted) setState(() => _loading = false);
-        },
-        onWebResourceError: (_) {
-          if (mounted) setState(() { _loading = false; _errored = true; });
-        },
-      ))
-      ..loadRequest(Uri.parse(viewerUrl));
+      if (!await file.exists()) {
+        final res = await http
+            .get(Uri.parse(widget.url))
+            .timeout(const Duration(seconds: 30));
+        if (res.statusCode != 200) {
+          throw Exception('HTTP ${res.statusCode}');
+        }
+        await file.writeAsBytes(res.bodyBytes, flush: true);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _filePath = file.path;
+        _loading  = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() { _loading = false; _errored = true; });
+    }
   }
 
   @override
@@ -81,6 +100,7 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
         leading: IconButton(
           onPressed: () => Navigator.pop(context),
           icon: const Icon(Icons.close_rounded, color: Colors.white),
+          tooltip: 'Close',
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,12 +120,8 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
           ],
         ),
         actions: [
-          // Reload in case Google Docs Viewer shows a "preview not available" page
           IconButton(
-            onPressed: () {
-              setState(() { _loading = true; _errored = false; });
-              _controller.reload();
-            },
+            onPressed: _loadPdf,
             icon: const Icon(Icons.refresh_rounded, color: Colors.white70),
             tooltip: 'Reload',
           ),
@@ -113,7 +129,23 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
       ),
       body: Stack(
         children: [
-          WebViewWidget(controller: _controller),
+          if (_filePath != null)
+            PDFView(
+              filePath: _filePath!,
+              enableSwipe: true,
+              swipeHorizontal: false,
+              autoSpacing: true,
+              pageFling: true,
+              pageSnap: false,
+              fitPolicy: FitPolicy.WIDTH,
+              onRender: (pages) {
+                if (mounted) setState(() => _pages = pages ?? 0);
+              },
+              onError: (_) {
+                if (mounted) setState(() => _errored = true);
+              },
+              onPageError: (_, __) {},
+            ),
 
           if (_loading)
             const Center(
@@ -136,10 +168,7 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
                   ),
                   const SizedBox(height: 16),
                   TextButton.icon(
-                    onPressed: () {
-                      setState(() { _loading = true; _errored = false; });
-                      _controller.reload();
-                    },
+                    onPressed: _loadPdf,
                     icon: const Icon(Icons.refresh_rounded, color: _accent),
                     label: const Text('Try again',
                         style: TextStyle(color: _accent)),

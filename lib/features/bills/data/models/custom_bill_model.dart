@@ -68,6 +68,7 @@ class CustomBillModel {
   final double subtotal;
   final double taxAmount;
   final double grandTotal;
+  final double receivedAmount;
   final String? pdfUrl;
   final DateTime createdAt;
   final String createdBy;
@@ -86,6 +87,7 @@ class CustomBillModel {
     required this.subtotal,
     required this.taxAmount,
     required this.grandTotal,
+    this.receivedAmount = 0.0,
     this.pdfUrl,
     required this.createdAt,
     required this.createdBy,
@@ -105,6 +107,7 @@ class CustomBillModel {
         'subtotal':        subtotal,
         'taxAmount':       taxAmount,
         'grandTotal':      grandTotal,
+        'receivedAmount':  receivedAmount,
         'pdfUrl':          pdfUrl,
         'createdAt':       FieldValue.serverTimestamp(),
         'createdBy':       createdBy,
@@ -131,6 +134,7 @@ class CustomBillModel {
       subtotal:        (d['subtotal']   as num?)?.toDouble() ?? 0,
       taxAmount:       (d['taxAmount']  as num?)?.toDouble() ?? 0,
       grandTotal:      (d['grandTotal'] as num?)?.toDouble() ?? 0,
+      receivedAmount:  (d['receivedAmount'] as num?)?.toDouble() ?? 0,
       pdfUrl:          d['pdfUrl']          as String?,
       createdAt:       (d['createdAt']  as Timestamp?)?.toDate() ?? DateTime.now(),
       createdBy:       d['createdBy']       as String?  ?? '',

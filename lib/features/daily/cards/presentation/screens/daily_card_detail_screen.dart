@@ -45,7 +45,10 @@ class DailyCardDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final key = DailyCardKey(card.cashbookId, card.cardId);
     final asyncSummary = ref.watch(dailyCardSummaryProvider(key));
-    final asyncTxns = ref.watch(dailyCardTransactionsStreamProvider(key));
+    // Capped "recent" window — this preview only ever shows 6 rows, so it
+    // doesn't need to pull the card's entire transaction history. Full,
+    // unbounded data is still available on the card's History screen.
+    final asyncTxns = ref.watch(dailyCardRecentTransactionsStreamProvider(key));
 
     return Scaffold(
       backgroundColor: _kBg,

@@ -14,8 +14,12 @@ final dailyCardRepositoryProvider = Provider<DailyCardRepositoryImpl>((ref) {
 });
 
 /// All cards saved for a cashbook, newest first.
-final dailyCardsStreamProvider =
-    StreamProvider.family<List<DailyCardEntity>, String>((ref, cashbookId) {
+///
+/// `autoDispose` so the underlying Firestore listener is closed as soon as
+/// no screen is watching it anymore, instead of staying open in the
+/// background for the rest of the app session.
+final dailyCardsStreamProvider = StreamProvider.autoDispose
+    .family<List<DailyCardEntity>, String>((ref, cashbookId) {
   final repo = ref.read(dailyCardRepositoryProvider);
   return repo.getCardsStream(cashbookId);
 });
@@ -36,11 +40,29 @@ class DailyCardKey {
   int get hashCode => Object.hash(cashbookId, cardId);
 }
 
-/// All transactions that belong to a single card, newest first.
-final dailyCardTransactionsStreamProvider = StreamProvider.family<
-    List<DailyCardTransactionEntity>, DailyCardKey>((ref, key) {
+/// All transactions that belong to a single card, newest first — full,
+/// unbounded history. Used by the card's dedicated History screen (which
+/// must be able to show everything) and by the balance/summary calc below
+/// (which needs every transaction to total correctly).
+///
+/// `autoDispose` so this listener closes once you leave the screen that
+/// needs it, instead of accumulating one live listener per card you've
+/// ever opened in a session.
+final dailyCardTransactionsStreamProvider = StreamProvider.autoDispose
+    .family<List<DailyCardTransactionEntity>, DailyCardKey>((ref, key) {
   final repo = ref.read(dailyCardRepositoryProvider);
   return repo.getTransactionsStream(key.cashbookId, key.cardId);
+});
+
+/// A capped preview (most recent few) of a card's transactions — for the
+/// "Recent Transactions" section on the card detail screen. This avoids
+/// downloading the card's entire transaction history just to render a
+/// handful of preview rows. The full history remains available via
+/// [dailyCardTransactionsStreamProvider] on the card's History screen.
+final dailyCardRecentTransactionsStreamProvider = StreamProvider.autoDispose
+    .family<List<DailyCardTransactionEntity>, DailyCardKey>((ref, key) {
+  final repo = ref.read(dailyCardRepositoryProvider);
+  return repo.getTransactionsStream(key.cashbookId, key.cardId, limit: 8);
 });
 
 class DailyCardSummary {
