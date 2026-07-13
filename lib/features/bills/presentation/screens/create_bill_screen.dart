@@ -134,6 +134,10 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
   List<String> _allPartyNames   = [];
   bool _showSuggestions = false;
 
+  // Discount state
+  late final TextEditingController _discountCtrl;
+  String _discountType = 'percent'; // 'percent' or 'amount'
+
   // Generation state
   bool   _generating = false;
   String _genStatus  = '';
@@ -158,6 +162,13 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
           text: bill.receivedAmount == bill.receivedAmount.truncateToDouble()
               ? bill.receivedAmount.toStringAsFixed(0)
               : bill.receivedAmount.toStringAsFixed(2));
+      _discountCtrl = TextEditingController(
+          text: bill.discountValue > 0
+              ? (bill.discountValue == bill.discountValue.truncateToDouble()
+                  ? bill.discountValue.toStringAsFixed(0)
+                  : bill.discountValue.toStringAsFixed(2))
+              : '');
+      _discountType = bill.discountType;
       _items = bill.items.map(_ItemState.fromBillItem).toList();
       if (_items.isEmpty) _items.add(_ItemState());
     } else {
@@ -170,6 +181,8 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
       _clientAddressCtrl = TextEditingController();
       _taxRateCtrl       = TextEditingController(text: '0');
       _receivedCtrl      = TextEditingController(text: '0');
+      _discountCtrl      = TextEditingController();
+      _discountType      = 'percent';
       _items             = [_ItemState()];
     }
 
@@ -179,6 +192,7 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
     }
     _taxRateCtrl.addListener(_rebuildTotals);
     _receivedCtrl.addListener(_rebuildTotals);
+    _discountCtrl.addListener(_rebuildTotals);
     _clientNameCtrl.addListener(_onClientTyped);
     _clientFocusNode.addListener(_onClientFocusChanged);
   }
@@ -195,6 +209,7 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
     _clientAddressCtrl.dispose();
     _taxRateCtrl.dispose();
     _receivedCtrl.dispose();
+    _discountCtrl.dispose();
     _scrollCtrl.dispose();
     for (final item in _items) item.dispose();
     super.dispose();
@@ -249,12 +264,18 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
 
   void _rebuildTotals() { if (mounted) setState(() {}); }
 
-  double get _subtotal   => _items.fold(0.0, (s, i) => s + i.amount);
-  double get _taxRate    => double.tryParse(_taxRateCtrl.text.trim()) ?? 0;
-  double get _taxAmount  => _subtotal * _taxRate / 100;
-  double get _grandTotal => _subtotal + _taxAmount;
+  double get _subtotal       => _items.fold(0.0, (s, i) => s + i.amount);
+  double get _taxRate        => double.tryParse(_taxRateCtrl.text.trim()) ?? 0;
+  double get _taxAmount      => _subtotal * _taxRate / 100;
+  double get _discountValue  => double.tryParse(_discountCtrl.text.trim()) ?? 0;
+  double get _discountAmount {
+    if (_discountValue <= 0) return 0;
+    if (_discountType == 'percent') return _subtotal * _discountValue / 100;
+    return _discountValue.clamp(0, _subtotal + _taxAmount).toDouble();
+  }
+  double get _grandTotal     => (_subtotal + _taxAmount - _discountAmount).clamp(0, double.infinity).toDouble();
   double get _receivedAmount => double.tryParse(_receivedCtrl.text.trim()) ?? 0;
-  double get _balanceDue => _grandTotal - _receivedAmount;
+  double get _balanceDue     => _grandTotal - _receivedAmount;
 
   // ── Items ──────────────────────────────────────────────────────────────────
 
@@ -371,6 +392,9 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
         taxRate:         _taxRate,
         subtotal:        _subtotal,
         taxAmount:       _taxAmount,
+        discountType:    _discountType,
+        discountValue:   _discountValue,
+        discountAmount:  _discountAmount,
         grandTotal:      _grandTotal,
         receivedAmount:  _receivedAmount,
         pdfUrl:          null,
@@ -412,6 +436,9 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
         taxRate:         tempBill.taxRate,
         subtotal:        tempBill.subtotal,
         taxAmount:       tempBill.taxAmount,
+        discountType:    tempBill.discountType,
+        discountValue:   tempBill.discountValue,
+        discountAmount:  tempBill.discountAmount,
         grandTotal:      tempBill.grandTotal,
         receivedAmount:  tempBill.receivedAmount,
         pdfUrl:          pdfUrl,
@@ -847,6 +874,59 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
                 ),
                 const SizedBox(height: 20),
 
+                // ── Discount ───────────────────────────────────────────────
+                _SectionHeader(
+                    icon: Icons.discount_rounded,
+                    label: 'Discount',
+                    color: const Color(0xFFF59E0B)),
+                const SizedBox(height: 10),
+                _FieldCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Type toggle
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.discount_rounded,
+                                color: _T.muted, size: 18),
+                            const SizedBox(width: 12),
+                            _DiscountTypeChip(
+                              label: '% Percent',
+                              selected: _discountType == 'percent',
+                              onTap: () =>
+                                  setState(() => _discountType = 'percent'),
+                            ),
+                            const SizedBox(width: 8),
+                            _DiscountTypeChip(
+                              label: '₹ Fixed',
+                              selected: _discountType == 'amount',
+                              onTap: () =>
+                                  setState(() => _discountType = 'amount'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const _FieldDivider(),
+                      _buildField(
+                          controller: _discountCtrl,
+                          label: _discountType == 'percent'
+                              ? 'Discount (%)'
+                              : 'Discount (₹)',
+                          icon: Icons.discount_outlined,
+                          hint: '0',
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d*'))
+                          ]),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
                 // ── Advance / Received ────────────────────────────────────
                 _SectionHeader(
                     icon: Icons.payments_rounded,
@@ -887,6 +967,16 @@ class _CreateBillScreenState extends ConsumerState<CreateBillScreen>
                           label:
                               'Tax (${_taxRate.toStringAsFixed(_taxRate == _taxRate.truncateToDouble() ? 0 : 1)}%)',
                           value: '\u20B9${fmt.format(_taxAmount)}',
+                        ),
+                      ],
+                      if (_discountAmount > 0) ...[
+                        const SizedBox(height: 8),
+                        _TotalRow(
+                          label: _discountType == 'percent'
+                              ? 'Discount (${_discountValue.toStringAsFixed(_discountValue == _discountValue.truncateToDouble() ? 0 : 1)}%)'
+                              : 'Discount',
+                          value: '- \u20B9${fmt.format(_discountAmount)}',
+                          valueColor: const Color(0xFF38D68A),
                         ),
                       ],
                       const SizedBox(height: 12),
@@ -1537,5 +1627,49 @@ class _TotalRow extends StatelessWidget {
                   fontWeight:
                       isBold ? FontWeight.w800 : FontWeight.w600)),
         ],
+      );
+}
+
+// ── Discount Type Chip ────────────────────────────────────────────────────────
+
+class _DiscountTypeChip extends StatelessWidget {
+  final String   label;
+  final bool     selected;
+  final VoidCallback onTap;
+
+  const _DiscountTypeChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFFF59E0B).withValues(alpha: 0.15)
+                : const Color(0xFF1C2130),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: selected
+                  ? const Color(0xFFF59E0B).withValues(alpha: 0.6)
+                  : const Color(0xFF2A3040),
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected
+                  ? const Color(0xFFF59E0B)
+                  : const Color(0xFF8C8E9A),
+              fontSize: 12,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
       );
 }

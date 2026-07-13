@@ -2,6 +2,17 @@
 //
 // Generates a Tax Invoice PDF matching the reference format exactly.
 // No rupee symbols anywhere. No lags (no heavy ops on main thread).
+//
+// FIX: Content now spans the full A4 page.
+//   • All Container widgets set width: double.infinity so every section
+//     fills the page width (in the pdf package, unlike Flutter, containers
+//     do NOT auto-expand to available width without this).
+//   • Items table pads up to a minimum of 12 rows so the table section
+//     always occupies meaningful vertical space. Empty rows are visually
+//     indistinguishable from blank invoice lines.
+//   • Cell and section padding increased so the page reads as full.
+//   • pw.MultiPage handles overflow: bills with more items automatically
+//     continue on page 2, 3, etc.
 
 import 'dart:typed_data';
 import 'package:intl/intl.dart';
@@ -128,11 +139,15 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
   final fullBorder = pw.TableBorder.all(color: cBorder, width: 0.5);
 
   // ── Cell helpers ───────────────────────────────────────────────────
+  // FIX: Increased vertical padding from 3.5 → 6 so rows are taller and
+  //      the items section fills more of the page.
+
   // Header cell (grey bg)
   pw.Widget hCell(String t, {pw.TextAlign align = pw.TextAlign.center}) =>
       pw.Container(
+        width: double.infinity,
         color: cBg,
-        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3.5),
+        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: pw.Text(t, style: smallBold, textAlign: align),
       );
 
@@ -140,13 +155,14 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
   pw.Widget dCell(String t,
       {pw.TextAlign align = pw.TextAlign.center, bool bold = false}) =>
       pw.Container(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3.5),
+        width: double.infinity,
+        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: pw.Text(t, style: bold ? smallBold : small, textAlign: align),
       );
 
   // Padded text helper for manual table rows
   pw.Widget pad(pw.Widget child) => pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 3.5),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
       child: child);
 
   // ── Compute totals ─────────────────────────────────────────────────
@@ -188,7 +204,8 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
         dCell(fmt.format(item.rate), align: pw.TextAlign.right),
         // GST column: amount on top, rate% in parentheses below
         pw.Container(
-          padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          width: double.infinity,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 6),
           child: taxRate > 0
               ? pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
@@ -206,6 +223,20 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
       ],
     );
   });
+
+  // FIX: Pad the item rows so the table always has at least 12 rows.
+  // This prevents the invoice from looking half-empty for bills with
+  // very few items. Blank rows are identical in height to data rows.
+  const _minItemRows = 12;
+  final blankRows = List.generate(
+    (_minItemRows - bill.items.length).clamp(0, _minItemRows),
+    (_) => pw.TableRow(
+      children: [
+        dCell(''), dCell(''), dCell(''), dCell(''), dCell(''),
+        dCell(''), dCell(''), dCell(''), dCell(''),
+      ],
+    ),
+  );
 
   // ── Tax summary rows ───────────────────────────────────────────────
   final taxSummaryDataRows = hsnMap.entries.map((e) {
@@ -240,20 +271,24 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
   pdf.addPage(
     pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.fromLTRB(12, 14, 12, 14),
+      // Slightly larger margins so the content area is well-framed.
+      margin: const pw.EdgeInsets.fromLTRB(14, 16, 14, 16),
       build: (ctx) => [
 
-        // ── 1. TITLE: "Tax Invoice" centered ──────────────────────
+        // ── 1. TITLE: "ESTIMATE" centered ─────────────────────────
         pw.Center(child: pw.Text('ESTIMATE', style: titleStyle)),
-        pw.SizedBox(height: 6),
+        pw.SizedBox(height: 8),
 
         // ── 2. COMPANY HEADER BOX ─────────────────────────────────
+        // FIX: width: double.infinity ensures the container stretches to
+        //      full page width (pdf package containers don't auto-expand).
         pw.Container(
+          width: double.infinity,
           decoration: pw.BoxDecoration(
             border: pw.Border.all(color: cBorder, width: 0.5),
           ),
           child: pw.Padding(
-            padding: const pw.EdgeInsets.all(7),
+            padding: const pw.EdgeInsets.all(9),
             child: pw.Row(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
@@ -270,10 +305,10 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                           color: PdfColors.blue900,
                         ),
                       ),
-                      pw.SizedBox(height: 4),
+                      pw.SizedBox(height: 5),
                       if (bill.businessAddress.isNotEmpty)
                         pw.Text(bill.businessAddress, style: small),
-                      pw.SizedBox(height: 3),
+                      pw.SizedBox(height: 4),
                       pw.Row(children: [
                         pw.Text('Phone: ', style: tinyMuted),
                         pw.Text('', style: small),
@@ -281,7 +316,7 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                         pw.Text('Email: ', style: tinyMuted),
                         pw.Text('', style: small),
                       ]),
-                      pw.SizedBox(height: 2),
+                      pw.SizedBox(height: 3),
                       pw.Row(children: [
                         pw.Text('GSTIN: ', style: tinyMuted),
                         pw.Text('', style: small),
@@ -313,11 +348,13 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
             // Section labels row
             pw.TableRow(children: [
               pw.Container(
-                padding: const pw.EdgeInsets.fromLTRB(7, 4, 7, 2),
+                width: double.infinity,
+                padding: const pw.EdgeInsets.fromLTRB(8, 5, 8, 3),
                 child: pw.Text('Bill To:', style: bodyBold),
               ),
               pw.Container(
-                padding: const pw.EdgeInsets.fromLTRB(7, 4, 7, 2),
+                width: double.infinity,
+                padding: const pw.EdgeInsets.fromLTRB(8, 5, 8, 3),
                 child: pw.Text('Invoice Details:', style: bodyBold),
               ),
             ]),
@@ -325,7 +362,8 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
             pw.TableRow(children: [
               // Bill To content
               pw.Container(
-                padding: const pw.EdgeInsets.fromLTRB(7, 1, 7, 5),
+                width: double.infinity,
+                padding: const pw.EdgeInsets.fromLTRB(8, 2, 8, 8),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -333,15 +371,15 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                       bill.clientName.isEmpty ? '-' : bill.clientName,
                       style: bodyBold,
                     ),
-                    pw.SizedBox(height: 2),
+                    pw.SizedBox(height: 3),
                     if (bill.clientAddress.isNotEmpty)
                       pw.Text(bill.clientAddress, style: small),
-                    pw.SizedBox(height: 2),
+                    pw.SizedBox(height: 3),
                     pw.Row(children: [
                       pw.Text('GSTIN: ', style: tinyMuted),
                       pw.Text('', style: small),
                     ]),
-                    pw.SizedBox(height: 1),
+                    pw.SizedBox(height: 2),
                     pw.Row(children: [
                       pw.Text('State: ', style: tinyMuted),
                       pw.Text(
@@ -356,7 +394,8 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
               ),
               // Invoice Details content
               pw.Container(
-                padding: const pw.EdgeInsets.fromLTRB(7, 1, 7, 5),
+                width: double.infinity,
+                padding: const pw.EdgeInsets.fromLTRB(8, 2, 8, 8),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -364,12 +403,12 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                       pw.Text('Invoice No.: ', style: small),
                       pw.Text(bill.billNumber, style: bodyBold),
                     ]),
-                    pw.SizedBox(height: 3),
+                    pw.SizedBox(height: 4),
                     pw.Row(children: [
                       pw.Text('Date: ', style: small),
                       pw.Text(date, style: bodyBold),
                     ]),
-                    pw.SizedBox(height: 3),
+                    pw.SizedBox(height: 4),
                     pw.Row(children: [
                       pw.Text('Place Of Supply: ', style: small),
                       pw.Text(placeOfSupply, style: bodyBold),
@@ -411,8 +450,11 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                 hCell('Amount', align: pw.TextAlign.right),
               ],
             ),
-            // Item rows
+            // Actual item rows
             ...itemRows,
+            // Blank padding rows (brings items table to minimum 12 rows
+            // so the invoice fills the full page for short bills).
+            ...blankRows,
             // Total row
             pw.TableRow(
               decoration: pw.BoxDecoration(color: cBg),
@@ -458,7 +500,7 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                   children: [
                     pw.Container(
                       width: double.infinity,
-                      padding: const pw.EdgeInsets.fromLTRB(6, 3.5, 6, 3.5),
+                      padding: const pw.EdgeInsets.fromLTRB(6, 5, 6, 5),
                       child: pw.Text('Tax Summary:', style: bodyBold),
                     ),
                     pw.Table(
@@ -488,6 +530,7 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                             hCell('Taxable amount',
                                 align: pw.TextAlign.right),
                             pw.Container(
+                              width: double.infinity,
                               color: cBg,
                               padding: const pw.EdgeInsets.symmetric(
                                   horizontal: 3, vertical: 5),
@@ -579,8 +622,6 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                 ),
 
                 // Right: Totals
-                // horizontalInside removed — borders are applied per-row so
-                // we can drop the line before Balance and box it separately.
                 pw.Table(
                   border: pw.TableBorder(
                     top: pw.BorderSide.none,
@@ -597,14 +638,14 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                     2: pw.FlexColumnWidth(2),    // value
                   },
                   children: [
-                    // Sub Total (no top border — first row)
+                    // Sub Total
                     pw.TableRow(children: [
                       pad(pw.Text('Sub Total', style: small)),
                       pad(pw.Text(':', style: small)),
                       pad(pw.Text(fmt.format(bill.subtotal),
                           style: small, textAlign: pw.TextAlign.right)),
                     ]),
-                    // Discount (only shown if > 0) — separator on top
+                    // Discount (only shown if > 0)
                     if (bill.discountAmount > 0)
                       pw.TableRow(
                         decoration: pw.BoxDecoration(
@@ -626,7 +667,7 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                               textAlign: pw.TextAlign.right)),
                         ],
                       ),
-                    // Total (bold) — separator on top
+                    // Total (bold)
                     pw.TableRow(
                       decoration: pw.BoxDecoration(
                         border: pw.Border(
@@ -641,8 +682,7 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
                             textAlign: pw.TextAlign.right)),
                       ],
                     ),
-                    // Received — separator on top, NO bottom border
-                    // (intentionally no line between Received and Balance)
+                    // Received
                     pw.TableRow(
                       decoration: pw.BoxDecoration(
                         border: pw.Border(
@@ -678,12 +718,13 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
           ],
         ),
 
-        // ── 5b. INVOICE AMOUNT IN WORDS (full width, left aligned) ──
+        // ── 5b. INVOICE AMOUNT IN WORDS (full width) ──────────────
         pw.Container(
+          width: double.infinity,
           decoration: pw.BoxDecoration(
             border: pw.Border.all(color: cBorder, width: 0.5),
           ),
-          padding: const pw.EdgeInsets.fromLTRB(8, 4, 8, 4),
+          padding: const pw.EdgeInsets.fromLTRB(8, 6, 8, 6),
           child: pw.Row(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
@@ -708,15 +749,16 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
 
         // ── 6. TERMS & CONDITIONS ─────────────────────────────────
         pw.Container(
+          width: double.infinity,
           decoration: pw.BoxDecoration(
             border: pw.Border.all(color: cBorder, width: 0.5),
           ),
-          padding: const pw.EdgeInsets.all(6),
+          padding: const pw.EdgeInsets.all(8),
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
               pw.Text('Terms & Conditions:', style: bodyBold),
-              pw.SizedBox(height: 3),
+              pw.SizedBox(height: 5),
               pw.Text(
                 '1. Shirts must be returned in original condition with tags intact to be eligible for exchange.\n'
                 '2. Discounts, if any, are applied at the time of sale and cannot be claimed later.\n'
@@ -739,47 +781,51 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
             pw.TableRow(children: [
               // Bank Details
               pw.Container(
-                padding: const pw.EdgeInsets.all(8),
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(10),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text('Bank Details:', style: bodyBold),
-                    pw.SizedBox(height: 4),
+                    pw.SizedBox(height: 6),
                     pw.Row(children: [
                       pw.Text('Name : ', style: tinyMuted),
                       pw.Text('', style: small),
                     ]),
-                    pw.SizedBox(height: 3),
+                    pw.SizedBox(height: 5),
                     pw.Row(children: [
                       pw.Text('Account No. : ', style: tinyMuted),
                       pw.Text('', style: small),
                     ]),
-                    pw.SizedBox(height: 3),
+                    pw.SizedBox(height: 5),
                     pw.Row(children: [
                       pw.Text('IFSC code : ', style: tinyMuted),
                       pw.Text('', style: small),
                     ]),
-                    pw.SizedBox(height: 3),
+                    pw.SizedBox(height: 5),
                     pw.Row(children: [
                       pw.Text('Account holder\'s name : ', style: tinyMuted),
                       pw.Text('', style: small),
                     ]),
-                    pw.SizedBox(height: 3),
+                    pw.SizedBox(height: 5),
                   ],
                 ),
               ),
               // Authorized Signatory
+              // FIX: signature space increased from 36 → 60 pt so the
+              //      section occupies more vertical room on the page.
               pw.Container(
-                padding: const pw.EdgeInsets.all(6),
+                width: double.infinity,
+                padding: const pw.EdgeInsets.all(8),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text('For ${bill.businessName}', style: bodyBold),
-                    pw.SizedBox(height: 36),
+                    pw.SizedBox(height: 60),
                     pw.Container(
                         width: 100, height: 0.6,
                         color: PdfColor.fromHex('888888')),
-                    pw.SizedBox(height: 3),
+                    pw.SizedBox(height: 4),
                     pw.Text('Authorized Signatory', style: tinyMuted),
                   ],
                 ),

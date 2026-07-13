@@ -4,9 +4,14 @@
 // through Google Docs Viewer. This gives real native pinch-to-zoom and is
 // much faster: the file is downloaded once (and cached) and rendered
 // on-device, with no dependency on an external conversion service.
+//
+// FIX: Added gestureRecognizers to forward ScaleGestureRecognizer to the
+// platform view. Without this, Flutter's gesture arena wins on pinch events
+// and the native PDF renderer never receives them — so zoom didn't work.
 
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:http/http.dart' as http;
@@ -138,6 +143,15 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
               pageFling: false,
               pageSnap: false,
               fitPolicy: FitPolicy.WIDTH,
+              // FIX: Forward pinch/scale gestures to the native platform view.
+              // Without this set, Flutter's own gesture arena consumes scale
+              // events before the underlying Android PdfViewer / iOS WKWebView
+              // renderer ever sees them, making pinch-to-zoom impossible.
+              gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                Factory<ScaleGestureRecognizer>(
+                  () => ScaleGestureRecognizer(),
+                ),
+              },
               onRender: (pages) {
                 if (mounted) setState(() => _pages = pages ?? 0);
               },
