@@ -17,6 +17,7 @@ import 'package:synccash/features/auth/presentation/providers/auth_provider.dart
     show currentCashbookIdProvider;
 import '../providers/purchase_client_provider.dart';
 import '../providers/purchase_bill_provider.dart';
+import '../../domain/entities/purchase_bill_entity.dart';
 import 'purchase_client_detail_screen.dart';
 import '../purchase_routes.dart';
 
@@ -29,6 +30,27 @@ class _T {
   static const text    = Color(0xFFF1F2F5);
   static const accent  = Color(0xFFF59E0B); // amber — purchase feature accent
   static const red     = Color(0xFFFC8181);
+  static const green   = Color(0xFF4ADE80);
+  static const panel   = Color(0xFF16171A);
+  static const line    = Color(0xFF232428);
+  static const line2   = Color(0xFF2C2D32);
+  static const text2   = Color(0xFFD4D6E0);
+  static const muted2  = Color(0xFF6B6D78);
+}
+
+/// One expense transaction relevant to this purchase screen.
+class _PurchasePayRec {
+  final double   amount;
+  final DateTime createdAt;
+  final String?  linkedBillId;   // non-null when linked to a specific bill
+  final String?  obClientName;   // non-null when this is an OB payment
+
+  const _PurchasePayRec({
+    required this.amount,
+    required this.createdAt,
+    this.linkedBillId,
+    this.obClientName,
+  });
 }
 
 class PurchasesScreen extends ConsumerStatefulWidget {
@@ -44,8 +66,9 @@ class _PurchasesScreenState extends ConsumerState<PurchasesScreen> {
   // bill total minus every expense transaction linked to it, recomputed on
   // every Firestore update so partial payments show up instantly.
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _txSub;
-  Map<String, double> _paidPerBill = {};
-  Map<String, double> _obPaidByClient = {};
+  Map<String, double>  _paidPerBill    = {};
+  Map<String, double>  _obPaidByClient = {};
+  List<_PurchasePayRec> _allPayRecs    = [];
 
   @override
   void initState() {
@@ -65,25 +88,32 @@ class _PurchasesScreenState extends ConsumerState<PurchasesScreen> {
         .snapshots()
         .listen((snap) {
       if (!mounted) return;
-      final perBill = <String, double>{};
+      final perBill    = <String, double>{};
       final obByClient = <String, double>{};
+      final payRecs    = <_PurchasePayRec>[];
       for (final d in snap.docs) {
-        final raw = d.data();
-        final linkedId = raw['linkedPurchaseBillId'] as String?;
-        final amount = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+        final raw       = d.data();
+        final linkedId  = raw['linkedPurchaseBillId'] as String?;
+        final amount    = (raw['amount'] as num?)?.toDouble() ?? 0.0;
+        final createdAt = (raw['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
         if (linkedId != null && linkedId.isNotEmpty) {
           perBill[linkedId] = (perBill[linkedId] ?? 0.0) + amount;
+          payRecs.add(_PurchasePayRec(
+            amount: amount, createdAt: createdAt, linkedBillId: linkedId));
         } else if (raw['isObPayment'] == true) {
           final obClient =
               (raw['obPartyName'] as String? ?? '').trim().toLowerCase();
           if (obClient.isNotEmpty) {
             obByClient[obClient] = (obByClient[obClient] ?? 0.0) + amount;
+            payRecs.add(_PurchasePayRec(
+              amount: amount, createdAt: createdAt, obClientName: obClient));
           }
         }
       }
       setState(() {
-        _paidPerBill = perBill;
+        _paidPerBill    = perBill;
         _obPaidByClient = obByClient;
+        _allPayRecs     = payRecs;
       });
     });
   }
@@ -92,6 +122,29 @@ class _PurchasesScreenState extends ConsumerState<PurchasesScreen> {
   void dispose() {
     _txSub?.cancel();
     super.dispose();
+  }
+
+  void _showBillAmtDetail(List<PurchaseBillEntity> allBills) {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AllBillsDetailSheet(bills: allBills),
+    );
+  }
+
+  void _showPaidDetail(List<PurchaseBillEntity> allBills) {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AllPaymentsDetailSheet(
+        payRecs:  _allPayRecs,
+        allBills: allBills,
+      ),
+    );
   }
 
   void _openAddSheet() {
@@ -291,9 +344,11 @@ class _PurchasesScreenState extends ConsumerState<PurchasesScreen> {
             // ── Summary strip ─────────────────────────────────────────────
             if (allClients.isNotEmpty || allBills.isNotEmpty)
               _PurchaseSummaryStrip(
-                totalBillAmt: _totalBillAmt,
-                totalPaid:    _totalPaid,
-                totalClosing: _totalClosing,
+                totalBillAmt:   _totalBillAmt,
+                totalPaid:      _totalPaid,
+                totalClosing:   _totalClosing,
+                onBillAmtTap:   allBills.isNotEmpty ? () => _showBillAmtDetail(allBills) : null,
+                onPaidTap:      _allPayRecs.isNotEmpty ? () => _showPaidDetail(allBills) : null,
               ),
             const SizedBox(height: 8),
             Padding(
@@ -759,14 +814,18 @@ class _AddPurchaseClientBillSheetState
 // ─── Purchase summary strip ──────────────────────────────────────────────────
 
 class _PurchaseSummaryStrip extends StatelessWidget {
-  final double totalBillAmt;
-  final double totalPaid;
-  final double totalClosing;
+  final double        totalBillAmt;
+  final double        totalPaid;
+  final double        totalClosing;
+  final VoidCallback? onBillAmtTap;
+  final VoidCallback? onPaidTap;
 
   const _PurchaseSummaryStrip({
     required this.totalBillAmt,
     required this.totalPaid,
     required this.totalClosing,
+    this.onBillAmtTap,
+    this.onPaidTap,
   });
 
   @override
@@ -786,12 +845,14 @@ class _PurchaseSummaryStrip extends StatelessWidget {
             label: 'Bill Amt',
             value: '₹${fmt.format(totalBillAmt)}',
             color: _T.text,
+            onTap: onBillAmtTap,
           ),
           _PurchaseSummaryDivider(),
           _PurchaseSummaryCell(
             label: 'Paid',
             value: '₹${fmt.format(totalPaid)}',
             color: const Color(0xFF38D68A),
+            onTap: onPaidTap,
           ),
           _PurchaseSummaryDivider(),
           _PurchaseSummaryCell(
@@ -806,42 +867,58 @@ class _PurchaseSummaryStrip extends StatelessWidget {
 }
 
 class _PurchaseSummaryCell extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color  color;
+  final String        label;
+  final String        value;
+  final Color         color;
+  final VoidCallback? onTap;
   const _PurchaseSummaryCell({
     required this.label,
     required this.value,
     required this.color,
+    this.onTap,
   });
   @override
   Widget build(BuildContext context) => Expanded(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: _T.muted,
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.3,
+    child: GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: _T.muted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              if (onTap != null) ...[
+                const SizedBox(width: 2),
+                const Icon(Icons.keyboard_arrow_down_rounded,
+                    color: _T.muted, size: 11),
+              ],
+            ],
           ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          value,
-          style: TextStyle(
-            color: color,
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.3,
+          const SizedBox(height: 3),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.3,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
+        ],
+      ),
     ),
   );
 }
@@ -854,4 +931,283 @@ class _PurchaseSummaryDivider extends StatelessWidget {
     margin: const EdgeInsets.symmetric(horizontal: 4),
     color: _T.border,
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  All Bills Detail Sheet — shown when Bill Amt is tapped
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AllBillsDetailSheet extends StatelessWidget {
+  final List<PurchaseBillEntity> bills;
+  const _AllBillsDetailSheet({required this.bills});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt     = NumberFormat('#,##,##0.##', 'en_IN');
+    final dateFmt = DateFormat('dd MMM yyyy');
+    final sorted  = List<PurchaseBillEntity>.from(bills)
+      ..sort((a, b) => b.billDate.compareTo(a.billDate));
+    final total = bills.fold(0.0, (s, b) => s + b.billAmount);
+    final maxH  = MediaQuery.of(context).size.height * 0.80;
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: maxH),
+      decoration: const BoxDecoration(
+        color: _T.panel,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.only(top: 14, bottom: 16),
+            decoration: BoxDecoration(
+              color: _T.line2, borderRadius: BorderRadius.circular(2)),
+          ),
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.receipt_long_rounded,
+                    color: _T.accent, size: 16),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('ALL BILLS',
+                      style: TextStyle(
+                          color: _T.text,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.4)),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('₹${fmt.format(total)}',
+                        style: const TextStyle(
+                            color: _T.text2,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.4)),
+                    Text('${bills.length} bills',
+                        style: const TextStyle(
+                            color: _T.muted, fontSize: 10)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Container(height: 1, color: _T.line2),
+          // List
+          Flexible(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+              itemCount: sorted.length,
+              separatorBuilder: (_, __) =>
+                  Container(height: 1, color: _T.line),
+              itemBuilder: (_, i) {
+                final b = sorted[i];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 32, height: 32,
+                        decoration: BoxDecoration(
+                          color: _T.accent.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: _T.line2),
+                        ),
+                        child: const Icon(Icons.description_rounded,
+                            color: _T.accent, size: 13),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(b.billNumber,
+                                style: const TextStyle(
+                                    color: _T.text,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 2),
+                            Text(b.clientName,
+                                style: const TextStyle(
+                                    color: _T.muted2, fontSize: 11)),
+                            Text(dateFmt.format(b.billDate),
+                                style: const TextStyle(
+                                    color: _T.muted2, fontSize: 10)),
+                          ],
+                        ),
+                      ),
+                      Text('₹${fmt.format(b.billAmount)}',
+                          style: const TextStyle(
+                              color: _T.text2,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3)),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  All Payments Detail Sheet — shown when Paid is tapped
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AllPaymentsDetailSheet extends StatelessWidget {
+  final List<_PurchasePayRec>    payRecs;
+  final List<PurchaseBillEntity> allBills;
+  const _AllPaymentsDetailSheet({
+    required this.payRecs,
+    required this.allBills,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt     = NumberFormat('#,##,##0.##', 'en_IN');
+    final dateFmt = DateFormat('dd MMM yyyy  hh:mm a');
+
+    // Build lookup maps from bills
+    final billNoMap     = <String, String>{};  // billId → billNumber
+    final billClientMap = <String, String>{};  // billId → clientName
+    for (final b in allBills) {
+      billNoMap[b.purchaseBillId]     = b.billNumber;
+      billClientMap[b.purchaseBillId] = b.clientName;
+    }
+
+    final sorted = List<_PurchasePayRec>.from(payRecs)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final total = payRecs.fold(0.0, (s, p) => s + p.amount);
+    final maxH  = MediaQuery.of(context).size.height * 0.80;
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: maxH),
+      decoration: const BoxDecoration(
+        color: _T.panel,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          Container(
+            width: 36, height: 4,
+            margin: const EdgeInsets.only(top: 14, bottom: 16),
+            decoration: BoxDecoration(
+              color: _T.line2, borderRadius: BorderRadius.circular(2)),
+          ),
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Row(
+              children: [
+                const Icon(Icons.payments_rounded,
+                    color: _T.green, size: 16),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('PAYMENTS SENT',
+                      style: TextStyle(
+                          color: _T.text,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.4)),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('₹${fmt.format(total)}',
+                        style: const TextStyle(
+                            color: _T.green,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.4)),
+                    Text(
+                        '${sorted.length} entr${sorted.length != 1 ? "ies" : "y"}',
+                        style: const TextStyle(
+                            color: _T.muted, fontSize: 10)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Container(height: 1, color: _T.line2),
+          // List
+          Flexible(
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(0, 8, 0, 24),
+              itemCount: sorted.length,
+              separatorBuilder: (_, __) =>
+                  Container(height: 1, color: _T.line),
+              itemBuilder: (_, i) {
+                final p = sorted[i];
+                final clientName = p.linkedBillId != null
+                    ? (billClientMap[p.linkedBillId] ?? '—')
+                    : (p.obClientName ?? '—');
+                final billLabel = p.linkedBillId != null
+                    ? (billNoMap[p.linkedBillId] ?? 'Bill')
+                    : 'Opening Balance';
+                return Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 12),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 32, height: 32,
+                        decoration: BoxDecoration(
+                          color: _T.green.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: _T.green.withValues(alpha: 0.18)),
+                        ),
+                        child: const Icon(Icons.arrow_upward_rounded,
+                            color: _T.green, size: 13),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(clientName,
+                                style: const TextStyle(
+                                    color: _T.text,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 2),
+                            Text(billLabel,
+                                style: const TextStyle(
+                                    color: _T.muted2, fontSize: 11)),
+                            Text(dateFmt.format(p.createdAt),
+                                style: const TextStyle(
+                                    color: _T.muted2, fontSize: 10)),
+                          ],
+                        ),
+                      ),
+                      Text('₹${fmt.format(p.amount)}',
+                          style: const TextStyle(
+                              color: _T.green,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3)),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
