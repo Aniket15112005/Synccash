@@ -85,12 +85,23 @@ class CashbookRepositoryImpl implements CashbookRepository {
     final cashbook = CashbookModel.fromJson(doc.data(), doc.id);
 
     final pid = cashbook.participantId;
-    if (pid != null && pid.isNotEmpty) {
-      throw Exception('Terminal Access Denied: Channel Busy.');
+
+    // Already-linked account (owner or existing participant) re-entering
+    // their own code — e.g. after a stale/empty local cache bounced them
+    // back to the pairing screen. This must succeed, not be treated as a
+    // channel conflict, otherwise a legitimately paired user can get
+    // permanently locked out of their own cashbook.
+    if (cashbook.ownerId == userId || pid == userId) {
+      await _withRetry(() => _firestore
+          .collection('users')
+          .doc(userId)
+          .set({'currentCashbookId': doc.id}, SetOptions(merge: true)));
+
+      return cashbook;
     }
 
-    if (cashbook.ownerId == userId) {
-      throw Exception('Cannot join your own cashbook.');
+    if (pid != null && pid.isNotEmpty) {
+      throw Exception('Terminal Access Denied: Channel Busy.');
     }
 
     await _withRetry(() => doc.reference.update({'participantId': userId}));

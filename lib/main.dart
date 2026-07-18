@@ -30,34 +30,37 @@ void main() async {
       cacheSizeBytes: 100 * 1024 * 1024,
     );
   } else {
-    // Web/PWA: auto-detect when the browser needs long-polling instead of
-    // WebChannel streaming. Some networks (corporate proxies, some mobile
-    // carriers) and iOS Safari/PWA's WKWebView silently buffer or kill the
-    // streaming connection Firestore normally uses, which is one of the
-    // causes behind screens (like Bills) getting permanently stuck on
-    // their loading spinner. Auto-detect long-polling falls back
-    // automatically only when needed, so it's safe to always enable.
-    FirebaseFirestore.instance.settings = const Settings(
-      webExperimentalAutoDetectLongPolling: true,
-    );
-
-    // NOTE: Settings.persistenceEnabled (used above for mobile) has NO
-    // effect on Flutter Web — it's silently ignored. Web needs this
-    // separate call instead, or Firestore only ever has an in-memory
-    // cache that starts EMPTY on every cold PWA launch. That's what was
-    // causing the app to land on the pairing screen right after login on
-    // iOS PWA (currentCashbookId looked missing because there was nothing
-    // to read it from before the network caught up), and the "client
-    // offline" error when submitting a pairing code moments later.
+    // Web/PWA: enable persistence AND auto-detect long-polling in a single
+    // Settings assignment.
+    //
+    // IMPORTANT: this used to be two separate steps — a `.settings =`
+    // assignment followed by a separate `enablePersistence()` call. As of
+    // the current cloud_firestore_web package, `.settings =` alone already
+    // configures a cache under the hood (memory cache by default). That
+    // means a later `enablePersistence()` call always conflicts with the
+    // cache the settings assignment already specified, throwing
+    // `[cloud_firestore/failed-precondition] SDK cache is already
+    // specified.` — on every launch, not just hot restarts.
+    //
+    // Passing `persistenceEnabled: true` directly here enables the
+    // persistent (IndexedDB) cache as part of that single assignment, so
+    // there's no second call left to conflict with. This also fixes the
+    // original problem this code was written for: Firestore only ever
+    // having an in-memory cache that starts EMPTY on every cold PWA
+    // launch, which was causing the app to land on the pairing screen
+    // right after login (currentCashbookId looked missing because there
+    // was nothing to read it from before the network caught up), and the
+    // "client offline" error when submitting a pairing code moments later.
     try {
-      await FirebaseFirestore.instance.enablePersistence(
-        const PersistenceSettings(synchronizeTabs: true),
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: true,
+        webExperimentalAutoDetectLongPolling: true,
       );
     } catch (e) {
-      // Can throw if persistence was already enabled in another tab, or
-      // isn't supported in this browser context — safe to ignore, the app
-      // just falls back to in-memory cache in that case.
-      if (kDebugMode) debugPrint('⚠️ enablePersistence failed: $e');
+      // Can throw if this browser context doesn't support persistence
+      // (e.g. private browsing) — safe to ignore, Firestore falls back to
+      // an in-memory cache in that case.
+      if (kDebugMode) debugPrint('⚠️ Firestore settings failed: $e');
     }
   }
 

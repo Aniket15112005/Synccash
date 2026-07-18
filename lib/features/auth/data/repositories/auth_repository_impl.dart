@@ -63,6 +63,8 @@ class AuthRepositoryImpl implements AuthRepository {
     try {
       initial = await _withRetry(
         () => ref.get(const GetOptions(source: Source.server)),
+        retries: 6,
+        delay: const Duration(milliseconds: 900),
       );
     } catch (_) {
       // Genuinely no network after retrying — fall back to whatever's cached
@@ -78,18 +80,35 @@ class AuthRepositoryImpl implements AuthRepository {
     }
 
     if (initial != null) {
+      final fromServer = !initial.metadata.isFromCache;
+
       // If the confirmed server doc doesn't exist yet, create it now so
       // later reads (and other devices) see a consistent record.
       if (!initial.exists) {
-        final fallbackUser = UserModel(
-          uid: firebaseUser.uid,
-          email: firebaseUser.email ?? '',
-          displayName: '',
-        );
-        _withRetry(() => ref.set(fallbackUser.toJson())).catchError((_) {});
-        yield fallbackUser;
+        if (fromServer) {
+          final fallbackUser = UserModel(
+            uid: firebaseUser.uid,
+            email: firebaseUser.email ?? '',
+            displayName: '',
+          );
+          _withRetry(() => ref.set(fallbackUser.toJson())).catchError((_) {});
+          yield fallbackUser;
+        }
+        // Cache says "doesn't exist" — ambiguous (could just be an
+        // uncached brand-new tab). Don't create/overwrite anything from
+        // a guess; wait for the live listener below to confirm.
       } else {
-        yield _mapDoc(firebaseUser, initial);
+        final mapped = _mapDoc(firebaseUser, initial);
+        // A cache-sourced doc that already shows a cashbook is safe to
+        // trust immediately (positive info). A cache-sourced doc showing
+        // NO cashbook is ambiguous — it may just predate pairing — so
+        // don't act on it. Stay in "loading" (router keeps showing the
+        // splash a moment longer) until the live listener below delivers
+        // a real, server-confirmed snapshot. This is what stops an
+        // already-paired user from ever flashing the pairing screen.
+        if (mapped.currentCashbookId != null || fromServer) {
+          yield mapped;
+        }
       }
     }
 
