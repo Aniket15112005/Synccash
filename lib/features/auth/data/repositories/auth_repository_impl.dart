@@ -8,42 +8,99 @@ class AuthRepositoryImpl implements AuthRepository {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  // ── Offline-tolerant retry wrapper ────────────────────────────────────────
+  // Right after a fresh iOS PWA login, Firestore's own connection can still
+  // be mid-handshake even though Firebase Auth already succeeded (Auth and
+  // Firestore use separate connections). A one-shot server read can throw
+  // `unavailable` in that window. Retry briefly instead of giving up.
+  Future<T> _withRetry<T>(
+    Future<T> Function() task, {
+    int retries = 4,
+    Duration delay = const Duration(milliseconds: 700),
+  }) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await task();
+      } on FirebaseException catch (e) {
+        final retryable = e.code == 'unavailable' || e.code == 'deadline-exceeded';
+        if (!retryable || attempt >= retries) rethrow;
+        await Future.delayed(delay);
+      }
+    }
+  }
+
+  UserEntity _mapDoc(User firebaseUser, DocumentSnapshot<Map<String, dynamic>> doc) {
+    if (!doc.exists) {
+      return UserModel(
+        uid: firebaseUser.uid,
+        email: firebaseUser.email ?? '',
+        displayName: '',
+      );
+    }
+    return UserModel.fromJson(doc.data()!);
+  }
+
   @override
   Stream<UserEntity?> get authStateChanges {
     return _auth.authStateChanges().asyncExpand((firebaseUser) {
       if (firebaseUser == null) return Stream.value(null);
-
-      // snapshots() serves from Firestore LOCAL CACHE instantly on first emit,
-      // then updates from server — no network wait before cashbookId is available.
-      return _firestore
-          .collection('users')
-          .doc(firebaseUser.uid)
-          .snapshots()
-          .asyncMap((doc) async {
-        // Guard: if the snapshot says doc doesn't exist but it came from cache
-        // (i.e. Firestore is offline and hasn't confirmed from server yet),
-        // do NOT create a fallback user — that would wipe currentCashbookId
-        // and send the user to the pairing screen. Return null to keep the
-        // router in its loading state until Firestore reconnects.
-        if (!doc.exists && doc.metadata.isFromCache) {
-          return null;
-        }
-
-        if (!doc.exists) {
-          final fallbackUser = UserModel(
-            uid: firebaseUser.uid,
-            email: firebaseUser.email ?? '',
-            displayName: '',
-          );
-          await _firestore
-              .collection('users')
-              .doc(firebaseUser.uid)
-              .set(fallbackUser.toJson());
-          return fallbackUser as UserEntity?;
-        }
-        return UserModel.fromJson(doc.data()!) as UserEntity?;
-      });
+      return _userDocStream(firebaseUser);
     });
+  }
+
+  // ── The actual fix ─────────────────────────────────────────────────────────
+  // Never let the router's first-ever decision be based on a guess. Before
+  // handing off to the live .snapshots() listener (which can legitimately
+  // serve a fast-but-possibly-stale/empty local snapshot first), get ONE
+  // authoritative answer straight from the server, retrying through the
+  // "connection still waking up" window. Only after that do we start
+  // streaming live updates. This is what guarantees the app never shows the
+  // pairing screen just because the cache happened to be empty or slow.
+  Stream<UserEntity?> _userDocStream(User firebaseUser) async* {
+    final ref = _firestore.collection('users').doc(firebaseUser.uid);
+
+    DocumentSnapshot<Map<String, dynamic>>? initial;
+    try {
+      initial = await _withRetry(
+        () => ref.get(const GetOptions(source: Source.server)),
+      );
+    } catch (_) {
+      // Genuinely no network after retrying — fall back to whatever's cached
+      // (better than nothing), but this is now a last resort, not the norm.
+      try {
+        initial = await ref.get(const GetOptions(source: Source.cache));
+      } catch (_) {
+        // No cache either. Don't emit a guess — stay in the loading state
+        // (router keeps showing splash) until the live listener below
+        // manages to deliver a real snapshot.
+        initial = null;
+      }
+    }
+
+    if (initial != null) {
+      // If the confirmed server doc doesn't exist yet, create it now so
+      // later reads (and other devices) see a consistent record.
+      if (!initial.exists) {
+        final fallbackUser = UserModel(
+          uid: firebaseUser.uid,
+          email: firebaseUser.email ?? '',
+          displayName: '',
+        );
+        _withRetry(() => ref.set(fallbackUser.toJson())).catchError((_) {});
+        yield fallbackUser;
+      } else {
+        yield _mapDoc(firebaseUser, initial);
+      }
+    }
+
+    // From here on, stream live updates as normal. Any individual snapshot
+    // that's a cache-only "doesn't exist" is ignored — we've already
+    // established the authoritative truth above, so a stale/offline blip
+    // shouldn't override it.
+    yield* ref.snapshots().where((doc) {
+      if (!doc.exists && doc.metadata.isFromCache) return false;
+      return true;
+    }).map((doc) => _mapDoc(firebaseUser, doc));
   }
 
   @override
@@ -53,51 +110,23 @@ class AuthRepositoryImpl implements AuthRepository {
       password: password,
     );
 
-    // Try server first, then fall back to local cache (handles iOS PWA where
-    // Firestore's WebChannel is offline during the first login attempt).
-    // Without this, the raw .get() throws "client offline", shows an error
-    // SnackBar, and the auth state change simultaneously routes the user to
-    // the pairing screen with a blank currentCashbookId.
-    DocumentSnapshot<Map<String, dynamic>> doc;
+    // This return value is only used by the login screen to know the sign-in
+    // call itself succeeded — actual navigation happens via authStateChanges
+    // above, which now handles the offline/cache-timing race correctly. We
+    // still try to give back real data here on a best-effort basis.
     try {
-      doc = await _firestore
+      final doc = await _withRetry(() => _firestore
           .collection('users')
           .doc(credentials.user!.uid)
-          .get(const GetOptions(source: Source.serverAndCache));
+          .get(const GetOptions(source: Source.server)));
+      return _mapDoc(credentials.user!, doc);
     } catch (_) {
-      // Server unreachable — try cache
-      try {
-        doc = await _firestore
-            .collection('users')
-            .doc(credentials.user!.uid)
-            .get(const GetOptions(source: Source.cache));
-      } catch (_) {
-        // No cache either — return a placeholder. The authStateChanges stream
-        // will emit the real user document once Firestore reconnects.
-        return UserModel(
-          uid: credentials.user!.uid,
-          email: email,
-          displayName: '',
-        );
-      }
-    }
-
-    if (!doc.exists) {
-      final newUser = UserModel(
+      return UserModel(
         uid: credentials.user!.uid,
         email: email,
         displayName: '',
       );
-      // Queue the write — Firestore will sync once connection resumes
-      _firestore
-          .collection('users')
-          .doc(newUser.uid)
-          .set(newUser.toJson())
-          .catchError((_) {});
-      return newUser;
     }
-
-    return UserModel.fromJson(doc.data()!);
   }
 
   @override
@@ -117,10 +146,10 @@ class AuthRepositoryImpl implements AuthRepository {
       displayName: name,
     );
 
-    await _firestore
+    await _withRetry(() => _firestore
         .collection('users')
         .doc(model.uid)
-        .set(model.toJson());
+        .set(model.toJson()));
 
     return model;
   }

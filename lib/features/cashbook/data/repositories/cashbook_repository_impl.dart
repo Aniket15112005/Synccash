@@ -8,6 +8,29 @@ import 'package:synccash/features/cashbook/domain/repositories/cashbook_reposito
 class CashbookRepositoryImpl implements CashbookRepository {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  // ── Offline-tolerant retry wrapper ────────────────────────────────────────
+  // On iOS PWA the Firestore long-polling connection can still be mid-handshake
+  // right after a fresh login, so a one-shot get()/update()/set() can throw
+  // `[cloud_firestore/unavailable] ... client is offline` even though the
+  // connection comes up a moment later. Instead of failing the pairing flow
+  // on that first attempt, retry a couple of times with a short backoff
+  // before surfacing the error to the user.
+  Future<T> _withRetry<T>(
+    Future<T> Function() task, {
+    int retries = 3,
+    Duration delay = const Duration(milliseconds: 800),
+  }) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await task();
+      } on FirebaseException catch (e) {
+        final retryable = e.code == 'unavailable' || e.code == 'deadline-exceeded';
+        if (!retryable || attempt >= retries) rethrow;
+        await Future.delayed(delay);
+      }
+    }
+  }
+
   String _generateInviteCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     return String.fromCharCodes(
@@ -32,12 +55,12 @@ class CashbookRepositoryImpl implements CashbookRepository {
       totalExpense: 0.0,
     );
 
-    await docRef.set(model.toJson());
+    await _withRetry(() => docRef.set(model.toJson()));
 
-    await _firestore
+    await _withRetry(() => _firestore
         .collection('users')
         .doc(userId)
-        .set({'currentCashbookId': docRef.id}, SetOptions(merge: true));
+        .set({'currentCashbookId': docRef.id}, SetOptions(merge: true)));
 
     return model;
   }
@@ -48,11 +71,11 @@ class CashbookRepositoryImpl implements CashbookRepository {
 
     final cleanCode = inviteCode.toUpperCase().trim();
 
-    final query = await _firestore
+    final query = await _withRetry(() => _firestore
         .collection('cashbooks')
         .where('inviteCode', isEqualTo: cleanCode)
         .limit(1)
-        .get();
+        .get());
 
     if (query.docs.isEmpty) {
       throw Exception('Validation Failed: Code not recognized.');
@@ -70,12 +93,12 @@ class CashbookRepositoryImpl implements CashbookRepository {
       throw Exception('Cannot join your own cashbook.');
     }
 
-    await doc.reference.update({'participantId': userId});
+    await _withRetry(() => doc.reference.update({'participantId': userId}));
 
-    await _firestore
+    await _withRetry(() => _firestore
         .collection('users')
         .doc(userId)
-        .set({'currentCashbookId': doc.id}, SetOptions(merge: true));
+        .set({'currentCashbookId': doc.id}, SetOptions(merge: true)));
 
     return CashbookModel(
       id: doc.id,

@@ -30,16 +30,35 @@ void main() async {
       cacheSizeBytes: 100 * 1024 * 1024,
     );
   } else {
-    // Web/PWA: FORCE long-polling instead of WebChannel streaming.
-    // iOS Safari / WKWebView silently kills the streaming WebChannel connection
-    // that Firestore uses by default — auto-detect is not reliable enough
-    // because iOS drops the connection before the SDK can detect it needs to
-    // switch. ForceLongPolling is the only mode that works consistently on
-    // iOS PWA (added to Home Screen), fixing the "client offline" error on
-    // login and the pairing-screen redirect caused by missing cashbookId.
+    // Web/PWA: auto-detect when the browser needs long-polling instead of
+    // WebChannel streaming. Some networks (corporate proxies, some mobile
+    // carriers) and iOS Safari/PWA's WKWebView silently buffer or kill the
+    // streaming connection Firestore normally uses, which is one of the
+    // causes behind screens (like Bills) getting permanently stuck on
+    // their loading spinner. Auto-detect long-polling falls back
+    // automatically only when needed, so it's safe to always enable.
     FirebaseFirestore.instance.settings = const Settings(
-      webExperimentalForceLongPolling: true,
+      webExperimentalAutoDetectLongPolling: true,
     );
+
+    // NOTE: Settings.persistenceEnabled (used above for mobile) has NO
+    // effect on Flutter Web — it's silently ignored. Web needs this
+    // separate call instead, or Firestore only ever has an in-memory
+    // cache that starts EMPTY on every cold PWA launch. That's what was
+    // causing the app to land on the pairing screen right after login on
+    // iOS PWA (currentCashbookId looked missing because there was nothing
+    // to read it from before the network caught up), and the "client
+    // offline" error when submitting a pairing code moments later.
+    try {
+      await FirebaseFirestore.instance.enablePersistence(
+        const PersistenceSettings(synchronizeTabs: true),
+      );
+    } catch (e) {
+      // Can throw if persistence was already enabled in another tab, or
+      // isn't supported in this browser context — safe to ignore, the app
+      // just falls back to in-memory cache in that case.
+      if (kDebugMode) debugPrint('⚠️ enablePersistence failed: $e');
+    }
   }
 
   // 3b. Force Firestore to re-establish its realtime connection whenever
