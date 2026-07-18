@@ -4,6 +4,17 @@ import 'package:synccash/features/auth/data/models/user_model.dart';
 import 'package:synccash/features/auth/domain/entities/user_entity.dart';
 import 'package:synccash/features/auth/domain/repositories/auth_repository.dart';
 
+/// Shared flag so unrelated services (e.g. FirestoreReconnectService) know
+/// whether the auth-bootstrap read below is currently in flight, and can
+/// avoid forcing a network disable/enable cycle in the middle of it. That
+/// race was the actual root cause of currentCashbookId getting wiped: a
+/// forced disableNetwork()/enableNetwork() mid-read could make Firestore
+/// hand back a false "document not found", which the old code then wrote
+/// back to the server as a blank profile, destroying real user data.
+class AuthBootstrapGuard {
+  static bool inProgress = false;
+}
+
 class AuthRepositoryImpl implements AuthRepository {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -60,43 +71,58 @@ class AuthRepositoryImpl implements AuthRepository {
     final ref = _firestore.collection('users').doc(firebaseUser.uid);
 
     DocumentSnapshot<Map<String, dynamic>>? initial;
+    AuthBootstrapGuard.inProgress = true;
     try {
-      initial = await _withRetry(
-        () => ref.get(const GetOptions(source: Source.server)),
-        retries: 6,
-        delay: const Duration(milliseconds: 900),
-      );
-    } catch (_) {
-      // Genuinely no network after retrying — fall back to whatever's cached
-      // (better than nothing), but this is now a last resort, not the norm.
       try {
-        initial = await ref.get(const GetOptions(source: Source.cache));
+        initial = await _withRetry(
+          () => ref.get(const GetOptions(source: Source.server)),
+          retries: 6,
+          delay: const Duration(milliseconds: 900),
+        );
       } catch (_) {
-        // No cache either. Don't emit a guess — stay in the loading state
-        // (router keeps showing splash) until the live listener below
-        // manages to deliver a real snapshot.
-        initial = null;
+        // Genuinely no network after retrying — fall back to whatever's
+        // cached (better than nothing), but this is now a last resort,
+        // not the norm.
+        try {
+          initial = await ref.get(const GetOptions(source: Source.cache));
+        } catch (_) {
+          // No cache either. Don't emit a guess — stay in the loading
+          // state (router keeps showing splash) until the live listener
+          // below manages to deliver a real snapshot.
+          initial = null;
+        }
       }
+    } finally {
+      AuthBootstrapGuard.inProgress = false;
     }
 
     if (initial != null) {
       final fromServer = !initial.metadata.isFromCache;
 
-      // If the confirmed server doc doesn't exist yet, create it now so
-      // later reads (and other devices) see a consistent record.
+      // The doc looks like it doesn't exist. IMPORTANT: we never write
+      // anything to Firestore from this branch anymore. A "not found" read
+      // — even one flagged as server-confirmed — can still be a false
+      // negative (e.g. a network toggle racing this exact read). Writing a
+      // blank profile back in that case used to permanently destroy a real
+      // user's currentCashbookId, fcmTokens, and platform. A brand-new
+      // account's Firestore doc is created exactly once, explicitly, in
+      // signUpWithEmail() — never here. If this really is a fresh/never-
+      // created doc, we just yield a LOCAL, never-persisted placeholder so
+      // the router can proceed (e.g. show pairing/login). If it was a
+      // false negative, the live listener below delivers the real,
+      // untouched doc moments later and the UI self-corrects — nothing
+      // was ever lost.
       if (!initial.exists) {
         if (fromServer) {
-          final fallbackUser = UserModel(
+          yield UserModel(
             uid: firebaseUser.uid,
             email: firebaseUser.email ?? '',
             displayName: '',
           );
-          _withRetry(() => ref.set(fallbackUser.toJson())).catchError((_) {});
-          yield fallbackUser;
         }
         // Cache says "doesn't exist" — ambiguous (could just be an
-        // uncached brand-new tab). Don't create/overwrite anything from
-        // a guess; wait for the live listener below to confirm.
+        // uncached brand-new tab). Don't act on a guess; wait for the
+        // live listener below to confirm.
       } else {
         final mapped = _mapDoc(firebaseUser, initial);
         // A cache-sourced doc that already shows a cashbook is safe to
@@ -171,10 +197,14 @@ class AuthRepositoryImpl implements AuthRepository {
       displayName: name,
     );
 
+    // merge: true here is defense-in-depth only — this should always be a
+    // brand-new doc for a brand-new uid — but it costs nothing and means
+    // this call can never wipe out fields written by something else that
+    // raced it (e.g. an FCM token save that landed a moment earlier).
     await _withRetry(() => _firestore
         .collection('users')
         .doc(model.uid)
-        .set(model.toJson()));
+        .set(model.toJson(), SetOptions(merge: true)));
 
     return model;
   }

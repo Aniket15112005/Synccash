@@ -20,6 +20,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:synccash/features/auth/data/repositories/auth_repository_impl.dart';
 
 class FirestoreReconnectService extends WidgetsBindingObserver {
   FirestoreReconnectService._();
@@ -60,6 +61,20 @@ class FirestoreReconnectService extends WidgetsBindingObserver {
 
   Future<void> _forceReconnect() async {
     try {
+      // Don't yank the network out from under the auth-bootstrap read in
+      // AuthRepositoryImpl. Toggling it mid-read is what could make
+      // Firestore report a real document as "not found" for a moment —
+      // which used to get written back to the server as a blank profile,
+      // wiping the user's currentCashbookId. Wait briefly for that read to
+      // finish; it has its own retry logic, so skipping the forced toggle
+      // here is safe either way.
+      var waited = 0;
+      while (AuthBootstrapGuard.inProgress && waited < 5000) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        waited += 200;
+      }
+      if (AuthBootstrapGuard.inProgress) return;
+
       final fs = FirebaseFirestore.instance;
       await fs.disableNetwork();
       await fs.enableNetwork();
