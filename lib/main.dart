@@ -30,15 +30,15 @@ void main() async {
       cacheSizeBytes: 100 * 1024 * 1024,
     );
   } else {
-    // Web/PWA: auto-detect when the browser needs long-polling instead of
-    // WebChannel streaming. Some networks (corporate proxies, some mobile
-    // carriers) and iOS Safari/PWA's WKWebView silently buffer or kill the
-    // streaming connection Firestore normally uses, which is one of the
-    // causes behind screens (like Bills) getting permanently stuck on
-    // their loading spinner. Auto-detect long-polling falls back
-    // automatically only when needed, so it's safe to always enable.
+    // Web/PWA: FORCE long-polling instead of WebChannel streaming.
+    // iOS Safari / WKWebView silently kills the streaming WebChannel connection
+    // that Firestore uses by default — auto-detect is not reliable enough
+    // because iOS drops the connection before the SDK can detect it needs to
+    // switch. ForceLongPolling is the only mode that works consistently on
+    // iOS PWA (added to Home Screen), fixing the "client offline" error on
+    // login and the pairing-screen redirect caused by missing cashbookId.
     FirebaseFirestore.instance.settings = const Settings(
-      webExperimentalAutoDetectLongPolling: true,
+      webExperimentalForceLongPolling: true,
     );
   }
 

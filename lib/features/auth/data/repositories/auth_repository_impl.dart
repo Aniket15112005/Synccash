@@ -20,6 +20,15 @@ class AuthRepositoryImpl implements AuthRepository {
           .doc(firebaseUser.uid)
           .snapshots()
           .asyncMap((doc) async {
+        // Guard: if the snapshot says doc doesn't exist but it came from cache
+        // (i.e. Firestore is offline and hasn't confirmed from server yet),
+        // do NOT create a fallback user — that would wipe currentCashbookId
+        // and send the user to the pairing screen. Return null to keep the
+        // router in its loading state until Firestore reconnects.
+        if (!doc.exists && doc.metadata.isFromCache) {
+          return null;
+        }
+
         if (!doc.exists) {
           final fallbackUser = UserModel(
             uid: firebaseUser.uid,
@@ -44,24 +53,47 @@ class AuthRepositoryImpl implements AuthRepository {
       password: password,
     );
 
-    final doc = await _firestore
-        .collection('users')
-        .doc(credentials.user!.uid)
-        .get();
+    // Try server first, then fall back to local cache (handles iOS PWA where
+    // Firestore's WebChannel is offline during the first login attempt).
+    // Without this, the raw .get() throws "client offline", shows an error
+    // SnackBar, and the auth state change simultaneously routes the user to
+    // the pairing screen with a blank currentCashbookId.
+    DocumentSnapshot<Map<String, dynamic>> doc;
+    try {
+      doc = await _firestore
+          .collection('users')
+          .doc(credentials.user!.uid)
+          .get(const GetOptions(source: Source.serverAndCache));
+    } catch (_) {
+      // Server unreachable — try cache
+      try {
+        doc = await _firestore
+            .collection('users')
+            .doc(credentials.user!.uid)
+            .get(const GetOptions(source: Source.cache));
+      } catch (_) {
+        // No cache either — return a placeholder. The authStateChanges stream
+        // will emit the real user document once Firestore reconnects.
+        return UserModel(
+          uid: credentials.user!.uid,
+          email: email,
+          displayName: '',
+        );
+      }
+    }
 
-    // ✅ FIX 2: prevent crash if doc missing
     if (!doc.exists) {
       final newUser = UserModel(
         uid: credentials.user!.uid,
         email: email,
         displayName: '',
       );
-
-      await _firestore
+      // Queue the write — Firestore will sync once connection resumes
+      _firestore
           .collection('users')
           .doc(newUser.uid)
-          .set(newUser.toJson());
-
+          .set(newUser.toJson())
+          .catchError((_) {});
       return newUser;
     }
 
