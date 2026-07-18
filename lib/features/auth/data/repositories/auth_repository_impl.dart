@@ -97,8 +97,14 @@ class AuthRepositoryImpl implements AuthRepository {
     // that's a cache-only "doesn't exist" is ignored — we've already
     // established the authoritative truth above, so a stale/offline blip
     // shouldn't override it.
+    // Skip any snapshot that comes from local cache — we already have the
+    // authoritative server answer from the read above. Trusting a stale
+    // cached doc here (e.g. one saved before the user paired a cashbook)
+    // can otherwise briefly bounce a correctly-paired user to the pairing
+    // screen before the real server update catches up. Only server-
+    // confirmed updates are allowed to change the auth state from here on.
     yield* ref.snapshots().where((doc) {
-      if (!doc.exists && doc.metadata.isFromCache) return false;
+      if (doc.metadata.isFromCache) return false;
       return true;
     }).map((doc) => _mapDoc(firebaseUser, doc));
   }

@@ -118,6 +118,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             : RouteConstants.pairing;
       }
 
+      // Self-heal: if we're sitting on the pairing screen but the user
+      // actually already has a cashbook — e.g. an early/stale auth
+      // emission wrongly sent them here before the real, confirmed value
+      // arrived — bounce them to the dashboard the moment the correct
+      // value comes through. This makes the router resilient to Firestore
+      // emission ordering instead of depending on it being perfect.
+      if (loggedIn &&
+          state.matchedLocation == RouteConstants.pairing &&
+          user.currentCashbookId != null) {
+        return RouteConstants.dashboard;
+      }
+
       return null;
     },
 
