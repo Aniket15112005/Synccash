@@ -52,7 +52,21 @@ List<dynamic> _applyFilters(
     if (q.isNotEmpty) {
       final desc = (tx.description as String).toLowerCase();
       final cat  = (tx.category   as String).toLowerCase();
-      if (!desc.contains(q) && !cat.contains(q)) return false;
+      final amount = (tx.amount as num).toDouble();
+
+      // Plain form ("4500" / "4500.5") and comma-grouped form ("4,500")
+      // so a search for "4500" or "4,500" both match the same transaction.
+      final amountPlain = amount % 1 == 0
+          ? amount.toStringAsFixed(0)
+          : amount.toString();
+      final amountGrouped = _fmt(amount);
+
+      final matchesAmount =
+          amountPlain.contains(q) || amountGrouped.contains(q);
+
+      if (!desc.contains(q) && !cat.contains(q) && !matchesAmount) {
+        return false;
+      }
     }
     return true;
   }).toList();
@@ -523,7 +537,7 @@ class _SearchBar extends StatelessWidget {
               fontWeight: FontWeight.w500,
             ),
             decoration: const InputDecoration(
-              hintText: 'Search description or category…',
+              hintText: 'Search description, category or amount…',
               hintStyle: TextStyle(
                 color:    AppColors.textMuted,
                 fontSize: 14,
