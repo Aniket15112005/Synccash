@@ -535,6 +535,96 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
         partiesImported++;
       }
 
+      // ── 4. Restore purchase bills ────────────────────────────────────
+      var purchaseBillsImported = 0;
+      for (final bill in backup.purchaseBills) {
+        if (bill.purchaseBillId.isEmpty) continue;
+        await db
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .collection('purchase_bills')
+            .doc(bill.purchaseBillId)
+            .set({
+          'purchaseBillId':    bill.purchaseBillId,
+          'clientName':        bill.clientName,
+          'billNumber':        bill.billNumber,
+          'billAmount':        bill.billAmount,
+          'billDate':          Timestamp.fromDate(bill.billDate),
+          'billNote':          bill.billNote,
+          'billCreatedAt':     Timestamp.fromDate(bill.billCreatedAt),
+          'billCreatedBy':     bill.billCreatedBy,
+          'billCreatedByName': bill.billCreatedByName,
+          'billStatus':        bill.billStatus,
+          'isImport':          true,
+        });
+        purchaseBillsImported++;
+      }
+
+      // ── 5. Restore daily entries ─────────────────────────────────────
+      var dailyEntriesImported = 0;
+      for (final entry in backup.dailyEntries) {
+        if (entry.entryId.isEmpty) continue;
+        await db
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .collection('daily_entries')
+            .doc(entry.entryId)
+            .set({
+          'entryId':     entry.entryId,
+          'cashbookId':  cashbookId,
+          'createdBy':   entry.createdBy,
+          'creatorName': entry.creatorName,
+          'createdAt':   Timestamp.fromDate(entry.createdAt),
+          'amount':      entry.amount,
+          'type':        entry.type,
+          'description': entry.description,
+          'isImport':    true,
+        });
+        dailyEntriesImported++;
+      }
+
+      // ── 6. Restore daily cards + their transactions ──────────────────
+      var dailyCardsImported = 0;
+      var dailyCardTxImported = 0;
+      for (final card in backup.dailyCards) {
+        if (card.cardId.isEmpty) continue;
+        final cardRef = db
+            .collection('cashbooks')
+            .doc(cashbookId)
+            .collection('daily_cards')
+            .doc(card.cardId);
+        await cardRef.set({
+          'cardId':      card.cardId,
+          'cashbookId':  cashbookId,
+          'name':        card.name,
+          if (card.number != null)   'number':   card.number,
+          if (card.bankName != null) 'bankName': card.bankName,
+          'colorIndex':  card.colorIndex,
+          'createdBy':   card.createdBy,
+          'creatorName': card.creatorName,
+          'createdAt':   Timestamp.fromDate(card.createdAt),
+          'isImport':    true,
+        });
+        dailyCardsImported++;
+
+        for (final tx in card.transactions) {
+          if (tx.txId.isEmpty) continue;
+          await cardRef.collection('transactions').doc(tx.txId).set({
+            'txId':        tx.txId,
+            'cardId':      card.cardId,
+            'cashbookId':  cashbookId,
+            'createdBy':   tx.createdBy,
+            'creatorName': tx.creatorName,
+            'createdAt':   Timestamp.fromDate(tx.createdAt),
+            'amount':      tx.amount,
+            'type':        tx.type,
+            'description': tx.description,
+            'isImport':    true,
+          });
+          dailyCardTxImported++;
+        }
+      }
+
       if (mounted) {
         Navigator.pop(context);
         final parts = <String>[
@@ -543,6 +633,14 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
             '$billsImported bill${billsImported == 1 ? '' : 's'}',
           if (partiesImported > 0)
             '$partiesImported part${partiesImported == 1 ? 'y' : 'ies'}',
+          if (purchaseBillsImported > 0)
+            '$purchaseBillsImported purchase bill${purchaseBillsImported == 1 ? '' : 's'}',
+          if (dailyEntriesImported > 0)
+            '$dailyEntriesImported daily entr${dailyEntriesImported == 1 ? 'y' : 'ies'}',
+          if (dailyCardsImported > 0)
+            '$dailyCardsImported card${dailyCardsImported == 1 ? '' : 's'}',
+          if (dailyCardTxImported > 0)
+            '$dailyCardTxImported card transaction${dailyCardTxImported == 1 ? '' : 's'}',
         ];
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('✓ Imported ${parts.join(', ')} successfully.'),
@@ -585,8 +683,9 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
                 style: TextStyle(
                     color: Color(0xFFE5E7EB), fontWeight: FontWeight.w700)),
             content: const Text(
-              'This will ADD transactions, sale bills, and parties from the backup '
-              'file to your current cashbook. Existing data will not be removed.',
+              'This will ADD transactions, sale bills, parties, purchase bills, '
+              'daily entries, and daily cards from the backup file to your current '
+              'cashbook. Existing data will not be removed.',
               style: TextStyle(color: Color(0xFF9CA3AF), height: 1.5),
             ),
             actions: [
@@ -630,6 +729,11 @@ class _ImportSheetState extends ConsumerState<_ImportSheet> {
                 _previewRow('Transactions', '${backup.transactions.length}'),
                 _previewRow('Sale bills', '${backup.saleBills.length}'),
                 _previewRow('Parties', '${backup.parties.length}'),
+                _previewRow(
+                    'Purchase bills', '${backup.purchaseBills.length}'),
+                _previewRow(
+                    'Daily entries', '${backup.dailyEntries.length}'),
+                _previewRow('Daily cards', '${backup.dailyCards.length}'),
                 const SizedBox(height: 12),
                 const Text(
                   'All data above will be added to your current cashbook.',
@@ -1878,7 +1982,10 @@ enum _TypeFilter {
   income,
   expense,
   retail,
-  wholesale;
+  wholesale,
+  bank,
+  upi,
+  cb;
 
   String get label {
     switch (this) {
@@ -1887,6 +1994,9 @@ enum _TypeFilter {
       case _TypeFilter.expense:   return 'Expense';
       case _TypeFilter.retail:    return 'Retail';
       case _TypeFilter.wholesale: return 'Wholesale';
+      case _TypeFilter.bank:      return 'Bank';
+      case _TypeFilter.upi:       return 'UPI';
+      case _TypeFilter.cb:        return 'CB';
     }
   }
 
@@ -1905,6 +2015,18 @@ enum _TypeFilter {
       case _TypeFilter.wholesale:
         return txs
             .where((tx) => tx.category.toLowerCase().contains('wholesale'))
+            .toList();
+      case _TypeFilter.bank:
+        return txs
+            .where((tx) => tx.category.toLowerCase().contains('bank'))
+            .toList();
+      case _TypeFilter.upi:
+        return txs
+            .where((tx) => tx.category.toLowerCase().contains('upi'))
+            .toList();
+      case _TypeFilter.cb:
+        return txs
+            .where((tx) => tx.category.toLowerCase() == 'cb')
             .toList();
     }
   }
