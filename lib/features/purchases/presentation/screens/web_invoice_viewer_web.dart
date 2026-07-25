@@ -8,6 +8,7 @@
 // a third-party viewer; the PDF renders inside this in-app screen.
 
 // ignore_for_file: avoid_web_libraries_in_flutter
+import 'dart:async';
 import 'dart:html' as html;
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
@@ -49,12 +50,21 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
 
   bool _loading = true;
   bool _errored = false;
+  Timer? _loadingFallbackTimer;
 
   @override
   void initState() {
     super.initState();
 
-    _viewId = 'purchase-invoice-pdf-${widget.billNumber}-${widget.url.hashCode}';
+    // FIX: viewId must be unique per screen instance, not just per
+    // bill/URL. Reopening the same invoice previously reused the same
+    // viewId, which made registerViewFactory throw/no-op on the second
+    // open (Flutter Web disallows re-registering a viewType) — no new
+    // iframe was created, onLoad never fired, and the spinner spun
+    // forever even though nothing was actually broken underneath.
+    _viewId =
+        'purchase-invoice-pdf-${widget.billNumber}-${widget.url.hashCode}-'
+        '${DateTime.now().microsecondsSinceEpoch}';
 
     _iframeEl = html.IFrameElement()
       ..src = widget.url
@@ -64,7 +74,7 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
       ..style.background = '#080A0E';
 
     _iframeEl.onLoad.first.then((_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) _stopLoading();
     });
     _iframeEl.onError.first.then((_) {
       if (mounted) {
@@ -79,6 +89,28 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
       _viewId,
       (int id) => _iframeEl,
     );
+
+    // FIX: the iframe's native `load` event is unreliable for PDFs across
+    // browsers — Safari/Chrome frequently never fire it (or fire it for an
+    // intermediate blank navigation) once the built-in PDF plugin takes
+    // over rendering. That left `_loading` stuck at true indefinitely even
+    // though the PDF was already visibly rendered behind the spinner. This
+    // fallback guarantees the spinner clears shortly after the PDF has had
+    // time to render, regardless of whether the browser ever fires `load`.
+    _loadingFallbackTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) _stopLoading();
+    });
+  }
+
+  void _stopLoading() {
+    _loadingFallbackTimer?.cancel();
+    if (mounted) setState(() => _loading = false);
+  }
+
+  @override
+  void dispose() {
+    _loadingFallbackTimer?.cancel();
+    super.dispose();
   }
 
   // ── Build ───────────────────────────────────────────────────────────────
