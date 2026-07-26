@@ -1,0 +1,107 @@
+diff --git a/lib/features/sales/presentation/screens/native_pdf_viewer_native.dart b/lib/features/sales/presentation/screens/native_pdf_viewer_native.dart
+index e932dec..1538bef 100644
+--- a/lib/features/sales/presentation/screens/native_pdf_viewer_native.dart
++++ b/lib/features/sales/presentation/screens/native_pdf_viewer_native.dart
+@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
+ import 'package:flutter_pdfview/flutter_pdfview.dart';
+ import 'package:http/http.dart' as http;
+ import 'package:path_provider/path_provider.dart';
++import 'package:share_plus/share_plus.dart';
+ 
+ void openNativePdfInApp(
+   BuildContext context,
+@@ -94,6 +95,28 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
+     }
+   }
+ 
++  // Shares the PDF that's already cached on disk from _loadPdf — no extra
++  // download or bytes round-trip, so this is instant and works exactly like
++  // sharing any normal PDF file through the OS share sheet (WhatsApp, Mail,
++  // Drive, etc. all receive the real .pdf attachment, not just a link).
++  Future<void> _sharePdf() async {
++    final path = _filePath;
++    if (path == null) return;
++    try {
++      final safeName = widget.billNumber.replaceAll(RegExp(r'[^\w\-]'), '_');
++      await Share.shareXFiles(
++        [XFile(path, name: 'Invoice_$safeName.pdf', mimeType: 'application/pdf')],
++        subject: 'Invoice #${widget.billNumber} — ${widget.partyName}',
++      );
++    } catch (e) {
++      if (mounted) {
++        ScaffoldMessenger.of(context).showSnackBar(
++          SnackBar(content: Text('Could not share: $e')),
++        );
++      }
++    }
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     return Scaffold(
+@@ -125,6 +148,11 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
+           ],
+         ),
+         actions: [
++          IconButton(
++            onPressed: _filePath == null ? null : _sharePdf,
++            icon: const Icon(Icons.share_rounded, color: Colors.white70),
++            tooltip: 'Share',
++          ),
+           IconButton(
+             onPressed: _loadPdf,
+             icon: const Icon(Icons.refresh_rounded, color: Colors.white70),
+diff --git a/lib/features/sales/presentation/screens/web_invoice_viewer_web.dart b/lib/features/sales/presentation/screens/web_invoice_viewer_web.dart
+index 40fa9d6..2bb421d 100644
+--- a/lib/features/sales/presentation/screens/web_invoice_viewer_web.dart
++++ b/lib/features/sales/presentation/screens/web_invoice_viewer_web.dart
+@@ -12,6 +12,7 @@ import 'dart:async';
+ import 'dart:html' as html;
+ import 'dart:ui_web' as ui_web;
+ import 'package:flutter/material.dart';
++import 'package:share_plus/share_plus.dart';
+ 
+ void openPdfInApp(
+     BuildContext context, String url, String billNumber, String partyName) {
+@@ -107,6 +108,27 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
+     if (mounted) setState(() => _loading = false);
+   }
+ 
++  // Shares the invoice link directly (Share.share) rather than fetching the
++  // PDF bytes first. Fetching bytes on web would need a CORS-enabled GET to
++  // the storage host and can noticeably lag on larger PDFs / slow networks;
++  // sharing the URL is instant, works with the OS/browser share sheet on
++  // every platform (mobile web + desktop web), and needs no extra network
++  // round trip beyond what's already happening in the iframe.
++  Future<void> _sharePdf() async {
++    try {
++      await Share.share(
++        widget.url,
++        subject: 'Invoice #${widget.billNumber} — ${widget.partyName}',
++      );
++    } catch (e) {
++      if (mounted) {
++        ScaffoldMessenger.of(context).showSnackBar(
++          SnackBar(content: Text('Could not share: $e')),
++        );
++      }
++    }
++  }
++
+   @override
+   void dispose() {
+     _loadingFallbackTimer?.cancel();
+@@ -140,6 +162,13 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
+                 style: const TextStyle(color: Colors.white54, fontSize: 11)),
+           ],
+         ),
++        actions: [
++          IconButton(
++            onPressed: _sharePdf,
++            icon: const Icon(Icons.share_rounded, color: Colors.white70),
++            tooltip: 'Share',
++          ),
++        ],
+       ),
+       body: Stack(
+         children: [

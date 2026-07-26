@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 void openNativePdfInApp(
   BuildContext context,
@@ -94,6 +95,27 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
     }
   }
 
+  // Shares the PDF that's already cached on disk from _loadPdf — no extra
+  // download or bytes round-trip, so this is instant and works exactly like
+  // sharing any normal PDF file through the OS share sheet (WhatsApp, Mail,
+  // Drive, etc. all receive the real .pdf attachment, not just a link).
+  Future<void> _sharePdf() async {
+    final path = _filePath;
+    if (path == null) return;
+    try {
+      final safeName = widget.billNumber.replaceAll(RegExp(r'[^\w\-]'), '_');
+      await Share.shareXFiles(
+        [XFile(path, name: 'Invoice_$safeName.pdf', mimeType: 'application/pdf')],
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not share: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -125,6 +147,11 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
           ],
         ),
         actions: [
+          IconButton(
+            onPressed: _filePath == null ? null : _sharePdf,
+            icon: const Icon(Icons.share_rounded, color: Colors.white70),
+            tooltip: 'Share',
+          ),
           IconButton(
             onPressed: _loadPdf,
             icon: const Icon(Icons.refresh_rounded, color: Colors.white70),
