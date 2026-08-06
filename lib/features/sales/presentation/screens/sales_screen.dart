@@ -13,6 +13,8 @@ import '../providers/sale_bill_provider.dart';
 import 'manage_opening_balance_screen.dart';
 import 'party_detail_screen.dart';
 import '../../../../voice/party_nav_mic_button.dart';
+import '../providers/party_provider.dart';
+import '../../../transactions/presentation/screens/party_picker_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Theme
@@ -1005,6 +1007,10 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
   DateTime _date    = DateTime.now();
   bool _submitting  = false;
 
+  // Party picker state
+  bool _openingPartyPicker = false;
+  bool _partyError         = false;
+
   // Opening balance fetch
   Timer?  _obTimer;
   double? _fetchedOB;
@@ -1059,10 +1065,10 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
     _obTimer?.cancel();
     final name = _partyCtrl.text.trim();
     if (name.isEmpty) {
-      if (mounted) setState(() { _fetchedOB = null; _obFetching = false; });
+      if (mounted) setState(() { _fetchedOB = null; _obFetching = false; _partyError = false; });
       return;
     }
-    if (mounted) setState(() => _obFetching = true);
+    if (mounted) setState(() { _obFetching = true; _partyError = false; });
     _obTimer = Timer(
       const Duration(milliseconds: 600),
       () => _fetchOB(name),
@@ -1092,6 +1098,67 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
     } catch (_) {
       if (mounted) setState(() => _obFetching = false);
     }
+  }
+
+  // Opens the same full-screen party picker used in Add Transaction.
+  // The user can search existing parties or type a brand-new name — if new,
+  // clicking "Done" confirms it and the bill creation registers them.
+  Future<void> _openPartyPicker() async {
+    if (_openingPartyPicker) return;
+    setState(() { _openingPartyPicker = true; _partyError = false; });
+
+    final namesFuture = _resolvePartyNames();
+
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PartyPickerScreen(
+          initialValue:        _partyCtrl.text,
+          allPartyNamesFuture: namesFuture,
+          canSuggest:          true,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    setState(() => _openingPartyPicker = false);
+
+    if (result != null) {
+      _partyCtrl.removeListener(_onPartyChanged);
+      _partyCtrl.text = result;
+      _partyCtrl.addListener(_onPartyChanged);
+      if (result.trim().isNotEmpty) _onPartyChanged();
+      setState(() {});
+    }
+  }
+
+  // Collects known party names from the saved parties collection and from
+  // existing sale bills so the picker can suggest them as the user types.
+  Future<List<String>> _resolvePartyNames() async {
+    List<PartyEntity> savedParties =
+        ref.read(partiesProvider).asData?.value ?? [];
+    List<SaleBillEntity> allBills =
+        ref.read(allSaleBillsProvider).asData?.value ?? [];
+
+    if (savedParties.isEmpty) {
+      try {
+        savedParties = await ref
+            .read(partiesProvider.future)
+            .timeout(const Duration(seconds: 3));
+      } catch (_) { savedParties = []; }
+    }
+    if (allBills.isEmpty) {
+      try {
+        allBills = await ref
+            .read(allSaleBillsProvider.future)
+            .timeout(const Duration(seconds: 3));
+      } catch (_) { allBills = []; }
+    }
+
+    return <String>{
+      ...savedParties.map((p) => p.partyName),
+      ...allBills.map((b) => b.partyName.trim()),
+    }.toList()..sort();
   }
 
   @override
@@ -1132,6 +1199,11 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
   }
 
   Future<void> _submit() async {
+    // Validate party name separately since it uses a custom tappable widget.
+    if (_partyCtrl.text.trim().isEmpty) {
+      setState(() => _partyError = true);
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
     if (_billNoError != null) return;
     final cashbookId = ref.read(currentCashbookIdProvider);
@@ -1237,17 +1309,72 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
               ),
               const SizedBox(height: 20),
 
-              // Party name field
-              TextFormField(
-                controller: _partyCtrl,
-                style: const TextStyle(color: _T.text),
-                decoration: _fieldDec('Party / Client Name *',
-                    hint: 'e.g. ABC Traders',
-                    icon: Icons.business_rounded),
-                textCapitalization: TextCapitalization.words,
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
+              // Party name — tappable field that opens the full-screen party
+              // picker. The user can search existing parties or type a new
+              // name; clicking "Done" confirms it. Matches the behaviour of
+              // the Description field in Add Transaction.
+              GestureDetector(
+                onTap: _openPartyPicker,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: _T.card,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: _partyError
+                          ? _T.red
+                          : _partyCtrl.text.isNotEmpty
+                              ? _T.accent.withValues(alpha: 0.4)
+                              : _T.border,
+                      width: _partyError ? 1.5 : 1.0,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.business_rounded,
+                          color: _partyError ? _T.red : _T.muted,
+                          size: 17),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _partyCtrl.text.isEmpty
+                            ? Text(
+                                'Party / Client Name *',
+                                style: TextStyle(
+                                  color: _partyError ? _T.red : _T.muted,
+                                  fontSize: 13,
+                                ),
+                              )
+                            : Text(
+                                _partyCtrl.text,
+                                style: const TextStyle(
+                                  color: _T.text,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                      ),
+                      if (_openingPartyPicker)
+                        const SizedBox(
+                          width: 14, height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 1.5, color: _T.accent),
+                        )
+                      else
+                        const Icon(Icons.chevron_right_rounded,
+                            color: _T.muted, size: 18),
+                    ],
+                  ),
+                ),
               ),
+              if (_partyError && _partyCtrl.text.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 4, left: 16),
+                  child: Text('Required',
+                      style: TextStyle(color: _T.red, fontSize: 11)),
+                ),
 
               // Opening balance display — read-only, appears after party name typed
               AnimatedSwitcher(

@@ -184,58 +184,68 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
 
   final placeOfSupply = _placeOfSupply(bill.businessAddress);
 
-  // ── Item rows ──────────────────────────────────────────────────────
-  final itemRows = List.generate(bill.items.length, (i) {
-    final item    = bill.items[i];
-    final itemTax = item.qty * item.rate * taxRate / 100;
-    final itemAmt = item.qty * item.rate + itemTax;
-    final qtyStr  = item.qty == item.qty.truncateToDouble()
-        ? item.qty.toStringAsFixed(0)
-        : item.qty.toStringAsFixed(2);
+  // ── Column widths — shared between the header and per-item-row tables ──────
+  // FIX: Extracted so the same widths are used in the header-row table and in
+  //      individual single-row tables for each item. This lets pw.MultiPage
+  //      paginate long bills across pages: a single monolithic pw.Table cannot
+  //      be broken by MultiPage (it has no SpanningWidget support), but a list
+  //      of single-row tables can be distributed across as many pages as needed.
+  const itemCols = <int, pw.TableColumnWidth>{
+    0: pw.FixedColumnWidth(18),   // #
+    1: pw.FlexColumnWidth(2.8),   // Item name
+    2: pw.FixedColumnWidth(42),   // HSN/SAC
+    3: pw.FixedColumnWidth(34),   // Size
+    4: pw.FixedColumnWidth(40),   // Quantity
+    5: pw.FixedColumnWidth(26),   // Unit
+    6: pw.FixedColumnWidth(54),   // Price/Unit
+    7: pw.FixedColumnWidth(58),   // GST
+    8: pw.FixedColumnWidth(58),   // Amount
+  };
 
-    return pw.TableRow(
-      children: [
-        dCell('${i + 1}'),
-        dCell(item.name, align: pw.TextAlign.left, bold: true),
-        dCell(item.hsnSac.isEmpty ? '' : item.hsnSac),
-        dCell(item.size),
-        dCell(qtyStr, align: pw.TextAlign.right, bold: true),
-        dCell('Pcs'),
-        dCell(fmt.format(item.rate), align: pw.TextAlign.right),
-        // GST column: amount on top, rate% in parentheses below
-        pw.Container(
-          width: double.infinity,
-          padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: taxRate > 0
-              ? pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  mainAxisSize: pw.MainAxisSize.min,
-                  children: [
-                    pw.Text(fmt.format(itemTax),
-                        style: small, textAlign: pw.TextAlign.right),
-                    pw.Text('(${_fmtRate(taxRate)}%)',
-                        style: tinyMuted, textAlign: pw.TextAlign.right),
-                  ],
-                )
-              : pw.Text('-', style: small, textAlign: pw.TextAlign.right),
-        ),
-        dCell(fmt.format(itemAmt), align: pw.TextAlign.right, bold: true),
-      ],
-    );
-  });
+  // Header-row border: all four outer sides + vertical dividers.
+  final itemHeaderBorder = pw.TableBorder(
+    top:              pw.BorderSide(color: cBorder, width: 0.5),
+    bottom:           pw.BorderSide(color: cBorder, width: 0.5),
+    left:             pw.BorderSide(color: cBorder, width: 0.5),
+    right:            pw.BorderSide(color: cBorder, width: 0.5),
+    verticalInside:   pw.BorderSide(color: cBorder, width: 0.5),
+    horizontalInside: pw.BorderSide.none,
+  );
 
-  // FIX: Pad the item rows so the table always has at least 12 rows.
-  // This prevents the invoice from looking half-empty for bills with
-  // very few items. Blank rows are identical in height to data rows.
-  const _minItemRows = 12;
-  final blankRows = List.generate(
-    (_minItemRows - bill.items.length).clamp(0, _minItemRows),
-    (_) => pw.TableRow(
-      children: [
-        dCell(''), dCell(''), dCell(''), dCell(''), dCell(''),
-        dCell(''), dCell(''), dCell(''), dCell(''),
-      ],
-    ),
+  // Item/total-row border: NO top border — the previous row's bottom edge acts
+  // as this row's top, creating a seamlessly connected appearance even though
+  // each item is rendered as its own pw.Table widget.
+  final itemRowBorder = pw.TableBorder(
+    top:              pw.BorderSide.none,
+    bottom:           pw.BorderSide(color: cBorder, width: 0.5),
+    left:             pw.BorderSide(color: cBorder, width: 0.5),
+    right:            pw.BorderSide(color: cBorder, width: 0.5),
+    verticalInside:   pw.BorderSide(color: cBorder, width: 0.5),
+    horizontalInside: pw.BorderSide.none,
+  );
+
+  // Local helper — builds the items column-header row widget fresh each call.
+  // Used once in the build list (page 1) and once per continuation page via
+  // the MultiPage header callback so readers always see column labels.
+  pw.Widget buildItemsColHeader() => pw.Table(
+    border: itemHeaderBorder,
+    columnWidths: itemCols,
+    children: [
+      pw.TableRow(
+        decoration: pw.BoxDecoration(color: cBg),
+        children: [
+          hCell('#'),
+          hCell('Item name', align: pw.TextAlign.left),
+          hCell('HSN/ SAC'),
+          hCell('Size'),
+          hCell('Quantity', align: pw.TextAlign.right),
+          hCell('Unit'),
+          hCell('Price/\nUnit', align: pw.TextAlign.right),
+          hCell('GST', align: pw.TextAlign.right),
+          hCell('Amount', align: pw.TextAlign.right),
+        ],
+      ),
+    ],
   );
 
   // ── Tax summary rows ───────────────────────────────────────────────
@@ -271,8 +281,13 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
   pdf.addPage(
     pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
-      // Slightly larger margins so the content area is well-framed.
       margin: const pw.EdgeInsets.fromLTRB(14, 16, 14, 16),
+      // Repeat the items column header at the top of pages 2, 3, … so
+      // readers always know which column is which. Page 1 already includes
+      // the header row as part of the build list below.
+      header: (ctx) => ctx.pageNumber == 0
+          ? pw.SizedBox()
+          : buildItemsColHeader(),
       build: (ctx) => [
 
         // ── 1. TITLE: "ESTIMATE" centered ─────────────────────────
@@ -420,42 +435,75 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
           ],
         ),
 
-        // ── 4. ITEMS TABLE ────────────────────────────────────────
+        // ── 4. ITEMS TABLE ─────────────────────────────────────────
+        // FIX (multi-page): Items are now rendered as individual single-row
+        // pw.Table widgets instead of one monolithic table. pw.Table does NOT
+        // implement SpanningWidget, so a single large table is clipped to
+        // page 1 — nothing flows to page 2. Individual single-row tables CAN
+        // be distributed by pw.MultiPage across as many pages as needed.
+        //
+        // Border trick: each item-row table omits its top border; the
+        // previous row's bottom border acts as the divider, producing a
+        // seamlessly connected appearance.
+
+        // Column-header row (appears on page 1 from the build list;
+        // the MultiPage header callback repeats it on page 2, 3, …).
+        buildItemsColHeader(),
+
+        // One pw.Table per item — MultiPage breaks between them freely.
+        ...List.generate(bill.items.length, (i) {
+          final item    = bill.items[i];
+          final itemTax = item.qty * item.rate * taxRate / 100;
+          final itemAmt = item.qty * item.rate + itemTax;
+          final qtyStr  = item.qty == item.qty.truncateToDouble()
+              ? item.qty.toStringAsFixed(0)
+              : item.qty.toStringAsFixed(2);
+          return pw.Table(
+            border: itemRowBorder,
+            columnWidths: itemCols,
+            children: [
+              pw.TableRow(children: [
+                dCell('${i + 1}'),
+                dCell(item.name, align: pw.TextAlign.left, bold: true),
+                dCell(item.hsnSac.isEmpty ? '' : item.hsnSac),
+                dCell(item.size),
+                dCell(qtyStr, align: pw.TextAlign.right, bold: true),
+                dCell('Pcs'),
+                dCell(fmt.format(item.rate), align: pw.TextAlign.right),
+                // GST: amount on top, rate% in parentheses below
+                pw.Container(
+                  width: double.infinity,
+                  padding: const pw.EdgeInsets.symmetric(
+                      horizontal: 4, vertical: 6),
+                  child: taxRate > 0
+                      ? pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.end,
+                          mainAxisSize: pw.MainAxisSize.min,
+                          children: [
+                            pw.Text(fmt.format(itemTax),
+                                style: small,
+                                textAlign: pw.TextAlign.right),
+                            pw.Text('(${_fmtRate(taxRate)}%)',
+                                style: tinyMuted,
+                                textAlign: pw.TextAlign.right),
+                          ],
+                        )
+                      : pw.Text('-',
+                          style: small,
+                          textAlign: pw.TextAlign.right),
+                ),
+                dCell(fmt.format(itemAmt),
+                    align: pw.TextAlign.right, bold: true),
+              ]),
+            ],
+          );
+        }),
+
+        // Total row — immediately follows the last item row.
         pw.Table(
-          border: fullBorder,
-          columnWidths: const {
-            0: pw.FixedColumnWidth(18),   // #
-            1: pw.FlexColumnWidth(2.8),   // Item name
-            2: pw.FixedColumnWidth(42),   // HSN/SAC
-            3: pw.FixedColumnWidth(34),   // Size
-            4: pw.FixedColumnWidth(40),   // Quantity
-            5: pw.FixedColumnWidth(26),   // Unit
-            6: pw.FixedColumnWidth(54),   // Price/Unit
-            7: pw.FixedColumnWidth(58),   // GST
-            8: pw.FixedColumnWidth(58),   // Amount
-          },
+          border: itemRowBorder,
+          columnWidths: itemCols,
           children: [
-            // Header row
-            pw.TableRow(
-              decoration: pw.BoxDecoration(color: cBg),
-              children: [
-                hCell('#'),
-                hCell('Item name', align: pw.TextAlign.left),
-                hCell('HSN/ SAC'),
-                hCell('Size'),
-                hCell('Quantity', align: pw.TextAlign.right),
-                hCell('Unit'),
-                hCell('Price/\nUnit', align: pw.TextAlign.right),
-                hCell('GST', align: pw.TextAlign.right),
-                hCell('Amount', align: pw.TextAlign.right),
-              ],
-            ),
-            // Actual item rows
-            ...itemRows,
-            // Blank padding rows (brings items table to minimum 12 rows
-            // so the invoice fills the full page for short bills).
-            ...blankRows,
-            // Total row
             pw.TableRow(
               decoration: pw.BoxDecoration(color: cBg),
               children: [
