@@ -147,6 +147,19 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
 
     // ADDED: rebuild when description changes so BillNoDropdownField updates
     _descCtrl.addListener(_onDescChanged);
+
+    // FIX (instant party suggestions): Riverpod StreamProviders are lazy —
+    // they don't start until the first ref.watch/read. If the user taps the
+    // party name field before the first build() has watched partiesProvider,
+    // _resolveAllPartyNames() has to wait for the stream to emit, causing
+    // the "loading suggestions…" spinner to show for 1-3 s. Reading the
+    // providers here kicks off the Firestore streams immediately on screen
+    // open, so data is almost always cached by the time the user taps.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(partiesProvider);
+      ref.read(allSaleBillsProvider);
+    });
   }
 
   // ADDED: fetches the SaleBillEntity for the existing linkedSaleBillId so

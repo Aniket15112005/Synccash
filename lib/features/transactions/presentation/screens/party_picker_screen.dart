@@ -83,6 +83,16 @@ class _PartyPickerScreenState extends State<PartyPickerScreen> {
     setState(() => _filtered = next);
   }
 
+  // FIX: true when the user has typed a name that is not already in the list.
+  // The "Create new party" tile is shown so they can tap OK instead of having
+  // to reach up to the "Done" button in the app bar.
+  bool get _showCreateNew {
+    if (!widget.canSuggest) return false;
+    final typed = _ctrl.text.trim();
+    if (typed.isEmpty) return false;
+    return !_allNames.any((n) => n.toLowerCase() == typed.toLowerCase());
+  }
+
   /// User tapped a suggestion tile.
   void _select(String name) {
     HapticFeedback.selectionClick();
@@ -298,6 +308,18 @@ class _PartyPickerScreenState extends State<PartyPickerScreen> {
     }
 
     if (_filtered.isEmpty) {
+      // FIX: when the typed name doesn't match any saved party, show a
+      // "Create new party" tile prominently so the user doesn't have to
+      // reach up to the "Done" button — they can tap OK right in the list.
+      if (_showCreateNew) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: _CreateNewPartyTile(
+            name: _ctrl.text.trim(),
+            onTap: () => Navigator.pop(context, _ctrl.text.trim()),
+          ),
+        );
+      }
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -319,19 +341,30 @@ class _PartyPickerScreenState extends State<PartyPickerScreen> {
       );
     }
 
+    // When there ARE matches but the typed text is not an exact match,
+    // append a "Create new party" tile at the bottom of the list.
+    final showCreate = _showCreateNew;
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       physics: const BouncingScrollPhysics(),
-      itemCount: _filtered.length,
+      itemCount: _filtered.length + (showCreate ? 1 : 0),
       separatorBuilder: (_, __) => Container(
         height: 1,
         margin: const EdgeInsets.symmetric(horizontal: 2),
         color: const Color(0xFF1C1F26),
       ),
-      itemBuilder: (_, i) => _PickerSuggestionTile(
-        partyName: _filtered[i],
-        onTap: () => _select(_filtered[i]),
-      ),
+      itemBuilder: (_, i) {
+        if (showCreate && i == _filtered.length) {
+          return _CreateNewPartyTile(
+            name: _ctrl.text.trim(),
+            onTap: () => Navigator.pop(context, _ctrl.text.trim()),
+          );
+        }
+        return _PickerSuggestionTile(
+          partyName: _filtered[i],
+          onTap: () => _select(_filtered[i]),
+        );
+      },
     );
   }
 }
@@ -404,6 +437,117 @@ class _PickerSuggestionTileState extends State<_PickerSuggestionTile> {
               Icons.north_west_rounded,
               size: 13,
               color: Color(0xFF3D4149),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Create-new-party tile ────────────────────────────────────────────────────
+// FIX: shown when the user's typed text doesn't match any existing party.
+// Tapping it is equivalent to tapping "Done" — pops the picker with the
+// typed name so the caller can proceed to create the bill with that name.
+
+class _CreateNewPartyTile extends StatefulWidget {
+  final String name;
+  final VoidCallback onTap;
+  const _CreateNewPartyTile({required this.name, required this.onTap});
+
+  @override
+  State<_CreateNewPartyTile> createState() => _CreateNewPartyTileState();
+}
+
+class _CreateNewPartyTileState extends State<_CreateNewPartyTile> {
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _pressed = true),
+      onTapUp: (_) {
+        setState(() => _pressed = false);
+        HapticFeedback.selectionClick();
+        widget.onTap();
+      },
+      onTapCancel: () => setState(() => _pressed = false),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+        decoration: BoxDecoration(
+          color: _pressed
+              ? const Color(0xFF1A2235)
+              : const Color(0xFF0F1520).withOpacity(0.6),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _pressed
+                ? const Color(0xFF3B82F6).withOpacity(0.5)
+                : const Color(0xFF1E2840),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E2840),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: const Color(0xFF3B82F6).withOpacity(0.4)),
+              ),
+              child: const Icon(
+                Icons.person_add_outlined,
+                size: 16,
+                color: Color(0xFF3B82F6),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.name,
+                    style: const TextStyle(
+                      color: Color(0xFFD1D9E6),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.1,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 1),
+                  const Text(
+                    'New party — tap to use this name',
+                    style: TextStyle(
+                      color: Color(0xFF6B7280),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF3B82F6).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'OK',
+                style: TextStyle(
+                  color: Color(0xFF3B82F6),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.3,
+                ),
+              ),
             ),
           ],
         ),

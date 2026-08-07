@@ -161,31 +161,39 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
       ),
       body: Stack(
         children: [
+          // FIX (Android/iOS multi-page): without Positioned.fill the PDFView
+          // widget sizes itself to its INTRINSIC height — typically one page —
+          // so the remaining pages are clipped and never reachable by scroll.
+          // Positioned.fill forces the view to occupy the full Stack space,
+          // giving the native PDF renderer the room it needs to lay out every
+          // page and make them all scrollable.
           if (_filePath != null)
-            PDFView(
-              filePath: _filePath!,
-              enableSwipe: true,
-              swipeHorizontal: false,
-              autoSpacing: true,
-              pageFling: false,
-              pageSnap: false,
-              fitPolicy: FitPolicy.WIDTH,
-              // FIX: Forward pinch/scale gestures to the native platform view.
-              // Without this set, Flutter's own gesture arena consumes scale
-              // events before the underlying Android PdfViewer / iOS WKWebView
-              // renderer ever sees them, making pinch-to-zoom impossible.
-              gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-                Factory<ScaleGestureRecognizer>(
-                  () => ScaleGestureRecognizer(),
-                ),
-              },
-              onRender: (pages) {
-                if (mounted) setState(() => _pages = pages ?? 0);
-              },
-              onError: (_) {
-                if (mounted) setState(() => _errored = true);
-              },
-              onPageError: (_, __) {},
+            Positioned.fill(
+              child: PDFView(
+                filePath: _filePath!,
+                enableSwipe: true,
+                swipeHorizontal: false,
+                autoSpacing: true,
+                pageFling: false,
+                pageSnap: false,
+                fitPolicy: FitPolicy.WIDTH,
+                // FIX: Forward pinch/scale gestures to the native platform view.
+                // Without this set, Flutter's own gesture arena consumes scale
+                // events before the underlying Android PdfViewer / iOS WKWebView
+                // renderer ever sees them, making pinch-to-zoom impossible.
+                gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
+                  Factory<ScaleGestureRecognizer>(
+                    () => ScaleGestureRecognizer(),
+                  ),
+                },
+                onRender: (pages) {
+                  if (mounted) setState(() => _pages = pages ?? 0);
+                },
+                onError: (_) {
+                  if (mounted) setState(() => _errored = true);
+                },
+                onPageError: (_, __) {},
+              ),
             ),
 
           if (_loading)

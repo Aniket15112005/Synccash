@@ -74,9 +74,12 @@ class _SalesScreenState extends ConsumerState<SalesScreen> {
     super.initState();
     _searchCtrl.addListener(_onSearchChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        ref.read(saleBillSearchProvider.notifier).update('');
-      }
+      if (!mounted) return;
+      ref.read(saleBillSearchProvider.notifier).update('');
+      // FIX: pre-warm party/bill streams so suggestions are already cached
+      // by the time the user taps "Add Bill" and opens the party picker.
+      ref.read(partiesProvider);
+      ref.read(allSaleBillsProvider);
     });
   }
 
@@ -1134,26 +1137,18 @@ class _AddBillSheetState extends ConsumerState<_AddBillSheet> {
 
   // Collects known party names from the saved parties collection and from
   // existing sale bills so the picker can suggest them as the user types.
+  //
+  // FIX: only use already-cached data — no .future / timeout fallback.
+  // partiesProvider and allSaleBillsProvider are pre-warmed in
+  // _SalesScreenState.initState, so by the time the user taps "Add Bill"
+  // both streams have already emitted. Dropping the await makes this
+  // function resolve synchronously, which means PartyPickerScreen never
+  // shows the "Loading suggestions…" spinner.
   Future<List<String>> _resolvePartyNames() async {
-    List<PartyEntity> savedParties =
-        ref.read(partiesProvider).asData?.value ?? [];
-    List<SaleBillEntity> allBills =
-        ref.read(allSaleBillsProvider).asData?.value ?? [];
-
-    if (savedParties.isEmpty) {
-      try {
-        savedParties = await ref
-            .read(partiesProvider.future)
-            .timeout(const Duration(seconds: 3));
-      } catch (_) { savedParties = []; }
-    }
-    if (allBills.isEmpty) {
-      try {
-        allBills = await ref
-            .read(allSaleBillsProvider.future)
-            .timeout(const Duration(seconds: 3));
-      } catch (_) { allBills = []; }
-    }
+    final savedParties =
+        ref.read(partiesProvider).asData?.value ?? <PartyEntity>[];
+    final allBills =
+        ref.read(allSaleBillsProvider).asData?.value ?? <SaleBillEntity>[];
 
     return <String>{
       ...savedParties.map((p) => p.partyName),

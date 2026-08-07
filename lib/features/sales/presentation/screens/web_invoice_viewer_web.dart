@@ -124,6 +124,26 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
     // taps Share, so the call to Share.shareXFiles happens essentially
     // synchronously with the click and the native file-share path is used.
     _pdfBytesFuture = _fetchPdfBytes();
+
+    // FIX (iOS PWA multi-page): Safari on iOS only renders the FIRST PAGE
+    // when the iframe src is a remote HTTPS URL — the browser's built-in
+    // PDF plugin does not scroll through pages in an inline iframe on iOS.
+    // Once the bytes are already being fetched (above), create a Blob URL
+    // from those bytes and swap the iframe src to it.  iOS Safari treats
+    // Blob URLs as local resources and renders ALL pages with native
+    // scrolling — identical to the desktop browser experience.
+    _pdfBytesFuture!.then((bytes) {
+      if (!mounted) return;
+      try {
+        final blob = html.Blob([bytes], 'application/pdf');
+        final blobUrl = html.Url.createObjectUrlFromBlob(blob);
+        _iframeEl.src = blobUrl;
+      } catch (_) {
+        // Blob creation unsupported in this browser — keep the original URL
+      }
+    }).catchError((_) {
+      // Fetch already failed; error state is handled via _errored flag
+    });
   }
 
   Future<Uint8List> _fetchPdfBytes() async {
