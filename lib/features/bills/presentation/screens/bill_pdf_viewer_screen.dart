@@ -1,13 +1,13 @@
 // lib/features/bills/presentation/screens/bill_pdf_viewer_screen.dart
 //
 // Universal in-app PDF viewer for custom bills.
-// – Web  : iframe via Google Docs embedded viewer
-// – Native: WebView via Google Docs viewer
+// – Web  : pdf.js-rendered pages via pdfx
+// – Native: native PDF renderer
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:synccash/features/sales/presentation/screens/web_invoice_viewer_stub.dart'
-    if (dart.library.html) 'package:synccash/features/sales/presentation/screens/web_invoice_viewer_web.dart';
+import 'package:synccash/features/bills/presentation/screens/web_bill_pdf_viewer_stub.dart'
+    if (dart.library.html) 'package:synccash/features/bills/presentation/screens/web_bill_pdf_viewer_web.dart';
 import 'package:synccash/features/sales/presentation/screens/native_pdf_viewer_stub.dart'
     if (dart.library.io) 'package:synccash/features/sales/presentation/screens/native_pdf_viewer_native.dart';
 

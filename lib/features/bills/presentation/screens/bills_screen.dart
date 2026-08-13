@@ -16,8 +16,8 @@ import '../providers/bills_provider.dart';
 import 'create_bill_screen.dart';
 import 'bill_pdf_generator.dart';
 
-import 'package:synccash/features/sales/presentation/screens/web_invoice_viewer_stub.dart'
-    if (dart.library.html) 'package:synccash/features/sales/presentation/screens/web_invoice_viewer_web.dart';
+import 'package:synccash/features/bills/presentation/screens/web_bill_pdf_viewer_stub.dart'
+    if (dart.library.html) 'package:synccash/features/bills/presentation/screens/web_bill_pdf_viewer_web.dart';
 import 'package:synccash/features/sales/presentation/screens/native_pdf_viewer_stub.dart'
     if (dart.library.io) 'package:synccash/features/sales/presentation/screens/native_pdf_viewer_native.dart';
 
