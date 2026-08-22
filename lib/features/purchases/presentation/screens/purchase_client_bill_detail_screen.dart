@@ -571,20 +571,16 @@ class _PurchaseClientBillDetailScreenState
       final cashbookRef = db.collection('cashbooks').doc(_cashbookId);
       final txRef       = cashbookRef.collection('transactions').doc(tx.id);
 
-      await db.runTransaction((txn) async {
-        final txSnap = await txn.get(txRef);
-        if (!txSnap.exists) return;
-
-        final data   = txSnap.data()!;
-        final amount = (data['amount'] as num?)?.toDouble() ?? tx.amount;
-
-        txn.delete(txRef);
-        // Reverse expense effect on cashbook totals
-        txn.update(cashbookRef, {
-          'balance': FieldValue.increment(amount),   // restore balance
-          'expense': FieldValue.increment(-amount),  // subtract from expense
-        });
+      final batch = db.batch();
+      batch.delete(txRef);
+      // Reverse expense effect on cashbook totals. The transaction is already
+      // present in the list, so no network read is needed before queueing the
+      // delete while offline.
+      batch.update(cashbookRef, {
+        'balance': FieldValue.increment(tx.amount),   // restore balance
+        'expense': FieldValue.increment(-tx.amount),  // subtract from expense
       });
+      await batch.commit();
 
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
           _snackBar('Payment entry deleted', success: true));

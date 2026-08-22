@@ -617,7 +617,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       );
 
       if (existing != null) {
-        await ref.read(transactionRepositoryProvider).updateTransaction(tx);
+        await ref.read(transactionRepositoryProvider).updateTransaction(
+          tx,
+          previous: existing,
+        );
       } else if (_category == 'CB') {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
       } else if (_type == 'income' && _selectedBill != null) {

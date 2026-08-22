@@ -1,388 +1,146 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:synccash/features/transactions/data/models/transaction_model.dart';
-
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
-
 import 'package:synccash/features/transactions/domain/repositories/transaction_repository.dart';
 
-
-
 class TransactionRepositoryImpl implements TransactionRepository {
-
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  bool _isIncome(String type) => type.toLowerCase().trim() == 'income';
 
+  Map<String, dynamic> _counterDeltas({
+    required double balance,
+    required double income,
+    required double expense,
+  }) {
+    return {
+      'totalBalance': FieldValue.increment(balance),
+      'totalIncome': FieldValue.increment(income),
+      'totalExpense': FieldValue.increment(expense),
+    };
+  }
 
   @override
-
   Future<void> addTransaction(TransactionEntity tx) async {
-
-    try {
-
-      final txRef = _firestore
-
-          .collection('cashbooks')
-
-          .doc(tx.cashbookId)
-
-          .collection('transactions')
-
-          .doc();
-
-
-
-      final cashbookRef =
-
-          _firestore.collection('cashbooks').doc(tx.cashbookId);
-
-
-
-      final model = TransactionModel(
-
-        transactionId: txRef.id,
-
-        cashbookId: tx.cashbookId,
-
-        createdBy: tx.createdBy,
-
-        creatorName: tx.creatorName,
-
-        createdAt: tx.createdAt,
-
-        amount: tx.amount,
-
-        type: tx.type,
-
-        category: tx.category,
-
-        description: tx.description,
-
-        linkedSaleBillId: tx.linkedSaleBillId,
-
-      );
-
-
-
-      await _firestore.runTransaction((transaction) async {
-
-        final cashbookSnapshot = await transaction.get(cashbookRef);
-
-
-
-        if (!cashbookSnapshot.exists) {
-
-          throw Exception(
-
-            "Cashbook '${tx.cashbookId}' does not exist.",
-
-          );
-
-        }
-
-
-
-        final data = cashbookSnapshot.data();
-
-
-
-        if (data == null) {
-
-          throw Exception(
-
-            "Cashbook '${tx.cashbookId}' contains no data.",
-
-          );
-
-        }
-
-
-
-        final num currentBalance =
-
-            (data['totalBalance'] as num?) ?? 0;
-
-
-
-        final num currentIncome =
-
-            (data['totalIncome'] as num?) ?? 0;
-
-
-
-        final num currentExpense =
-
-            (data['totalExpense'] as num?) ?? 0;
-
-
-
-        transaction.set(txRef, model.toJson());
-
-
-
-        final bool isIncome =
-
-            tx.type.toLowerCase().trim() == 'income';
-
-
-
-        if (isIncome) {
-
-          transaction.update(cashbookRef, {
-
-            'totalBalance': currentBalance + tx.amount,
-
-            'totalIncome': currentIncome + tx.amount,
-
-          });
-
-        } else {
-
-          transaction.update(cashbookRef, {
-
-            'totalBalance': currentBalance - tx.amount,
-
-            'totalExpense': currentExpense + tx.amount,
-
-          });
-
-        }
-
-      });
-
-    } on FirebaseException {
-
-      rethrow;
-
-    }
-
+    final txRef = _firestore
+        .collection('cashbooks')
+        .doc(tx.cashbookId)
+        .collection('transactions')
+        .doc();
+    final cashbookRef = _firestore.collection('cashbooks').doc(tx.cashbookId);
+
+    final model = TransactionModel(
+      transactionId: txRef.id,
+      cashbookId: tx.cashbookId,
+      createdBy: tx.createdBy,
+      creatorName: tx.creatorName,
+      createdAt: tx.createdAt,
+      amount: tx.amount,
+      type: tx.type,
+      category: tx.category,
+      description: tx.description,
+      linkedSaleBillId: tx.linkedSaleBillId,
+      linkedPurchaseBillId: tx.linkedPurchaseBillId,
+    );
+
+    final batch = _firestore.batch();
+    batch.set(txRef, model.toJson());
+
+    final isIncome = _isIncome(tx.type);
+    batch.update(
+      cashbookRef,
+      _counterDeltas(
+        balance: isIncome ? tx.amount : -tx.amount,
+        income: isIncome ? tx.amount : 0,
+        expense: isIncome ? 0 : tx.amount,
+      ),
+    );
+
+    // Firestore batches are persisted locally and uploaded automatically when
+    // the device reconnects. Do not replace this with runTransaction():
+    // Firestore transactions cannot complete while offline.
+    await batch.commit();
   }
 
-
-
   @override
-
   Future<void> deleteTransaction(TransactionEntity tx) async {
-
-    try {
-
-      final txRef = _firestore
-
-          .collection('cashbooks')
-
-          .doc(tx.cashbookId)
-
-          .collection('transactions')
-
-          .doc(tx.transactionId);
-
-
-
-      final cashbookRef =
-
-          _firestore.collection('cashbooks').doc(tx.cashbookId);
-
-
-
-      await _firestore.runTransaction((transaction) async {
-
-        final txSnapshot = await transaction.get(txRef);
-
-        final cashbookSnapshot = await transaction.get(cashbookRef);
-
-
-
-        if (!txSnapshot.exists) {
-
-          throw Exception(
-
-            "Transaction '${tx.transactionId}' does not exist.",
-
-          );
-
-        }
-
-
-
-        if (!cashbookSnapshot.exists) {
-
-          throw Exception(
-
-            "Cashbook '${tx.cashbookId}' does not exist.",
-
-          );
-
-        }
-
-
-
-        final cashbookData = cashbookSnapshot.data();
-
-
-
-        if (cashbookData == null) {
-
-          throw Exception(
-
-            "Cashbook '${tx.cashbookId}' contains no data.",
-
-          );
-
-        }
-
-
-
-        final txData = txSnapshot.data()!;
-
-        final num amount = (txData['amount'] as num?) ?? tx.amount;
-
-        final String type = (txData['type'] as String?) ?? tx.type;
-
-
-
-        final num currentBalance =
-
-            (cashbookData['totalBalance'] as num?) ?? 0;
-
-        final num currentIncome =
-
-            (cashbookData['totalIncome'] as num?) ?? 0;
-
-        final num currentExpense =
-
-            (cashbookData['totalExpense'] as num?) ?? 0;
-
-
-
-        final bool isIncome =
-
-            type.toLowerCase().trim() == 'income';
-
-
-
-        if (isIncome) {
-
-          transaction.update(cashbookRef, {
-
-            'totalBalance': currentBalance - amount,
-
-            'totalIncome': currentIncome - amount,
-
-          });
-
-        } else {
-
-          transaction.update(cashbookRef, {
-
-            'totalBalance': currentBalance + amount,
-
-            'totalExpense': currentExpense - amount,
-
-          });
-
-        }
-
-
-
-        transaction.delete(txRef);
-
-      });
-
-    } on FirebaseException {
-
-      rethrow;
-
-    }
-
+    final txRef = _firestore
+        .collection('cashbooks')
+        .doc(tx.cashbookId)
+        .collection('transactions')
+        .doc(tx.transactionId);
+    final cashbookRef = _firestore.collection('cashbooks').doc(tx.cashbookId);
+
+    final batch = _firestore.batch();
+    batch.delete(txRef);
+
+    final isIncome = _isIncome(tx.type);
+    batch.update(
+      cashbookRef,
+      _counterDeltas(
+        balance: isIncome ? -tx.amount : tx.amount,
+        income: isIncome ? -tx.amount : 0,
+        expense: isIncome ? 0 : -tx.amount,
+      ),
+    );
+
+    await batch.commit();
   }
 
   @override
-  Future<void> updateTransaction(TransactionEntity tx) async {
-    try {
-      final txRef = _firestore
-          .collection('cashbooks')
-          .doc(tx.cashbookId)
-          .collection('transactions')
-          .doc(tx.transactionId);
+  Future<void> updateTransaction(
+    TransactionEntity tx, {
+    TransactionEntity? previous,
+  }) async {
+    final txRef = _firestore
+        .collection('cashbooks')
+        .doc(tx.cashbookId)
+        .collection('transactions')
+        .doc(tx.transactionId);
+    final cashbookRef = _firestore.collection('cashbooks').doc(tx.cashbookId);
 
-      final cashbookRef =
-          _firestore.collection('cashbooks').doc(tx.cashbookId);
+    // The edit screen passes the locally visible previous value. This avoids
+    // a network read, which is the part that makes Firestore transactions fail
+    // offline. If no previous value is available, only the document fields are
+    // updated and the counters are left unchanged.
+    final old = previous;
+    final oldIsIncome = old != null && _isIncome(old.type);
+    final newIsIncome = _isIncome(tx.type);
 
-      await _firestore.runTransaction((transaction) async {
-        final txSnapshot = await transaction.get(txRef);
-        final cashbookSnapshot = await transaction.get(cashbookRef);
+    final oldBalance = old == null ? 0.0 : (oldIsIncome ? old.amount : -old.amount);
+    final newBalance = newIsIncome ? tx.amount : -tx.amount;
+    final oldIncome = old == null || !oldIsIncome ? 0.0 : old.amount;
+    final newIncome = newIsIncome ? tx.amount : 0.0;
+    final oldExpense = old == null || oldIsIncome ? 0.0 : old.amount;
+    final newExpense = newIsIncome ? 0.0 : tx.amount;
 
-        if (!txSnapshot.exists) {
-          throw Exception(
-            "Transaction '${tx.transactionId}' does not exist.",
-          );
-        }
+    final batch = _firestore.batch();
+    batch.update(txRef, {
+      'amount': tx.amount,
+      'type': tx.type,
+      'category': tx.category,
+      'description': tx.description,
+      'createdAt': Timestamp.fromDate(tx.createdAt),
+      'createdBy': tx.createdBy,
+      'creatorName': tx.creatorName,
+      'lastEditedBy': tx.lastEditedBy,
+      'linkedSaleBillId': tx.linkedSaleBillId ?? FieldValue.delete(),
+      'linkedPurchaseBillId': tx.linkedPurchaseBillId ?? FieldValue.delete(),
+    });
 
-        if (!cashbookSnapshot.exists) {
-          throw Exception(
-            "Cashbook '${tx.cashbookId}' does not exist.",
-          );
-        }
-
-        final cashbookData = cashbookSnapshot.data()!;
-        final oldData = txSnapshot.data()!;
-
-        final num oldAmount = (oldData['amount'] as num?) ?? tx.amount;
-        final String oldType = (oldData['type'] as String?) ?? tx.type;
-        final bool wasIncome = oldType.toLowerCase().trim() == 'income';
-        final bool isIncome = tx.type.toLowerCase().trim() == 'income';
-
-        num balance = (cashbookData['totalBalance'] as num?) ?? 0;
-        num income  = (cashbookData['totalIncome']  as num?) ?? 0;
-        num expense = (cashbookData['totalExpense'] as num?) ?? 0;
-
-        // Reverse old amount
-        if (wasIncome) {
-          balance -= oldAmount;
-          income  -= oldAmount;
-        } else {
-          balance += oldAmount;
-          expense -= oldAmount;
-        }
-
-        // Apply new amount
-        if (isIncome) {
-          balance += tx.amount;
-          income  += tx.amount;
-        } else {
-          balance -= tx.amount;
-          expense += tx.amount;
-        }
-
-        // CHANGED: always write linkedSaleBillId.
-        // When the user clears the bill selection (_selectedBill becomes null),
-        // tx.linkedSaleBillId is null and we use FieldValue.delete() to
-        // properly remove the field from Firestore instead of leaving the old
-        // bill ID in place. The previous conditional guard
-        //   `if (tx.linkedSaleBillId != null) 'linkedSaleBillId': ...`
-        // was preventing bill-link clearing from ever being persisted.
-        transaction.update(txRef, {
-          'amount':          tx.amount,
-          'type':            tx.type,
-          'category':        tx.category,
-          'description':     tx.description,
-          'createdAt':       Timestamp.fromDate(tx.createdAt),
-          'createdBy':       tx.createdBy,
-          'creatorName':     tx.creatorName,
-          'lastEditedBy':    tx.lastEditedBy,
-          'linkedSaleBillId':     tx.linkedSaleBillId     ?? FieldValue.delete(),
-          'linkedPurchaseBillId': tx.linkedPurchaseBillId ?? FieldValue.delete(),
-        });
-
-        transaction.update(cashbookRef, {
-          'totalBalance': balance,
-          'totalIncome':  income,
-          'totalExpense': expense,
-        });
-      });
-    } on FirebaseException {
-      rethrow;
+    if (old != null) {
+      batch.update(
+        cashbookRef,
+        _counterDeltas(
+          balance: newBalance - oldBalance,
+          income: newIncome - oldIncome,
+          expense: newExpense - oldExpense,
+        ),
+      );
     }
+
+    await batch.commit();
   }
 
   // limit:0 skips .limit() so all records are fetched.
@@ -391,7 +149,7 @@ class TransactionRepositoryImpl implements TransactionRepository {
     String cashbookId, {
     int limit = 5000,
   }) {
-    var query = FirebaseFirestore.instance
+    var query = _firestore
         .collection('cashbooks')
         .doc(cashbookId)
         .collection('transactions')
@@ -400,11 +158,10 @@ class TransactionRepositoryImpl implements TransactionRepository {
     if (limit > 0) query = query.limit(limit);
 
     return query
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs
             .map<TransactionEntity>(
                 (d) => TransactionModel.fromFirestore(d))
             .toList());
   }
-
 }

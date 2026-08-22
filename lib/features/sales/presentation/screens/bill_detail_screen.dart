@@ -565,19 +565,15 @@ class _BillDetailScreenState extends ConsumerState<BillDetailScreen>
       final cashbookRef = db.collection('cashbooks').doc(_cashbookId);
       final txRef       = cashbookRef.collection('transactions').doc(tx.id);
 
-      await db.runTransaction((txn) async {
-        final txSnap = await txn.get(txRef);
-        if (!txSnap.exists) return;
-
-        final data   = txSnap.data()!;
-        final amount = (data['amount'] as num?)?.toDouble() ?? tx.amount;
-
-        txn.delete(txRef);
-        txn.update(cashbookRef, {
-          'balance': FieldValue.increment(-amount),
-          'income':  FieldValue.increment(-amount),
-        });
+      final batch = db.batch();
+      batch.delete(txRef);
+      // The payment is already present in the loaded list, so no network read
+      // is needed before queueing this delete while offline.
+      batch.update(cashbookRef, {
+        'balance': FieldValue.increment(-tx.amount),
+        'income':  FieldValue.increment(-tx.amount),
       });
+      await batch.commit();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

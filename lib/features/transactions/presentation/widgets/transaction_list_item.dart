@@ -721,7 +721,10 @@ class _EditTransactionSheetState extends ConsumerState<_EditTransactionSheet> {
 
       await ref
           .read(transactionRepositoryProvider)
-          .updateTransaction(updated);
+          .updateTransaction(
+            updated,
+            previous: widget.transaction,
+          );
 
       // Stamp or clear isObPayment / obPartyName.
       // These fields are NOT part of TransactionEntity so updateTransaction

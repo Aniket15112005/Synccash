@@ -285,7 +285,7 @@ Future<Uint8List> buildBillPdfFromModel(CustomBillModel bill) async {
       // Repeat the items column header at the top of pages 2, 3, … so
       // readers always know which column is which. Page 1 already includes
       // the header row as part of the build list below.
-      header: (ctx) => ctx.pageNumber == 0
+      header: (ctx) => ctx.pageNumber == 1
           ? pw.SizedBox()
           : buildItemsColHeader(),
       build: (ctx) => [
