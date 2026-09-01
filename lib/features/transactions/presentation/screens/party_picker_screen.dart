@@ -23,16 +23,22 @@ class PartyPickerScreen extends StatefulWidget {
   /// making the whole screen wait to appear.
   final Future<List<String>> allPartyNamesFuture;
 
-  /// Whether suggestions should be shown at all.
-  /// Pass false for expense / non-wholesale categories → no suggestions,
-  /// just a plain text entry screen.
+  /// Whether suggestions should be shown at all. When false, this remains a
+  /// plain text entry screen; when true, the user can choose a saved name or
+  /// confirm a new one.
   final bool canSuggest;
+  final String title;
+  final String inputHint;
+  final String entityLabel;
 
   const PartyPickerScreen({
     super.key,
     required this.initialValue,
     required this.allPartyNamesFuture,
     required this.canSuggest,
+    this.title = 'Party Name',
+    this.inputHint = 'Type party name…',
+    this.entityLabel = 'party',
   });
 
   @override
@@ -126,8 +132,8 @@ class _PartyPickerScreenState extends State<PartyPickerScreen> {
               color: Color(0xFF6B7280)),
           onPressed: () => Navigator.pop(context, null),
         ),
-        title: const Text(
-          'Party Name',
+        title: Text(
+          widget.title,
           style: TextStyle(
             color: Color(0xFFF0F1F3),
             fontSize: 16,
@@ -199,7 +205,7 @@ class _PartyPickerScreenState extends State<PartyPickerScreen> {
               ),
               decoration: InputDecoration(
                 hintText: widget.canSuggest
-                    ? 'Type party name…'
+                    ? widget.inputHint
                     : 'What was this for?',
                 hintStyle: const TextStyle(
                   color: Color(0xFF3D4149),
@@ -316,6 +322,7 @@ class _PartyPickerScreenState extends State<PartyPickerScreen> {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: _CreateNewPartyTile(
             name: _ctrl.text.trim(),
+            entityLabel: widget.entityLabel,
             onTap: () => Navigator.pop(context, _ctrl.text.trim()),
           ),
         );
@@ -357,6 +364,7 @@ class _PartyPickerScreenState extends State<PartyPickerScreen> {
         if (showCreate && i == _filtered.length) {
           return _CreateNewPartyTile(
             name: _ctrl.text.trim(),
+            entityLabel: widget.entityLabel,
             onTap: () => Navigator.pop(context, _ctrl.text.trim()),
           );
         }
@@ -452,8 +460,13 @@ class _PickerSuggestionTileState extends State<_PickerSuggestionTile> {
 
 class _CreateNewPartyTile extends StatefulWidget {
   final String name;
+  final String entityLabel;
   final VoidCallback onTap;
-  const _CreateNewPartyTile({required this.name, required this.onTap});
+  const _CreateNewPartyTile({
+    required this.name,
+    required this.onTap,
+    this.entityLabel = 'party',
+  });
 
   @override
   State<_CreateNewPartyTile> createState() => _CreateNewPartyTileState();
@@ -523,8 +536,8 @@ class _CreateNewPartyTileState extends State<_CreateNewPartyTile> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 1),
-                  const Text(
-                    'New party — tap to use this name',
+                  Text(
+                    'New ${widget.entityLabel} — tap to use this name',
                     style: TextStyle(
                       color: Color(0xFF6B7280),
                       fontSize: 11,

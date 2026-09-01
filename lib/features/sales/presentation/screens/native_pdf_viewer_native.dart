@@ -24,7 +24,7 @@ void openNativePdfInApp(
   String url,
   String billNumber,
   String partyName,
-) {
+  {String documentLabel = 'Invoice'}) {
   Navigator.push(
     context,
     MaterialPageRoute(
@@ -32,6 +32,7 @@ void openNativePdfInApp(
         url:        url,
         billNumber: billNumber,
         partyName:  partyName,
+        documentLabel: documentLabel,
       ),
     ),
   );
@@ -43,11 +44,13 @@ class _NativePdfViewerPage extends StatefulWidget {
   final String url;
   final String billNumber;
   final String partyName;
+  final String documentLabel;
 
   const _NativePdfViewerPage({
     required this.url,
     required this.billNumber,
     required this.partyName,
+    required this.documentLabel,
   });
 
   @override
@@ -106,7 +109,9 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
     try {
       final safeName = widget.billNumber.replaceAll(RegExp(r'[^\w\-]'), '_');
       await Share.shareXFiles(
-        [XFile(path, name: 'Invoice_$safeName.pdf', mimeType: 'application/pdf')],
+        [XFile(path,
+            name: '${widget.documentLabel}_$safeName.pdf',
+            mimeType: 'application/pdf')],
       );
     } catch (e) {
       if (mounted) {
@@ -142,7 +147,7 @@ class _NativePdfViewerPageState extends State<_NativePdfViewerPage> {
               ),
             ),
             Text(
-              'Invoice  #${widget.billNumber}',
+              '${widget.documentLabel}  #${widget.billNumber}',
               style: const TextStyle(color: Colors.white54, fontSize: 11),
             ),
           ],

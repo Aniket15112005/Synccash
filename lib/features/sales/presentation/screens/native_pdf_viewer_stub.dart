@@ -8,4 +8,5 @@ void openNativePdfInApp(
   String url,
   String billNumber,
   String partyName,
+  {String documentLabel = 'Invoice'}
 ) {}

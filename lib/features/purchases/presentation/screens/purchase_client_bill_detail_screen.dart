@@ -29,6 +29,8 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'web_invoice_viewer_stub.dart'
     if (dart.library.html) 'web_invoice_viewer_web.dart';
+import 'package:synccash/features/sales/presentation/screens/native_pdf_viewer_stub.dart'
+    if (dart.library.io) 'package:synccash/features/sales/presentation/screens/native_pdf_viewer_native.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Theme  (amber = purchase-feature accent, mirrors _T in purchases_screen.dart)
@@ -808,7 +810,32 @@ class _PaymentDetailSheet extends StatelessWidget {
   final PurchaseBillEntity bill;
   const _PaymentDetailSheet({required this.tx, required this.bill});
 
-  Future<void> _openDocument(BuildContext context, String url) async {
+  Future<void> _openDocument(
+    BuildContext context,
+    String url, {
+    required bool isPdf,
+  }) async {
+    if (isPdf) {
+      if (kIsWeb) {
+        openPdfInApp(
+          context,
+          url,
+          bill.billNumber,
+          bill.clientName,
+          documentLabel: 'Receipt',
+        );
+      } else {
+        openNativePdfInApp(
+          context,
+          url,
+          bill.billNumber,
+          bill.clientName,
+          documentLabel: 'Receipt',
+        );
+      }
+      return;
+    }
+
     final opened = await launchUrl(
       Uri.parse(url),
       mode: LaunchMode.externalApplication,
@@ -830,6 +857,7 @@ class _PaymentDetailSheet extends StatelessWidget {
       required String label,
       required String name,
       required String url,
+      required bool isPdf,
     }) {
       return ListTile(
         dense: true,
@@ -844,7 +872,7 @@ class _PaymentDetailSheet extends StatelessWidget {
             style: const TextStyle(color: _T.muted, fontSize: 10)),
         trailing: const Icon(Icons.open_in_new_rounded,
             color: _T.muted, size: 17),
-        onTap: () => _openDocument(context, url),
+        onTap: () => _openDocument(context, url, isPdf: isPdf),
       );
     }
 
@@ -1001,6 +1029,9 @@ class _PaymentDetailSheet extends StatelessWidget {
                       label: 'Payment proof',
                       name: tx.paymentAttachmentName ?? 'Attached proof',
                       url: tx.paymentAttachmentUrl!,
+                      isPdf: (tx.paymentAttachmentName ?? '')
+                          .toLowerCase()
+                          .endsWith('.pdf'),
                     ),
                   if ((tx.paymentAttachmentUrl ?? '').isNotEmpty &&
                       (tx.paymentReceiptUrl ?? '').isNotEmpty)
@@ -1011,6 +1042,7 @@ class _PaymentDetailSheet extends StatelessWidget {
                       label: 'Payment receipt',
                       name: tx.paymentReceiptName ?? 'Receipt PDF',
                       url: tx.paymentReceiptUrl!,
+                      isPdf: true,
                     ),
                 ],
               ),

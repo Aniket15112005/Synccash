@@ -4,4 +4,4 @@
 import 'package:flutter/material.dart';
 
 void openPdfInApp(BuildContext context, String url, String billNumber,
-    String clientName) {}
+    String clientName, {String documentLabel = 'Invoice'}) {}

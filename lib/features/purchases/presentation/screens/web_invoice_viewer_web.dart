@@ -10,11 +10,15 @@
 // ignore_for_file: avoid_web_libraries_in_flutter
 import 'dart:async';
 import 'dart:html' as html;
+import 'dart:typed_data';
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:share_plus/share_plus.dart';
 
 void openPdfInApp(
-    BuildContext context, String url, String billNumber, String clientName) {
+    BuildContext context, String url, String billNumber, String clientName,
+    {String documentLabel = 'Invoice'}) {
   Navigator.push(
     context,
     MaterialPageRoute(
@@ -22,6 +26,7 @@ void openPdfInApp(
         url: url,
         billNumber: billNumber,
         clientName: clientName,
+        documentLabel: documentLabel,
       ),
     ),
   );
@@ -33,11 +38,13 @@ class _WebInvoiceViewerPage extends StatefulWidget {
   final String url;
   final String billNumber;
   final String clientName;
+  final String documentLabel;
 
   const _WebInvoiceViewerPage({
     required this.url,
     required this.billNumber,
     required this.clientName,
+    required this.documentLabel,
   });
 
   @override
@@ -50,7 +57,10 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
 
   bool _loading = true;
   bool _errored = false;
+  bool _sharing = false;
   Timer? _loadingFallbackTimer;
+  Uint8List? _pdfBytes;
+  Future<Uint8List>? _pdfBytesFuture;
 
   @override
   void initState() {
@@ -100,11 +110,49 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
     _loadingFallbackTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) _stopLoading();
     });
+
+    _pdfBytesFuture = _fetchPdfBytes();
+  }
+
+  Future<Uint8List> _fetchPdfBytes() async {
+    final response = await http
+        .get(Uri.parse(widget.url))
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}');
+    }
+    _pdfBytes = response.bodyBytes;
+    return response.bodyBytes;
   }
 
   void _stopLoading() {
     _loadingFallbackTimer?.cancel();
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _sharePdf() async {
+    if (_sharing) return;
+    setState(() => _sharing = true);
+    try {
+      final bytes = _pdfBytes ?? await (_pdfBytesFuture ??= _fetchPdfBytes());
+      final safeName =
+          widget.billNumber.replaceAll(RegExp(r'[^\w\-]'), '_');
+      await Share.shareXFiles([
+        XFile.fromData(
+          bytes,
+          name: '${widget.documentLabel}_$safeName.pdf',
+          mimeType: 'application/pdf',
+        ),
+      ]);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not share: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
   }
 
   @override
@@ -136,10 +184,24 @@ class _WebInvoiceViewerPageState extends State<_WebInvoiceViewerPage> {
                     color: Colors.white,
                     fontSize: 14,
                     fontWeight: FontWeight.w700)),
-            Text('Invoice  #${widget.billNumber}',
+            Text('${widget.documentLabel}  #${widget.billNumber}',
                 style: const TextStyle(color: Colors.white54, fontSize: 11)),
           ],
         ),
+        actions: [
+          IconButton(
+            onPressed: _sharing ? null : _sharePdf,
+            icon: _sharing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        color: Colors.white70, strokeWidth: 2),
+                  )
+                : const Icon(Icons.share_rounded, color: Colors.white70),
+            tooltip: 'Share',
+          ),
+        ],
       ),
       body: Stack(
         children: [

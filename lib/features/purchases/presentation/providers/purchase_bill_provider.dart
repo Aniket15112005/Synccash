@@ -228,6 +228,12 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
     String? paymentAttachmentType,
     String? paymentReceiptUrl,
     String? paymentReceiptName,
+    // An explicitly selected bill from the transaction form must receive the
+    // whole payment. Otherwise a payment larger than its remaining balance
+    // silently spills into another bill, which makes the user's selection
+    // appear to have been ignored. Other callers retain the existing FIFO
+    // overflow behavior.
+    bool keepPaymentOnSelectedBill = false,
   }) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
@@ -285,7 +291,9 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
       );
       final selPaid = data.paidPerBill[selectedBillId] ?? 0.0;
       final selRem = (selBill.total - selPaid).clamp(0.0, double.infinity);
-      final toSel = left.clamp(0.0, selRem);
+      final toSel = keepPaymentOnSelectedBill
+          ? left
+          : left.clamp(0.0, selRem);
       left -= toSel;
 
       alloc(
@@ -295,7 +303,7 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
       );
 
       // 2. Other pending bills (oldest first, skipping the selected one).
-      if (left > 0) {
+      if (left > 0 && !keepPaymentOnSelectedBill) {
         final others = data.allBills.where((b) {
           if (b.id == selectedBillId) return false;
           final paid = data.paidPerBill[b.id] ?? 0.0;
@@ -683,6 +691,33 @@ final purchaseBillActionsProvider =
     AsyncNotifierProvider<PurchaseBillActionsNotifier, void>(
   PurchaseBillActionsNotifier.new,
 );
+
+/// Maps purchase bill IDs to bill numbers for transaction history/details.
+/// The document ID is authoritative, matching the ID persisted on linked
+/// purchase-payment transactions.
+final purchaseBillNumberMapProvider =
+    StreamProvider<Map<String, String>>((ref) {
+  final cashbookId = ref.watch(currentCashbookIdProvider);
+  if (cashbookId == null) return Stream.value({});
+
+  return FirebaseFirestore.instance
+      .collection('cashbooks')
+      .doc(cashbookId)
+      .collection('purchase_bills')
+      .snapshots()
+      .map((snap) {
+    final map = <String, String>{};
+    for (final doc in snap.docs) {
+      final storedId = doc.data()['purchaseBillId'] as String? ?? '';
+      final billNumber = doc.data()['billNumber'] as String? ?? '';
+      if (doc.id.isNotEmpty) map[doc.id] = billNumber;
+      // Keep compatibility with older records whose linked transactions use
+      // the persisted purchaseBillId field rather than the document ID.
+      if (storedId.isNotEmpty) map[storedId] = billNumber;
+    }
+    return map;
+  });
+});
 
 /// Quick lookup of a bill by id — used when editing a transaction that
 /// already has a linkedPurchaseBillId, to pre-select it in the dropdown.

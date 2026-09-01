@@ -1,9 +1,12 @@
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:synccash/core/utils/currency_formatter.dart';
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
 import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
+import 'package:synccash/features/purchases/presentation/providers/purchase_bill_provider.dart';
 
 class TransactionDetailsSheet extends ConsumerWidget {
   final TransactionEntity transaction;
@@ -16,12 +19,20 @@ class TransactionDetailsSheet extends ConsumerWidget {
         '${isIncome ? '+' : '−'}₹${CurrencyFormatter.format(transaction.amount)}';
 
     // Bill number lookup from live map (no extra Firestore read needed)
-    final _billMap    = ref.watch(saleBillNumberMapProvider).asData?.value ?? {};
-    final _linkedId   = transaction.linkedSaleBillId;
-    final _billNumber = (_linkedId != null && _linkedId.isNotEmpty)
-        ? _billMap[_linkedId]
-        : null;
-    final _hasBillNo  = _billNumber != null && _billNumber.isNotEmpty;
+    final saleBillMap =
+        ref.watch(saleBillNumberMapProvider).asData?.value ?? {};
+    final purchaseBillMap =
+        (kIsWeb || defaultTargetPlatform == TargetPlatform.iOS)
+            ? ref.watch(purchaseBillNumberMapProvider).asData?.value ?? {}
+            : <String, String>{};
+    final linkedSaleId = transaction.linkedSaleBillId;
+    final linkedPurchaseId = transaction.linkedPurchaseBillId;
+    final billNumber = linkedPurchaseId != null && linkedPurchaseId.isNotEmpty
+        ? purchaseBillMap[linkedPurchaseId]
+        : linkedSaleId != null && linkedSaleId.isNotEmpty
+            ? saleBillMap[linkedSaleId]
+            : null;
+    final hasBillNo = billNumber != null && billNumber.isNotEmpty;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
@@ -110,12 +121,12 @@ class TransactionDetailsSheet extends ConsumerWidget {
         _DetailRow(
           label: 'Time',
           value: DateFormat('hh:mm a').format(transaction.createdAt),
-          isLast: !_hasBillNo,
+          isLast: !hasBillNo,
         ),
-        if (_hasBillNo)
+        if (hasBillNo)
           _DetailRow(
             label: 'Bill No.',
-            value: _billNumber!,
+            value: billNumber!,
             isLast: true,
           ),
       ]),

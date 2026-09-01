@@ -9,6 +9,10 @@ import 'package:synccash/app/theme/app_colors.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
     show currentCashbookIdProvider;
 import 'package:synccash/features/transactions/domain/entities/transaction_entity.dart';
+import 'package:synccash/features/purchases/presentation/screens/web_invoice_viewer_stub.dart'
+    if (dart.library.html) 'package:synccash/features/purchases/presentation/screens/web_invoice_viewer_web.dart';
+import 'package:synccash/features/sales/presentation/screens/native_pdf_viewer_stub.dart'
+    if (dart.library.io) 'package:synccash/features/sales/presentation/screens/native_pdf_viewer_native.dart';
 
 class TransactionDetailsScreen extends ConsumerStatefulWidget {
   final TransactionEntity transaction;
@@ -36,9 +40,12 @@ class _TransactionDetailsScreenState
   @override
   void initState() {
     super.initState();
-    final billId = widget.transaction.linkedSaleBillId;
-    if (billId != null && billId.isNotEmpty) {
-      _fetchBillNumber(billId);
+    final purchaseBillId = widget.transaction.linkedPurchaseBillId;
+    final saleBillId = widget.transaction.linkedSaleBillId;
+    if (purchaseBillId != null && purchaseBillId.isNotEmpty) {
+      _fetchBillNumber(purchaseBillId, collection: 'purchase_bills');
+    } else if (saleBillId != null && saleBillId.isNotEmpty) {
+      _fetchBillNumber(saleBillId, collection: 'sale_bills');
     } else if (widget.transaction.type == 'income') {
       _checkObPayment();
     }
@@ -46,7 +53,10 @@ class _TransactionDetailsScreenState
 
   // ── Fetch bill number from sale_bills sub-collection ──────────────────────
 
-  Future<void> _fetchBillNumber(String billId) async {
+  Future<void> _fetchBillNumber(
+    String billId, {
+    required String collection,
+  }) async {
     if (!mounted) return;
     setState(() => _loadingBill = true);
     try {
@@ -55,7 +65,7 @@ class _TransactionDetailsScreenState
       final doc = await FirebaseFirestore.instance
           .collection('cashbooks')
           .doc(cashbookId)
-          .collection('sale_bills')
+          .collection(collection)
           .doc(billId)
           .get();
       if (mounted && doc.exists) {
@@ -67,6 +77,26 @@ class _TransactionDetailsScreenState
       // silently ignore — bill number is optional display info
     } finally {
       if (mounted) setState(() => _loadingBill = false);
+    }
+  }
+
+  void _openReceipt(String url) {
+    if (kIsWeb) {
+      openPdfInApp(
+        context,
+        url,
+        'Payment receipt',
+        widget.transaction.description,
+        documentLabel: 'Receipt',
+      );
+    } else {
+      openNativePdfInApp(
+        context,
+        url,
+        'Payment receipt',
+        widget.transaction.description,
+        documentLabel: 'Receipt',
+      );
     }
   }
 
@@ -237,10 +267,13 @@ class _TransactionDetailsScreenState
   Widget build(BuildContext context) {
     final bool isIncome = widget.transaction.type == 'income';
     final bool showPurchasePaymentDocs =
-        kIsWeb || defaultTargetPlatform != TargetPlatform.android;
+        kIsWeb || defaultTargetPlatform == TargetPlatform.iOS;
     final bool hasLinkedBill =
-        widget.transaction.linkedSaleBillId != null &&
-        widget.transaction.linkedSaleBillId!.isNotEmpty;
+        (widget.transaction.linkedSaleBillId != null &&
+            widget.transaction.linkedSaleBillId!.isNotEmpty) ||
+        (showPurchasePaymentDocs &&
+            widget.transaction.linkedPurchaseBillId != null &&
+            widget.transaction.linkedPurchaseBillId!.isNotEmpty);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -356,13 +389,12 @@ class _TransactionDetailsScreenState
                 title: 'Payment receipt',
                 name: widget.transaction.paymentReceiptName ?? 'Receipt PDF',
                 icon: Icons.receipt_long_rounded,
-                onTap: () => launchUrl(
-                  Uri.parse(widget.transaction.paymentReceiptUrl!),
-                  mode: LaunchMode.externalApplication,
+                onTap: () => _openReceipt(
+                  widget.transaction.paymentReceiptUrl!,
                 ),
               ),
 
-            // Bill No. — shown when linked to a sale bill
+            // Bill No. — shown when linked to either a sale or purchase bill
             if (hasLinkedBill)
               _DetailTile(
                 title: "Bill No.",

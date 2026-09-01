@@ -18,6 +18,7 @@ import 'package:synccash/features/sales/domain/entities/sale_bill_entity.dart';
 import 'package:synccash/features/sales/presentation/providers/sale_bill_provider.dart';
 import 'package:synccash/features/sales/presentation/widgets/bill_no_dropdown_field.dart';
 import 'package:synccash/features/sales/presentation/providers/party_provider.dart';
+import 'package:synccash/features/purchases/presentation/providers/purchase_bill_provider.dart';
 // ADDED: dedicated party picker screen (keyboard-safe suggestion flow)
 import 'package:synccash/features/transactions/presentation/screens/party_picker_screen.dart';
 
@@ -175,12 +176,20 @@ class TransactionListItem extends ConsumerWidget {
     final timeStr = _timeFmt.format(transaction.createdAt);
     final amountStr =
         '${isIncome ? '+' : '−'}₹${CurrencyFormatter.format(transaction.amount)}';
-    // Bill number lookup
-    final _billMap = ref.watch(saleBillNumberMapProvider).asData?.value ?? {};
-    final _linkedId = transaction.linkedSaleBillId;
-    final _billNo = (_linkedId != null && _linkedId.isNotEmpty)
-        ? _billMap[_linkedId]
-        : null;
+    // Bill number lookup for both sales and purchase payments.
+    final saleBillMap =
+        ref.watch(saleBillNumberMapProvider).asData?.value ?? {};
+    final purchaseBillMap =
+        (kIsWeb || defaultTargetPlatform == TargetPlatform.iOS)
+            ? ref.watch(purchaseBillNumberMapProvider).asData?.value ?? {}
+            : <String, String>{};
+    final linkedSaleId = transaction.linkedSaleBillId;
+    final linkedPurchaseId = transaction.linkedPurchaseBillId;
+    final billNo = linkedPurchaseId != null && linkedPurchaseId.isNotEmpty
+        ? purchaseBillMap[linkedPurchaseId]
+        : linkedSaleId != null && linkedSaleId.isNotEmpty
+            ? saleBillMap[linkedSaleId]
+            : null;
 
     return RepaintBoundary(
       child: GestureDetector(
@@ -256,10 +265,10 @@ class TransactionListItem extends ConsumerWidget {
                                   : const Color(0xD0A5B0C0),
                             ),
                           ),
-                          if (_billNo != null && _billNo.isNotEmpty) ...[
+                          if (billNo != null && billNo.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
-                              'B.no: $_billNo',
+                              'B.no: $billNo',
                               style: const TextStyle(
                                 fontSize: 13,
                                 color: Color(0xFF6B7280),

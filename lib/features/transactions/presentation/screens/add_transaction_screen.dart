@@ -248,10 +248,13 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     if (_openingPartyPicker) return;
     _openingPartyPicker = true;
 
-    final canSuggest = _descriptionSuggestionsEnabled;
-    final namesFuture = canSuggest
-        ? _resolveAllPartyNames()
-        : Future.value(const <String>[]);
+    final canSuggest = _descriptionPickerEnabled;
+    final isPurchasePicker = _purchaseDescriptionSuggestionsEnabled;
+    final namesFuture = isPurchasePicker
+        ? _resolvePurchaseClientNames()
+        : canSuggest
+            ? _resolveAllPartyNames()
+            : Future.value(const <String>[]);
 
     final navigateFuture = Navigator.push<String>(
       context,
@@ -260,6 +263,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           initialValue:        _descCtrl.text,
           allPartyNamesFuture: namesFuture,
           canSuggest:          canSuggest,
+          title:               isPurchasePicker ? 'Purchase Client' : 'Party Name',
+          inputHint:           isPurchasePicker
+              ? 'Type purchase client or description…'
+              : 'Type party name…',
+          entityLabel:          isPurchasePicker ? 'client' : 'party',
         ),
       ),
     );
@@ -330,6 +338,27 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       ...purchaseClients.map((c) => c.clientName),
       ...allPurchaseBills.map((b) => b.clientName.trim()),
     }.toList()..sort();
+  }
+
+  // Expense entries must only suggest purchase clients. Reusing the broader
+  // income-party union here could accidentally link an expense to a sales
+  // customer with the same name.
+  Future<List<String>> _resolvePurchaseClientNames() async {
+    final clientsFuture = _resolveAsync(
+      cached: ref.read(purchaseClientsProvider).asData?.value,
+      load: () => ref.read(purchaseClientsProvider.future),
+    );
+    final billsFuture = _resolveAsync(
+      cached: ref.read(allPurchaseBillsProvider).asData?.value,
+      load: () => ref.read(allPurchaseBillsProvider.future),
+    );
+
+    final clients = await clientsFuture;
+    final bills = await billsFuture;
+    return <String>{
+      ...clients.map((c) => c.clientName.trim()),
+      ...bills.map((b) => b.clientName.trim()),
+    }.where((name) => name.isNotEmpty).toList()..sort();
   }
 
   // ADDED: resolves a single StreamProvider's data independently — returns
@@ -502,9 +531,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     }
   }
 
-  // Purchase clients and bills remain iOS/PWA/web/Windows-only.
+  // Purchase clients and bills are available only on iOS and web/PWA.
   bool get _purchaseFeatureEnabled =>
-      kIsWeb || defaultTargetPlatform != TargetPlatform.android;
+      kIsWeb || defaultTargetPlatform == TargetPlatform.iOS;
 
   // Party-name suggestions are only useful for income entries that can be
   // matched to a customer/client. Other transaction descriptions stay as a
@@ -515,6 +544,15 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           _category == 'Bank' ||
           _category == 'CB' ||
           _category == 'UPI');
+
+  // Every expense can optionally be tied to a purchase client. The picker
+  // still allows arbitrary text, so existing free-text expense entries keep
+  // working exactly as before when no client is selected.
+  bool get _purchaseDescriptionSuggestionsEnabled =>
+      _purchaseFeatureEnabled && _type == 'expense';
+
+  bool get _descriptionPickerEnabled =>
+      _descriptionSuggestionsEnabled || _purchaseDescriptionSuggestionsEnabled;
 
   bool _isKnownPurchaseClient(WidgetRef ref) {
     if (!_purchaseFeatureEnabled) return false;
@@ -558,8 +596,9 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         _selectedBill = null;
         _isObPayment = false;
       }
-      // Clear purchase bill when switching away from Wholesale/Bank/UPI.
-      if (cat != 'Wholesale' && cat != 'Bank' && cat != 'UPI') {
+      // Purchase payments are valid for every expense category. Only clear
+      // purchase state when this is an income entry.
+      if (_type != 'expense') {
         _selectedPurchaseBill = null;
         _isPurchaseObPayment = false;
       }
@@ -645,7 +684,6 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       return;
     }
 
-    final user = ref.read(authProvider).value;
     final draft = await showDialog<PaymentReceiptData>(
       context: context,
       builder: (_) => _PaymentReceiptDialog(
@@ -653,7 +691,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         paymentDate: _selectedDate,
         paidTo: _descCtrl.text.trim(),
         billNumber: _selectedPurchaseBill?.billNumber ?? '',
-        paidBy: user?.displayName ?? '',
+        paidBy: 'NEELKANTH GARMENTS',
       ),
     );
     if (!mounted || draft == null) return;
@@ -777,7 +815,12 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         if (existing.paymentReceiptUrl != paymentReceiptUrl) {
           await storage.deletePaymentFile(existing.paymentReceiptUrl);
         }
-      } else if (_category == 'CB') {
+      } else if (_category == 'CB' &&
+          !(_purchaseFeatureEnabled &&
+              _type == 'expense' &&
+              (_selectedPurchaseBill != null ||
+                  _isPurchaseObPayment ||
+                  _isKnownPurchaseClient(ref)))) {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
       } else if (_type == 'income' && _selectedBill != null) {
         await ref.read(saleBillActionsProvider.notifier).recordPaymentWithOverflow(
@@ -811,6 +854,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           selectedBillId: _selectedPurchaseBill!.purchaseBillId,
           clientName:     _selectedPurchaseBill!.clientName,
           totalAmount:    tx.amount,
+          keepPaymentOnSelectedBill: true,
           description:    tx.description,
           category:       tx.category,
           createdBy:      tx.createdBy,
@@ -995,9 +1039,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                           const _FieldLabel('Description'),
                           const SizedBox(height: 8),
 
-                           // Eligible income categories use the party picker;
-                           // all other descriptions remain editable text.
-                          (_descriptionSuggestionsEnabled
+                          // Income party categories and all supported expense
+                          // entries use the picker. It still accepts free text
+                          // when no saved party/client is chosen.
+                          (_descriptionPickerEnabled
                                   ? _DescTapField(
                                       value: _descCtrl.text,
                                       onTap: _openPartyPicker,
@@ -1048,13 +1093,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                               ),
                           ],
 
-                          // ADDED: Purchase bill dropdown — expense + Wholesale/Bank/UPI.
-                          // Mirrors the sales bill dropdown above; the two never render
-                          // together since one requires _type == 'income' and the other
-                          // requires _type == 'expense'.
-                          // Gated behind _purchaseFeatureEnabled so this section
-                          // renders on every supported client.
-                          if (_purchaseFeatureEnabled && _type == 'expense' && _partyConfirmed && (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI')) ...[
+                          // Purchase bill dropdown — every supported expense
+                          // category, once a client/name has been confirmed.
+                          if (_purchaseFeatureEnabled &&
+                              _type == 'expense' &&
+                              _partyConfirmed) ...[
                             if (_loadingPurchaseBill)
                               Padding(
                                 padding: const EdgeInsets.only(top: 12),
