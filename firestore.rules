@@ -34,6 +34,33 @@ service cloud.firestore {
       return isBankTransaction(data) || isCbTransaction(data);
     }
 
+    // Payment proof/receipt metadata is optional and remains on the
+    // transaction document. When present, it is only valid for an expense and
+    // every metadata value must be a string. The actual file bytes live in
+    // Firebase Storage; these checks protect the Firestore record without
+    // changing access for existing transactions.
+    function hasValidPaymentDocumentFields(data) {
+      return !data.keys().hasAny([
+        'paymentAttachmentUrl',
+        'paymentAttachmentName',
+        'paymentAttachmentType',
+        'paymentReceiptUrl',
+        'paymentReceiptName'
+      ]) || (
+        data.type == 'expense'
+        && (!data.keys().hasAny(['paymentAttachmentUrl'])
+            || data.paymentAttachmentUrl is string)
+        && (!data.keys().hasAny(['paymentAttachmentName'])
+            || data.paymentAttachmentName is string)
+        && (!data.keys().hasAny(['paymentAttachmentType'])
+            || data.paymentAttachmentType is string)
+        && (!data.keys().hasAny(['paymentReceiptUrl'])
+            || data.paymentReceiptUrl is string)
+        && (!data.keys().hasAny(['paymentReceiptName'])
+            || data.paymentReceiptName is string)
+      );
+    }
+
     // ── Users ──────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow read, write: if request.auth != null
@@ -76,6 +103,7 @@ service cloud.firestore {
         //          with a different createdBy (recycle-bin restore).
         allow create: if isCashbookMember(database, cashbookId)
                       && (!isRestrictedCategory(request.resource.data) || isIosUser(database))
+                      && hasValidPaymentDocumentFields(request.resource.data)
                       && (request.auth.uid == request.resource.data.createdBy
                           || isIosUser(database));
 
@@ -88,6 +116,7 @@ service cloud.firestore {
         allow update: if isCashbookMember(database, cashbookId)
                       && (!isRestrictedCategory(resource.data) || isIosUser(database))
                       && (!isRestrictedCategory(request.resource.data) || isIosUser(database))
+                      && hasValidPaymentDocumentFields(request.resource.data)
                       && (request.auth.uid == resource.data.createdBy
                           || isIosUser(database))
                       && (request.resource.data.createdBy == resource.data.createdBy

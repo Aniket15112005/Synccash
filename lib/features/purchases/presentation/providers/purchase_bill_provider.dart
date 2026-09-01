@@ -331,13 +331,26 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
         );
       }
 
+      // If all linked bills and the opening balance are already settled, the
+      // remainder is still a real expense and must not disappear.
+      if (left > 0) {
+        alloc(
+          linkedBillId: null,
+          amount: left,
+          desc: description.isNotEmpty ? description : 'Payment – $clientName',
+        );
+      }
+
       // Update cashbook running totals so balance/expense reflect this payment.
       batch.update(cashRef, {
-        'balance': FieldValue.increment(-totalAmount),
-        'expense': FieldValue.increment(totalAmount),
+        'totalBalance': FieldValue.increment(-totalAmount),
+        'totalExpense': FieldValue.increment(totalAmount),
       });
       await batch.commit();
     });
+    if (state.hasError) {
+      Error.throwWithStackTrace(state.error!, state.stackTrace!);
+    }
   }
 
   /// Records an expense payment applied directly against the client's
@@ -457,11 +470,14 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
 
       // Update cashbook running totals so balance/expense reflect this payment.
       batch.update(cashRef, {
-        'balance': FieldValue.increment(-totalAmount),
-        'expense': FieldValue.increment(totalAmount),
+        'totalBalance': FieldValue.increment(-totalAmount),
+        'totalExpense': FieldValue.increment(totalAmount),
       });
       await batch.commit();
     });
+    if (state.hasError) {
+      Error.throwWithStackTrace(state.error!, state.stackTrace!);
+    }
   }
 
   /// Auto-allocates a payment against a purchase client when the user did NOT
@@ -588,11 +604,14 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
       }
 
       batch.update(cashRef, {
-        'balance': FieldValue.increment(-totalAmount),
-        'expense': FieldValue.increment(totalAmount),
+        'totalBalance': FieldValue.increment(-totalAmount),
+        'totalExpense': FieldValue.increment(totalAmount),
       });
       await batch.commit();
     });
+    if (state.hasError) {
+      Error.throwWithStackTrace(state.error!, state.stackTrace!);
+    }
   }
 
   /// Records a final expense entry settling the remaining balance on a specific
@@ -629,8 +648,8 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
       });
       // Update cashbook running totals
       batch.update(cashRef, {
-        'balance': FieldValue.increment(-remaining),
-        'expense': FieldValue.increment(remaining),
+        'totalBalance': FieldValue.increment(-remaining),
+        'totalExpense': FieldValue.increment(remaining),
       });
       await batch.commit();
     });

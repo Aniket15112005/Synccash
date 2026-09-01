@@ -26,6 +26,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import 'web_invoice_viewer_stub.dart'
     if (dart.library.html) 'web_invoice_viewer_web.dart';
 
@@ -56,13 +57,25 @@ class _TxItem {
   final DateTime createdAt;
   final String   description;
   final bool     isLinked;
+  final String?  paymentAttachmentUrl;
+  final String?  paymentAttachmentName;
+  final String?  paymentReceiptUrl;
+  final String?  paymentReceiptName;
   const _TxItem({
     required this.id,
     required this.amount,
     required this.createdAt,
     required this.description,
     required this.isLinked,
+    this.paymentAttachmentUrl,
+    this.paymentAttachmentName,
+    this.paymentReceiptUrl,
+    this.paymentReceiptName,
   });
+
+  bool get hasPaymentDocuments =>
+      (paymentAttachmentUrl ?? '').isNotEmpty ||
+      (paymentReceiptUrl ?? '').isNotEmpty;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,6 +197,12 @@ class _PurchaseClientBillDetailScreenState
                 description: raw['description'] as String? ?? '',
                 isLinked:    (raw['linkedPurchaseBillId'] as String? ?? '')
                                  .isNotEmpty,
+                paymentAttachmentUrl:
+                    raw['paymentAttachmentUrl'] as String?,
+                paymentAttachmentName:
+                    raw['paymentAttachmentName'] as String?,
+                paymentReceiptUrl: raw['paymentReceiptUrl'] as String?,
+                paymentReceiptName: raw['paymentReceiptName'] as String?,
               );
             })
             .toList()
@@ -789,10 +808,45 @@ class _PaymentDetailSheet extends StatelessWidget {
   final PurchaseBillEntity bill;
   const _PaymentDetailSheet({required this.tx, required this.bill});
 
+  Future<void> _openDocument(BuildContext context, String url) async {
+    final opened = await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        _snackBar('Could not open document', success: false),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final fmt     = NumberFormat('#,##,##0.00');
     final dateFmt = DateFormat('dd MMM yyyy  ·  hh:mm a');
+
+    Widget documentTile({
+      required IconData icon,
+      required String label,
+      required String name,
+      required String url,
+    }) {
+      return ListTile(
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+        leading: Icon(icon, color: _T.accent, size: 20),
+        title: Text(label,
+            style: const TextStyle(
+                color: _T.text, fontSize: 12, fontWeight: FontWeight.w600)),
+        subtitle: Text(name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: _T.muted, fontSize: 10)),
+        trailing: const Icon(Icons.open_in_new_rounded,
+            color: _T.muted, size: 17),
+        onTap: () => _openDocument(context, url),
+      );
+    }
 
     return Container(
       decoration: const BoxDecoration(
@@ -920,6 +974,48 @@ class _PaymentDetailSheet extends StatelessWidget {
               ],
             ),
           ),
+          if (tx.hasPaymentDocuments) ...[
+            const SizedBox(height: 16),
+            const Text('PAYMENT DOCUMENTS',
+                style: TextStyle(
+                    color: _T.muted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2)),
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: _T.card,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _T.border),
+              ),
+              child: Column(
+                children: [
+                  if ((tx.paymentAttachmentUrl ?? '').isNotEmpty)
+                    documentTile(
+                      icon: (tx.paymentAttachmentName ?? '')
+                              .toLowerCase()
+                              .endsWith('.pdf')
+                          ? Icons.picture_as_pdf_rounded
+                          : Icons.image_rounded,
+                      label: 'Payment proof',
+                      name: tx.paymentAttachmentName ?? 'Attached proof',
+                      url: tx.paymentAttachmentUrl!,
+                    ),
+                  if ((tx.paymentAttachmentUrl ?? '').isNotEmpty &&
+                      (tx.paymentReceiptUrl ?? '').isNotEmpty)
+                    const Divider(height: 1, color: _T.border),
+                  if ((tx.paymentReceiptUrl ?? '').isNotEmpty)
+                    documentTile(
+                      icon: Icons.receipt_long_rounded,
+                      label: 'Payment receipt',
+                      name: tx.paymentReceiptName ?? 'Receipt PDF',
+                      url: tx.paymentReceiptUrl!,
+                    ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           SizedBox(
             height: 50,
@@ -1276,6 +1372,23 @@ class _PaymentTile extends StatelessWidget {
                           color: _T.muted.withValues(alpha: 0.8),
                           fontSize: 11),
                     ),
+                     if (tx.hasPaymentDocuments) ...[
+                       const SizedBox(height: 3),
+                       Row(
+                         mainAxisSize: MainAxisSize.min,
+                         children: [
+                           Icon(Icons.attach_file_rounded,
+                               color: _T.accent.withValues(alpha: 0.7),
+                               size: 11),
+                           const SizedBox(width: 3),
+                           Text('documents attached',
+                               style: TextStyle(
+                                   color: _T.accent.withValues(alpha: 0.7),
+                                   fontSize: 9,
+                                   fontWeight: FontWeight.w600)),
+                         ],
+                       ),
+                     ],
                   ],
                 ),
               ),

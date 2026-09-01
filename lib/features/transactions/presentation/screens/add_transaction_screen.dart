@@ -74,6 +74,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   Uint8List? _paymentReceiptBytes;
   String? _paymentReceiptName;
   PaymentReceiptData? _paymentReceiptData;
+  bool _removePaymentAttachment = false;
+  bool _removePaymentReceipt = false;
 
   String   _type         = 'expense';
   String   _category     = 'Retail';
@@ -246,15 +248,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     if (_openingPartyPicker) return;
     _openingPartyPicker = true;
 
-    final namesFuture = _resolveAllPartyNames();
-
-    // FIX: this used to gate suggestions behind Income + Wholesale/Bank/UPI,
-    // so for Expense (the default type) or Retail/CB categories the picker
-    // showed the plain "Type a description below" prompt instead of the
-    // party list, no matter how well the data loaded. Suggestions are now
-    // always shown — party names are useful to autocomplete regardless of
-    // transaction type or category.
-    const bool canSuggest = true;
+    final canSuggest = _descriptionSuggestionsEnabled;
+    final namesFuture = canSuggest
+        ? _resolveAllPartyNames()
+        : Future.value(const <String>[]);
 
     final navigateFuture = Navigator.push<String>(
       context,
@@ -509,6 +506,16 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   bool get _purchaseFeatureEnabled =>
       kIsWeb || defaultTargetPlatform != TargetPlatform.android;
 
+  // Party-name suggestions are only useful for income entries that can be
+  // matched to a customer/client. Other transaction descriptions stay as a
+  // normal free-text field.
+  bool get _descriptionSuggestionsEnabled =>
+      _type == 'income' &&
+      (_category == 'Wholesale' ||
+          _category == 'Bank' ||
+          _category == 'CB' ||
+          _category == 'UPI');
+
   bool _isKnownPurchaseClient(WidgetRef ref) {
     if (!_purchaseFeatureEnabled) return false;
     final name = _descCtrl.text.trim().toLowerCase();
@@ -623,7 +630,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       );
       return;
     }
-    setState(() => _paymentAttachment = file);
+    setState(() {
+      _paymentAttachment = file;
+      _removePaymentAttachment = false;
+    });
   }
 
   Future<void> _createPaymentReceipt() async {
@@ -655,6 +665,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       _paymentReceiptBytes = bytes;
       _paymentReceiptName =
           '${draft.receiptNumber.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_')}.pdf';
+      _removePaymentReceipt = false;
     });
   }
 
@@ -676,12 +687,33 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       String? paymentAttachmentType = existing?.paymentAttachmentType;
       String? paymentReceiptUrl = existing?.paymentReceiptUrl;
       String? paymentReceiptName = existing?.paymentReceiptName;
+      final storage = PaymentStorageService();
 
-      if (_isKnownPurchaseClient(ref)) {
+      // A bill/OB can already be selected in the direct purchase-bill stream
+      // while purchaseClientsProvider is still loading. Use the actual target
+      // selection as the source of truth so a generated/uploaded receipt is
+      // never silently dropped.
+      final hasPurchasePaymentTarget =
+          _selectedPurchaseBill != null ||
+          _isPurchaseObPayment ||
+          _isKnownPurchaseClient(ref);
+
+      if (_removePaymentAttachment) {
+        paymentAttachmentUrl = null;
+        paymentAttachmentName = null;
+        paymentAttachmentType = null;
+      }
+      if (_removePaymentReceipt) {
+        paymentReceiptUrl = null;
+        paymentReceiptName = null;
+      }
+
+      if (_purchaseFeatureEnabled &&
+          _type == 'expense' &&
+          hasPurchasePaymentTarget) {
         final uploadKey = existing?.transactionId.isNotEmpty == true
             ? existing!.transactionId
             : '${user.uid}_${DateTime.now().microsecondsSinceEpoch}';
-        final storage = PaymentStorageService();
         if (_paymentAttachment?.bytes != null) {
           final extension = (_paymentAttachment!.extension ?? '').toLowerCase();
           paymentAttachmentUrl = await storage.uploadPaymentFile(
@@ -735,6 +767,16 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           tx,
           previous: existing,
         );
+
+        // Remove replaced/cleared files only after the Firestore edit succeeds.
+        // This avoids deleting the old document if the transaction update is
+        // rejected or temporarily offline.
+        if (existing.paymentAttachmentUrl != paymentAttachmentUrl) {
+          await storage.deletePaymentFile(existing.paymentAttachmentUrl);
+        }
+        if (existing.paymentReceiptUrl != paymentReceiptUrl) {
+          await storage.deletePaymentFile(existing.paymentReceiptUrl);
+        }
       } else if (_category == 'CB') {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
       } else if (_type == 'income' && _selectedBill != null) {
@@ -864,8 +906,13 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       ref.watch(purchaseClientsProvider);
       ref.watch(allPurchaseBillsProvider);
     }
-    final showPurchasePaymentOptions =
-        _type == 'expense' && _partyConfirmed && _isKnownPurchaseClient(ref);
+    final hasPurchasePaymentTarget =
+        _selectedPurchaseBill != null ||
+        _isPurchaseObPayment ||
+        _isKnownPurchaseClient(ref);
+    final showPurchasePaymentOptions = _purchaseFeatureEnabled &&
+        _type == 'expense' &&
+        hasPurchasePaymentTarget;
 
     return Scaffold(
       backgroundColor: _C.bg,
@@ -948,14 +995,17 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                           const _FieldLabel('Description'),
                           const SizedBox(height: 8),
 
-                          // CHANGED: tapping the description field now opens a
-                          // dedicated full-screen picker where suggestions are
-                          // always visible above the keyboard.
-                          _DescTapField(
-                            value: _descCtrl.text,
-                            onTap: _openPartyPicker,
-                            loading: _openingPartyPicker,
-                          )
+                           // Eligible income categories use the party picker;
+                           // all other descriptions remain editable text.
+                          (_descriptionSuggestionsEnabled
+                                  ? _DescTapField(
+                                      value: _descCtrl.text,
+                                      onTap: _openPartyPicker,
+                                      loading: _openingPartyPicker,
+                                    )
+                                  : _DescriptionTextField(
+                                      controller: _descCtrl,
+                                    ))
                               .animate()
                               .fadeIn(delay: 210.ms, duration: 280.ms)
                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
@@ -1047,14 +1097,32 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                             _PurchasePaymentOptions(
                               attachment: _paymentAttachment,
                               receiptData: _paymentReceiptData,
+                              existingAttachmentName:
+                                  widget.existingTransaction?.paymentAttachmentName,
+                              existingAttachmentType:
+                                  widget.existingTransaction?.paymentAttachmentType,
+                              hasExistingAttachment:
+                                  !_removePaymentAttachment &&
+                                      (widget.existingTransaction?.paymentAttachmentUrl ?? '')
+                                          .isNotEmpty,
+                              existingReceiptName:
+                                  widget.existingTransaction?.paymentReceiptName,
+                              hasExistingReceipt:
+                                  !_removePaymentReceipt &&
+                                      (widget.existingTransaction?.paymentReceiptUrl ?? '')
+                                          .isNotEmpty,
                               onAttach: _pickPaymentAttachment,
                               onCreateReceipt: _createPaymentReceipt,
                               onRemoveAttachment: () =>
-                                  setState(() => _paymentAttachment = null),
+                                  setState(() {
+                                    _paymentAttachment = null;
+                                    _removePaymentAttachment = true;
+                                  }),
                               onRemoveReceipt: () => setState(() {
                                 _paymentReceiptBytes = null;
                                 _paymentReceiptName = null;
                                 _paymentReceiptData = null;
+                                _removePaymentReceipt = true;
                               }),
                             ),
                           ],
@@ -1113,6 +1181,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
 class _PurchasePaymentOptions extends StatelessWidget {
   final PlatformFile? attachment;
   final PaymentReceiptData? receiptData;
+  final String? existingAttachmentName;
+  final String? existingAttachmentType;
+  final bool hasExistingAttachment;
+  final String? existingReceiptName;
+  final bool hasExistingReceipt;
   final VoidCallback onAttach;
   final VoidCallback onCreateReceipt;
   final VoidCallback onRemoveAttachment;
@@ -1121,6 +1194,11 @@ class _PurchasePaymentOptions extends StatelessWidget {
   const _PurchasePaymentOptions({
     required this.attachment,
     required this.receiptData,
+    this.existingAttachmentName,
+    this.existingAttachmentType,
+    this.hasExistingAttachment = false,
+    this.existingReceiptName,
+    this.hasExistingReceipt = false,
     required this.onAttach,
     required this.onCreateReceipt,
     required this.onRemoveAttachment,
@@ -1171,26 +1249,43 @@ class _PurchasePaymentOptions extends StatelessWidget {
     return Column(
       children: [
         tile(
-          icon: attachment == null
-              ? Icons.attach_file_rounded
-              : (attachment!.extension?.toLowerCase() == 'pdf'
+          icon: attachment != null
+              ? (attachment!.extension?.toLowerCase() == 'pdf'
                   ? Icons.picture_as_pdf_rounded
-                  : Icons.image_rounded),
-          title: attachment == null ? 'Attach payment proof' : 'Payment proof attached',
-          subtitle: attachment?.name ?? 'Upload an image or PDF from your phone',
+                  : Icons.image_rounded)
+              : hasExistingAttachment
+                  ? (existingAttachmentType == 'pdf'
+                      ? Icons.picture_as_pdf_rounded
+                      : Icons.image_rounded)
+                  : Icons.attach_file_rounded,
+          title: attachment != null || hasExistingAttachment
+              ? 'Payment proof attached'
+              : 'Attach payment proof',
+          subtitle: attachment?.name ??
+              (hasExistingAttachment
+                  ? (existingAttachmentName ?? 'Saved payment proof')
+                  : 'Upload an image or PDF from your phone'),
           onTap: onAttach,
-          onRemove: attachment == null ? null : onRemoveAttachment,
+          onRemove: attachment != null || hasExistingAttachment
+              ? onRemoveAttachment
+              : null,
         ),
         tile(
-          icon: receiptData == null
-              ? Icons.receipt_long_rounded
-              : Icons.check_circle_outline_rounded,
-          title: receiptData == null ? 'Create payment receipt' : 'Payment receipt ready',
-          subtitle: receiptData == null
-              ? 'Add payment details and generate a PDF'
-              : '${receiptData!.receiptNumber} • Tap to edit',
+          icon: receiptData != null || hasExistingReceipt
+              ? Icons.check_circle_outline_rounded
+              : Icons.receipt_long_rounded,
+          title: receiptData != null || hasExistingReceipt
+              ? 'Payment receipt attached'
+              : 'Create payment receipt',
+          subtitle: receiptData != null
+              ? '${receiptData!.receiptNumber} • Tap to edit'
+              : hasExistingReceipt
+                  ? (existingReceiptName ?? 'Saved receipt PDF')
+                  : 'Add payment details and generate a PDF',
           onTap: onCreateReceipt,
-          onRemove: receiptData == null ? null : onRemoveReceipt,
+          onRemove: receiptData != null || hasExistingReceipt
+              ? onRemoveReceipt
+              : null,
         ),
       ],
     );
@@ -1747,6 +1842,59 @@ class _CategoryToggle extends StatelessWidget {
             ),
           );
         }).toList(),
+      ),
+    );
+  }
+}
+
+class _DescriptionTextField extends StatelessWidget {
+  final TextEditingController controller;
+
+  const _DescriptionTextField({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      minLines: 1,
+      maxLines: 3,
+      keyboardType: TextInputType.multiline,
+      textInputAction: TextInputAction.newline,
+      cursorColor: _C.textPri,
+      cursorWidth: 1.5,
+      style: const TextStyle(
+        color: _C.textPri,
+        fontSize: 14,
+        height: 1.5,
+      ),
+      decoration: InputDecoration(
+        hintText: 'What was this for?',
+        hintStyle: const TextStyle(
+          color: _C.textMut,
+          fontSize: 14,
+        ),
+        prefixIcon: const Padding(
+          padding: EdgeInsets.only(left: 16, right: 12),
+          child: Icon(Icons.notes_rounded, size: 17, color: _C.textMut),
+        ),
+        prefixIconConstraints:
+            const BoxConstraints(minWidth: 45, minHeight: 52),
+        filled: true,
+        fillColor: _C.bg,
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _C.border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _C.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _C.border2),
+        ),
       ),
     );
   }

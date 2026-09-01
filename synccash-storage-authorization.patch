@@ -1,0 +1,87 @@
+diff --git a/firebase.json b/firebase.json
+index 02c2214..9a8ea84 100644
+--- a/firebase.json
++++ b/firebase.json
+@@ -4,6 +4,9 @@
+     "location": "asia-south2",
+     "rules": "firestore.rules"
+   },
++  "storage": {
++    "rules": "storage.rules"
++  },
+   "flutter": {
+     "platforms": {
+       "android": {
+diff --git a/storage.rules b/storage.rules
+new file mode 100644
+index 0000000..8734ec1
+--- /dev/null
++++ b/storage.rules
+@@ -0,0 +1,66 @@
++rules_version = '2';
++service firebase.storage {
++  match /b/{bucket}/o {
++
++    function isCashbookMember(cashbookId) {
++      return request.auth != null
++          && (
++            firestore.get(
++              /databases/(default)/documents/cashbooks/$(cashbookId)
++            ).data.ownerId == request.auth.uid
++            || firestore.get(
++              /databases/(default)/documents/cashbooks/$(cashbookId)
++            ).data.participantId == request.auth.uid
++          );
++    }
++
++    function isValidFileUpload() {
++      return request.resource != null
++          && request.resource.size < 25 * 1024 * 1024;
++    }
++
++    // Payment proof and generated receipt files. Each file is scoped to the
++    // cashbook and transaction so multiple payments for one bill stay separate.
++    match /purchase_payment_attachments/{cashbookId}/{transactionId}/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    match /purchase_payment_receipts/{cashbookId}/{transactionId}/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    // Existing purchase and sales bill attachments.
++    match /purchase_bills/{cashbookId}/{billId}/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    match /sale_bills/{cashbookId}/{billId}/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    // Custom bills generated under the cashbook namespace.
++    match /cashbooks/{cashbookId}/custom_bills/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    // Deny every unlisted Storage path by default.
++    match /{allPaths=**} {
++      allow read, write: if false;
++    }
++  }
++}
+\ No newline at end of file

@@ -1,0 +1,754 @@
+diff --git a/firebase.json b/firebase.json
+index 02c2214..9a8ea84 100644
+--- a/firebase.json
++++ b/firebase.json
+@@ -4,6 +4,9 @@
+     "location": "asia-south2",
+     "rules": "firestore.rules"
+   },
++  "storage": {
++    "rules": "storage.rules"
++  },
+   "flutter": {
+     "platforms": {
+       "android": {
+diff --git a/firestore.rules b/firestore.rules
+index 628b8a9..b452c47 100644
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -34,6 +34,33 @@ service cloud.firestore {
+       return isBankTransaction(data) || isCbTransaction(data);
+     }
+ 
++    // Payment proof/receipt metadata is optional and remains on the
++    // transaction document. When present, it is only valid for an expense and
++    // every metadata value must be a string. The actual file bytes live in
++    // Firebase Storage; these checks protect the Firestore record without
++    // changing access for existing transactions.
++    function hasValidPaymentDocumentFields(data) {
++      return !data.keys().hasAny([
++        'paymentAttachmentUrl',
++        'paymentAttachmentName',
++        'paymentAttachmentType',
++        'paymentReceiptUrl',
++        'paymentReceiptName'
++      ]) || (
++        data.type == 'expense'
++        && (!data.keys().hasAny(['paymentAttachmentUrl'])
++            || data.paymentAttachmentUrl is string)
++        && (!data.keys().hasAny(['paymentAttachmentName'])
++            || data.paymentAttachmentName is string)
++        && (!data.keys().hasAny(['paymentAttachmentType'])
++            || data.paymentAttachmentType is string)
++        && (!data.keys().hasAny(['paymentReceiptUrl'])
++            || data.paymentReceiptUrl is string)
++        && (!data.keys().hasAny(['paymentReceiptName'])
++            || data.paymentReceiptName is string)
++      );
++    }
++
+     // ── Users ──────────────────────────────────────────────────────────────
+     match /users/{userId} {
+       allow read, write: if request.auth != null
+@@ -76,6 +103,7 @@ service cloud.firestore {
+         //          with a different createdBy (recycle-bin restore).
+         allow create: if isCashbookMember(database, cashbookId)
+                       && (!isRestrictedCategory(request.resource.data) || isIosUser(database))
++                      && hasValidPaymentDocumentFields(request.resource.data)
+                       && (request.auth.uid == request.resource.data.createdBy
+                           || isIosUser(database));
+ 
+@@ -88,6 +116,7 @@ service cloud.firestore {
+         allow update: if isCashbookMember(database, cashbookId)
+                       && (!isRestrictedCategory(resource.data) || isIosUser(database))
+                       && (!isRestrictedCategory(request.resource.data) || isIosUser(database))
++                      && hasValidPaymentDocumentFields(request.resource.data)
+                       && (request.auth.uid == resource.data.createdBy
+                           || isIosUser(database))
+                       && (request.resource.data.createdBy == resource.data.createdBy
+diff --git a/lib/features/purchases/presentation/providers/purchase_bill_provider.dart b/lib/features/purchases/presentation/providers/purchase_bill_provider.dart
+index 8ecc7d5..cfe608d 100644
+--- a/lib/features/purchases/presentation/providers/purchase_bill_provider.dart
++++ b/lib/features/purchases/presentation/providers/purchase_bill_provider.dart
+@@ -331,13 +331,26 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
+         );
+       }
+ 
++      // If all linked bills and the opening balance are already settled, the
++      // remainder is still a real expense and must not disappear.
++      if (left > 0) {
++        alloc(
++          linkedBillId: null,
++          amount: left,
++          desc: description.isNotEmpty ? description : 'Payment – $clientName',
++        );
++      }
++
+       // Update cashbook running totals so balance/expense reflect this payment.
+       batch.update(cashRef, {
+-        'balance': FieldValue.increment(-totalAmount),
+-        'expense': FieldValue.increment(totalAmount),
++        'totalBalance': FieldValue.increment(-totalAmount),
++        'totalExpense': FieldValue.increment(totalAmount),
+       });
+       await batch.commit();
+     });
++    if (state.hasError) {
++      Error.throwWithStackTrace(state.error!, state.stackTrace!);
++    }
+   }
+ 
+   /// Records an expense payment applied directly against the client's
+@@ -457,11 +470,14 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
+ 
+       // Update cashbook running totals so balance/expense reflect this payment.
+       batch.update(cashRef, {
+-        'balance': FieldValue.increment(-totalAmount),
+-        'expense': FieldValue.increment(totalAmount),
++        'totalBalance': FieldValue.increment(-totalAmount),
++        'totalExpense': FieldValue.increment(totalAmount),
+       });
+       await batch.commit();
+     });
++    if (state.hasError) {
++      Error.throwWithStackTrace(state.error!, state.stackTrace!);
++    }
+   }
+ 
+   /// Auto-allocates a payment against a purchase client when the user did NOT
+@@ -588,11 +604,14 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
+       }
+ 
+       batch.update(cashRef, {
+-        'balance': FieldValue.increment(-totalAmount),
+-        'expense': FieldValue.increment(totalAmount),
++        'totalBalance': FieldValue.increment(-totalAmount),
++        'totalExpense': FieldValue.increment(totalAmount),
+       });
+       await batch.commit();
+     });
++    if (state.hasError) {
++      Error.throwWithStackTrace(state.error!, state.stackTrace!);
++    }
+   }
+ 
+   /// Records a final expense entry settling the remaining balance on a specific
+@@ -629,8 +648,8 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
+       });
+       // Update cashbook running totals
+       batch.update(cashRef, {
+-        'balance': FieldValue.increment(-remaining),
+-        'expense': FieldValue.increment(remaining),
++        'totalBalance': FieldValue.increment(-remaining),
++        'totalExpense': FieldValue.increment(remaining),
+       });
+       await batch.commit();
+     });
+diff --git a/lib/features/purchases/presentation/screens/purchase_client_bill_detail_screen.dart b/lib/features/purchases/presentation/screens/purchase_client_bill_detail_screen.dart
+index 259db2e..a1f277c 100644
+--- a/lib/features/purchases/presentation/screens/purchase_client_bill_detail_screen.dart
++++ b/lib/features/purchases/presentation/screens/purchase_client_bill_detail_screen.dart
+@@ -26,6 +26,7 @@ import 'package:share_plus/share_plus.dart';
+ import 'package:file_picker/file_picker.dart';
+ import 'package:cached_network_image/cached_network_image.dart';
+ import 'package:http/http.dart' as http;
++import 'package:url_launcher/url_launcher.dart';
+ import 'web_invoice_viewer_stub.dart'
+     if (dart.library.html) 'web_invoice_viewer_web.dart';
+ 
+@@ -56,13 +57,25 @@ class _TxItem {
+   final DateTime createdAt;
+   final String   description;
+   final bool     isLinked;
++  final String?  paymentAttachmentUrl;
++  final String?  paymentAttachmentName;
++  final String?  paymentReceiptUrl;
++  final String?  paymentReceiptName;
+   const _TxItem({
+     required this.id,
+     required this.amount,
+     required this.createdAt,
+     required this.description,
+     required this.isLinked,
++    this.paymentAttachmentUrl,
++    this.paymentAttachmentName,
++    this.paymentReceiptUrl,
++    this.paymentReceiptName,
+   });
++
++  bool get hasPaymentDocuments =>
++      (paymentAttachmentUrl ?? '').isNotEmpty ||
++      (paymentReceiptUrl ?? '').isNotEmpty;
+ }
+ 
+ // ─────────────────────────────────────────────────────────────────────────────
+@@ -184,6 +197,12 @@ class _PurchaseClientBillDetailScreenState
+                 description: raw['description'] as String? ?? '',
+                 isLinked:    (raw['linkedPurchaseBillId'] as String? ?? '')
+                                  .isNotEmpty,
++                paymentAttachmentUrl:
++                    raw['paymentAttachmentUrl'] as String?,
++                paymentAttachmentName:
++                    raw['paymentAttachmentName'] as String?,
++                paymentReceiptUrl: raw['paymentReceiptUrl'] as String?,
++                paymentReceiptName: raw['paymentReceiptName'] as String?,
+               );
+             })
+             .toList()
+@@ -789,11 +808,46 @@ class _PaymentDetailSheet extends StatelessWidget {
+   final PurchaseBillEntity bill;
+   const _PaymentDetailSheet({required this.tx, required this.bill});
+ 
++  Future<void> _openDocument(BuildContext context, String url) async {
++    final opened = await launchUrl(
++      Uri.parse(url),
++      mode: LaunchMode.externalApplication,
++    );
++    if (!opened && context.mounted) {
++      ScaffoldMessenger.of(context).showSnackBar(
++        _snackBar('Could not open document', success: false),
++      );
++    }
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     final fmt     = NumberFormat('#,##,##0.00');
+     final dateFmt = DateFormat('dd MMM yyyy  ·  hh:mm a');
+ 
++    Widget documentTile({
++      required IconData icon,
++      required String label,
++      required String name,
++      required String url,
++    }) {
++      return ListTile(
++        dense: true,
++        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
++        leading: Icon(icon, color: _T.accent, size: 20),
++        title: Text(label,
++            style: const TextStyle(
++                color: _T.text, fontSize: 12, fontWeight: FontWeight.w600)),
++        subtitle: Text(name,
++            maxLines: 1,
++            overflow: TextOverflow.ellipsis,
++            style: const TextStyle(color: _T.muted, fontSize: 10)),
++        trailing: const Icon(Icons.open_in_new_rounded,
++            color: _T.muted, size: 17),
++        onTap: () => _openDocument(context, url),
++      );
++    }
++
+     return Container(
+       decoration: const BoxDecoration(
+         color: Color(0xFF0D1018),
+@@ -920,6 +974,48 @@ class _PaymentDetailSheet extends StatelessWidget {
+               ],
+             ),
+           ),
++          if (tx.hasPaymentDocuments) ...[
++            const SizedBox(height: 16),
++            const Text('PAYMENT DOCUMENTS',
++                style: TextStyle(
++                    color: _T.muted,
++                    fontSize: 10,
++                    fontWeight: FontWeight.w700,
++                    letterSpacing: 1.2)),
++            const SizedBox(height: 8),
++            Container(
++              decoration: BoxDecoration(
++                color: _T.card,
++                borderRadius: BorderRadius.circular(16),
++                border: Border.all(color: _T.border),
++              ),
++              child: Column(
++                children: [
++                  if ((tx.paymentAttachmentUrl ?? '').isNotEmpty)
++                    documentTile(
++                      icon: (tx.paymentAttachmentName ?? '')
++                              .toLowerCase()
++                              .endsWith('.pdf')
++                          ? Icons.picture_as_pdf_rounded
++                          : Icons.image_rounded,
++                      label: 'Payment proof',
++                      name: tx.paymentAttachmentName ?? 'Attached proof',
++                      url: tx.paymentAttachmentUrl!,
++                    ),
++                  if ((tx.paymentAttachmentUrl ?? '').isNotEmpty &&
++                      (tx.paymentReceiptUrl ?? '').isNotEmpty)
++                    const Divider(height: 1, color: _T.border),
++                  if ((tx.paymentReceiptUrl ?? '').isNotEmpty)
++                    documentTile(
++                      icon: Icons.receipt_long_rounded,
++                      label: 'Payment receipt',
++                      name: tx.paymentReceiptName ?? 'Receipt PDF',
++                      url: tx.paymentReceiptUrl!,
++                    ),
++                ],
++              ),
++            ),
++          ],
+           const SizedBox(height: 16),
+           SizedBox(
+             height: 50,
+@@ -1276,6 +1372,23 @@ class _PaymentTile extends StatelessWidget {
+                           color: _T.muted.withValues(alpha: 0.8),
+                           fontSize: 11),
+                     ),
++                     if (tx.hasPaymentDocuments) ...[
++                       const SizedBox(height: 3),
++                       Row(
++                         mainAxisSize: MainAxisSize.min,
++                         children: [
++                           Icon(Icons.attach_file_rounded,
++                               color: _T.accent.withValues(alpha: 0.7),
++                               size: 11),
++                           const SizedBox(width: 3),
++                           Text('documents attached',
++                               style: TextStyle(
++                                   color: _T.accent.withValues(alpha: 0.7),
++                                   fontSize: 9,
++                                   fontWeight: FontWeight.w600)),
++                         ],
++                       ),
++                     ],
+                   ],
+                 ),
+               ),
+diff --git a/lib/features/transactions/data/services/payment_storage_service.dart b/lib/features/transactions/data/services/payment_storage_service.dart
+index 1d0ae1c..a387f05 100644
+--- a/lib/features/transactions/data/services/payment_storage_service.dart
++++ b/lib/features/transactions/data/services/payment_storage_service.dart
+@@ -35,4 +35,16 @@ class PaymentStorageService {
+     );
+     return task.ref.getDownloadURL();
+   }
++
++  /// Deletes a previously saved payment document. Cleanup is best-effort so a
++  /// stale/invalid download URL cannot prevent the Firestore transaction edit
++  /// from completing.
++  Future<void> deletePaymentFile(String? downloadUrl) async {
++    if (downloadUrl == null || downloadUrl.isEmpty) return;
++    try {
++      await _storage.refFromURL(downloadUrl).delete();
++    } catch (_) {
++      // The Firestore reference is still removed by the caller.
++    }
++  }
+ }
+\ No newline at end of file
+diff --git a/lib/features/transactions/presentation/screens/add_transaction_screen.dart b/lib/features/transactions/presentation/screens/add_transaction_screen.dart
+index 4fcce1c..b97e932 100644
+--- a/lib/features/transactions/presentation/screens/add_transaction_screen.dart
++++ b/lib/features/transactions/presentation/screens/add_transaction_screen.dart
+@@ -74,6 +74,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+   Uint8List? _paymentReceiptBytes;
+   String? _paymentReceiptName;
+   PaymentReceiptData? _paymentReceiptData;
++  bool _removePaymentAttachment = false;
++  bool _removePaymentReceipt = false;
+ 
+   String   _type         = 'expense';
+   String   _category     = 'Retail';
+@@ -246,15 +248,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+     if (_openingPartyPicker) return;
+     _openingPartyPicker = true;
+ 
+-    final namesFuture = _resolveAllPartyNames();
+-
+-    // FIX: this used to gate suggestions behind Income + Wholesale/Bank/UPI,
+-    // so for Expense (the default type) or Retail/CB categories the picker
+-    // showed the plain "Type a description below" prompt instead of the
+-    // party list, no matter how well the data loaded. Suggestions are now
+-    // always shown — party names are useful to autocomplete regardless of
+-    // transaction type or category.
+-    const bool canSuggest = true;
++    final canSuggest = _descriptionSuggestionsEnabled;
++    final namesFuture = canSuggest
++        ? _resolveAllPartyNames()
++        : Future.value(const <String>[]);
+ 
+     final navigateFuture = Navigator.push<String>(
+       context,
+@@ -509,6 +506,16 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+   bool get _purchaseFeatureEnabled =>
+       kIsWeb || defaultTargetPlatform != TargetPlatform.android;
+ 
++  // Party-name suggestions are only useful for income entries that can be
++  // matched to a customer/client. Other transaction descriptions stay as a
++  // normal free-text field.
++  bool get _descriptionSuggestionsEnabled =>
++      _type == 'income' &&
++      (_category == 'Wholesale' ||
++          _category == 'Bank' ||
++          _category == 'CB' ||
++          _category == 'UPI');
++
+   bool _isKnownPurchaseClient(WidgetRef ref) {
+     if (!_purchaseFeatureEnabled) return false;
+     final name = _descCtrl.text.trim().toLowerCase();
+@@ -623,7 +630,10 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+       );
+       return;
+     }
+-    setState(() => _paymentAttachment = file);
++    setState(() {
++      _paymentAttachment = file;
++      _removePaymentAttachment = false;
++    });
+   }
+ 
+   Future<void> _createPaymentReceipt() async {
+@@ -655,6 +665,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+       _paymentReceiptBytes = bytes;
+       _paymentReceiptName =
+           '${draft.receiptNumber.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_')}.pdf';
++      _removePaymentReceipt = false;
+     });
+   }
+ 
+@@ -676,12 +687,33 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+       String? paymentAttachmentType = existing?.paymentAttachmentType;
+       String? paymentReceiptUrl = existing?.paymentReceiptUrl;
+       String? paymentReceiptName = existing?.paymentReceiptName;
++      final storage = PaymentStorageService();
++
++      // A bill/OB can already be selected in the direct purchase-bill stream
++      // while purchaseClientsProvider is still loading. Use the actual target
++      // selection as the source of truth so a generated/uploaded receipt is
++      // never silently dropped.
++      final hasPurchasePaymentTarget =
++          _selectedPurchaseBill != null ||
++          _isPurchaseObPayment ||
++          _isKnownPurchaseClient(ref);
++
++      if (_removePaymentAttachment) {
++        paymentAttachmentUrl = null;
++        paymentAttachmentName = null;
++        paymentAttachmentType = null;
++      }
++      if (_removePaymentReceipt) {
++        paymentReceiptUrl = null;
++        paymentReceiptName = null;
++      }
+ 
+-      if (_isKnownPurchaseClient(ref)) {
++      if (_purchaseFeatureEnabled &&
++          _type == 'expense' &&
++          hasPurchasePaymentTarget) {
+         final uploadKey = existing?.transactionId.isNotEmpty == true
+             ? existing!.transactionId
+             : '${user.uid}_${DateTime.now().microsecondsSinceEpoch}';
+-        final storage = PaymentStorageService();
+         if (_paymentAttachment?.bytes != null) {
+           final extension = (_paymentAttachment!.extension ?? '').toLowerCase();
+           paymentAttachmentUrl = await storage.uploadPaymentFile(
+@@ -735,6 +767,16 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+           tx,
+           previous: existing,
+         );
++
++        // Remove replaced/cleared files only after the Firestore edit succeeds.
++        // This avoids deleting the old document if the transaction update is
++        // rejected or temporarily offline.
++        if (existing.paymentAttachmentUrl != paymentAttachmentUrl) {
++          await storage.deletePaymentFile(existing.paymentAttachmentUrl);
++        }
++        if (existing.paymentReceiptUrl != paymentReceiptUrl) {
++          await storage.deletePaymentFile(existing.paymentReceiptUrl);
++        }
+       } else if (_category == 'CB') {
+         await ref.read(transactionRepositoryProvider).addTransaction(tx);
+       } else if (_type == 'income' && _selectedBill != null) {
+@@ -864,8 +906,13 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+       ref.watch(purchaseClientsProvider);
+       ref.watch(allPurchaseBillsProvider);
+     }
+-    final showPurchasePaymentOptions =
+-        _type == 'expense' && _partyConfirmed && _isKnownPurchaseClient(ref);
++    final hasPurchasePaymentTarget =
++        _selectedPurchaseBill != null ||
++        _isPurchaseObPayment ||
++        _isKnownPurchaseClient(ref);
++    final showPurchasePaymentOptions = _purchaseFeatureEnabled &&
++        _type == 'expense' &&
++        hasPurchasePaymentTarget;
+ 
+     return Scaffold(
+       backgroundColor: _C.bg,
+@@ -948,14 +995,17 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+                           const _FieldLabel('Description'),
+                           const SizedBox(height: 8),
+ 
+-                          // CHANGED: tapping the description field now opens a
+-                          // dedicated full-screen picker where suggestions are
+-                          // always visible above the keyboard.
+-                          _DescTapField(
+-                            value: _descCtrl.text,
+-                            onTap: _openPartyPicker,
+-                            loading: _openingPartyPicker,
+-                          )
++                           // Eligible income categories use the party picker;
++                           // all other descriptions remain editable text.
++                          (_descriptionSuggestionsEnabled
++                                  ? _DescTapField(
++                                      value: _descCtrl.text,
++                                      onTap: _openPartyPicker,
++                                      loading: _openingPartyPicker,
++                                    )
++                                  : _DescriptionTextField(
++                                      controller: _descCtrl,
++                                    ))
+                               .animate()
+                               .fadeIn(delay: 210.ms, duration: 280.ms)
+                               .slideY(begin: 0.05, end: 0, curve: Curves.easeOut),
+@@ -1047,14 +1097,32 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+                             _PurchasePaymentOptions(
+                               attachment: _paymentAttachment,
+                               receiptData: _paymentReceiptData,
++                              existingAttachmentName:
++                                  widget.existingTransaction?.paymentAttachmentName,
++                              existingAttachmentType:
++                                  widget.existingTransaction?.paymentAttachmentType,
++                              hasExistingAttachment:
++                                  !_removePaymentAttachment &&
++                                      (widget.existingTransaction?.paymentAttachmentUrl ?? '')
++                                          .isNotEmpty,
++                              existingReceiptName:
++                                  widget.existingTransaction?.paymentReceiptName,
++                              hasExistingReceipt:
++                                  !_removePaymentReceipt &&
++                                      (widget.existingTransaction?.paymentReceiptUrl ?? '')
++                                          .isNotEmpty,
+                               onAttach: _pickPaymentAttachment,
+                               onCreateReceipt: _createPaymentReceipt,
+                               onRemoveAttachment: () =>
+-                                  setState(() => _paymentAttachment = null),
++                                  setState(() {
++                                    _paymentAttachment = null;
++                                    _removePaymentAttachment = true;
++                                  }),
+                               onRemoveReceipt: () => setState(() {
+                                 _paymentReceiptBytes = null;
+                                 _paymentReceiptName = null;
+                                 _paymentReceiptData = null;
++                                _removePaymentReceipt = true;
+                               }),
+                             ),
+                           ],
+@@ -1113,6 +1181,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
+ class _PurchasePaymentOptions extends StatelessWidget {
+   final PlatformFile? attachment;
+   final PaymentReceiptData? receiptData;
++  final String? existingAttachmentName;
++  final String? existingAttachmentType;
++  final bool hasExistingAttachment;
++  final String? existingReceiptName;
++  final bool hasExistingReceipt;
+   final VoidCallback onAttach;
+   final VoidCallback onCreateReceipt;
+   final VoidCallback onRemoveAttachment;
+@@ -1121,6 +1194,11 @@ class _PurchasePaymentOptions extends StatelessWidget {
+   const _PurchasePaymentOptions({
+     required this.attachment,
+     required this.receiptData,
++    this.existingAttachmentName,
++    this.existingAttachmentType,
++    this.hasExistingAttachment = false,
++    this.existingReceiptName,
++    this.hasExistingReceipt = false,
+     required this.onAttach,
+     required this.onCreateReceipt,
+     required this.onRemoveAttachment,
+@@ -1171,26 +1249,43 @@ class _PurchasePaymentOptions extends StatelessWidget {
+     return Column(
+       children: [
+         tile(
+-          icon: attachment == null
+-              ? Icons.attach_file_rounded
+-              : (attachment!.extension?.toLowerCase() == 'pdf'
++          icon: attachment != null
++              ? (attachment!.extension?.toLowerCase() == 'pdf'
+                   ? Icons.picture_as_pdf_rounded
+-                  : Icons.image_rounded),
+-          title: attachment == null ? 'Attach payment proof' : 'Payment proof attached',
+-          subtitle: attachment?.name ?? 'Upload an image or PDF from your phone',
++                  : Icons.image_rounded)
++              : hasExistingAttachment
++                  ? (existingAttachmentType == 'pdf'
++                      ? Icons.picture_as_pdf_rounded
++                      : Icons.image_rounded)
++                  : Icons.attach_file_rounded,
++          title: attachment != null || hasExistingAttachment
++              ? 'Payment proof attached'
++              : 'Attach payment proof',
++          subtitle: attachment?.name ??
++              (hasExistingAttachment
++                  ? (existingAttachmentName ?? 'Saved payment proof')
++                  : 'Upload an image or PDF from your phone'),
+           onTap: onAttach,
+-          onRemove: attachment == null ? null : onRemoveAttachment,
++          onRemove: attachment != null || hasExistingAttachment
++              ? onRemoveAttachment
++              : null,
+         ),
+         tile(
+-          icon: receiptData == null
+-              ? Icons.receipt_long_rounded
+-              : Icons.check_circle_outline_rounded,
+-          title: receiptData == null ? 'Create payment receipt' : 'Payment receipt ready',
+-          subtitle: receiptData == null
+-              ? 'Add payment details and generate a PDF'
+-              : '${receiptData!.receiptNumber} • Tap to edit',
++          icon: receiptData != null || hasExistingReceipt
++              ? Icons.check_circle_outline_rounded
++              : Icons.receipt_long_rounded,
++          title: receiptData != null || hasExistingReceipt
++              ? 'Payment receipt attached'
++              : 'Create payment receipt',
++          subtitle: receiptData != null
++              ? '${receiptData!.receiptNumber} • Tap to edit'
++              : hasExistingReceipt
++                  ? (existingReceiptName ?? 'Saved receipt PDF')
++                  : 'Add payment details and generate a PDF',
+           onTap: onCreateReceipt,
+-          onRemove: receiptData == null ? null : onRemoveReceipt,
++          onRemove: receiptData != null || hasExistingReceipt
++              ? onRemoveReceipt
++              : null,
+         ),
+       ],
+     );
+@@ -1752,6 +1847,59 @@ class _CategoryToggle extends StatelessWidget {
+   }
+ }
+ 
++class _DescriptionTextField extends StatelessWidget {
++  final TextEditingController controller;
++
++  const _DescriptionTextField({required this.controller});
++
++  @override
++  Widget build(BuildContext context) {
++    return TextFormField(
++      controller: controller,
++      minLines: 1,
++      maxLines: 3,
++      keyboardType: TextInputType.multiline,
++      textInputAction: TextInputAction.newline,
++      cursorColor: _C.textPri,
++      cursorWidth: 1.5,
++      style: const TextStyle(
++        color: _C.textPri,
++        fontSize: 14,
++        height: 1.5,
++      ),
++      decoration: InputDecoration(
++        hintText: 'What was this for?',
++        hintStyle: const TextStyle(
++          color: _C.textMut,
++          fontSize: 14,
++        ),
++        prefixIcon: const Padding(
++          padding: EdgeInsets.only(left: 16, right: 12),
++          child: Icon(Icons.notes_rounded, size: 17, color: _C.textMut),
++        ),
++        prefixIconConstraints:
++            const BoxConstraints(minWidth: 45, minHeight: 52),
++        filled: true,
++        fillColor: _C.bg,
++        contentPadding:
++            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
++        border: OutlineInputBorder(
++          borderRadius: BorderRadius.circular(14),
++          borderSide: const BorderSide(color: _C.border),
++        ),
++        enabledBorder: OutlineInputBorder(
++          borderRadius: BorderRadius.circular(14),
++          borderSide: const BorderSide(color: _C.border),
++        ),
++        focusedBorder: OutlineInputBorder(
++          borderRadius: BorderRadius.circular(14),
++          borderSide: const BorderSide(color: _C.border2),
++        ),
++      ),
++    );
++  }
++}
++
+ // ─── Description tap field ─────────────────────────────────────────────────────
+ // CHANGED: replaced the inline text field with a tappable display that
+ // navigates to PartyPickerScreen. This keeps the suggestion list fully
+diff --git a/storage.rules b/storage.rules
+new file mode 100644
+index 0000000..8734ec1
+--- /dev/null
++++ b/storage.rules
+@@ -0,0 +1,66 @@
++rules_version = '2';
++service firebase.storage {
++  match /b/{bucket}/o {
++
++    function isCashbookMember(cashbookId) {
++      return request.auth != null
++          && (
++            firestore.get(
++              /databases/(default)/documents/cashbooks/$(cashbookId)
++            ).data.ownerId == request.auth.uid
++            || firestore.get(
++              /databases/(default)/documents/cashbooks/$(cashbookId)
++            ).data.participantId == request.auth.uid
++          );
++    }
++
++    function isValidFileUpload() {
++      return request.resource != null
++          && request.resource.size < 25 * 1024 * 1024;
++    }
++
++    // Payment proof and generated receipt files. Each file is scoped to the
++    // cashbook and transaction so multiple payments for one bill stay separate.
++    match /purchase_payment_attachments/{cashbookId}/{transactionId}/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    match /purchase_payment_receipts/{cashbookId}/{transactionId}/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    // Existing purchase and sales bill attachments.
++    match /purchase_bills/{cashbookId}/{billId}/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    match /sale_bills/{cashbookId}/{billId}/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    // Custom bills generated under the cashbook namespace.
++    match /cashbooks/{cashbookId}/custom_bills/{fileName} {
++      allow read: if isCashbookMember(cashbookId);
++      allow create, update: if isCashbookMember(cashbookId)
++                            && isValidFileUpload();
++      allow delete: if isCashbookMember(cashbookId);
++    }
++
++    // Deny every unlisted Storage path by default.
++    match /{allPaths=**} {
++      allow read, write: if false;
++    }
++  }
++}
+\ No newline at end of file

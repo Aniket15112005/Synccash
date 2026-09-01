@@ -35,4 +35,16 @@ class PaymentStorageService {
     );
     return task.ref.getDownloadURL();
   }
+
+  /// Deletes a previously saved payment document. Cleanup is best-effort so a
+  /// stale/invalid download URL cannot prevent the Firestore transaction edit
+  /// from completing.
+  Future<void> deletePaymentFile(String? downloadUrl) async {
+    if (downloadUrl == null || downloadUrl.isEmpty) return;
+    try {
+      await _storage.refFromURL(downloadUrl).delete();
+    } catch (_) {
+      // The Firestore reference is still removed by the caller.
+    }
+  }
 }
