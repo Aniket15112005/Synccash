@@ -23,6 +23,15 @@ class TransactionEntity {
   /// fully backward compatible.
   final String? linkedPurchaseBillId;
 
+  /// Optional documents saved against this individual purchase payment.
+  /// These are transaction-level fields because one bill can have many
+  /// separate payments.
+  final String? paymentAttachmentUrl;
+  final String? paymentAttachmentName;
+  final String? paymentAttachmentType;
+  final String? paymentReceiptUrl;
+  final String? paymentReceiptName;
+
   const TransactionEntity({
     required this.transactionId,
     required this.cashbookId,
@@ -36,6 +45,11 @@ class TransactionEntity {
     this.lastEditedBy,
     this.linkedSaleBillId,
     this.linkedPurchaseBillId,
+    this.paymentAttachmentUrl,
+    this.paymentAttachmentName,
+    this.paymentAttachmentType,
+    this.paymentReceiptUrl,
+    this.paymentReceiptName,
   });
 
   TransactionEntity copyWith({
@@ -51,6 +65,11 @@ class TransactionEntity {
     String? lastEditedBy,
     String? linkedSaleBillId,
     String? linkedPurchaseBillId,
+    String? paymentAttachmentUrl,
+    String? paymentAttachmentName,
+    String? paymentAttachmentType,
+    String? paymentReceiptUrl,
+    String? paymentReceiptName,
   }) {
     return TransactionEntity(
       transactionId: transactionId ?? this.transactionId,
@@ -65,6 +84,11 @@ class TransactionEntity {
       lastEditedBy:  lastEditedBy  ?? this.lastEditedBy,
       linkedSaleBillId: linkedSaleBillId ?? this.linkedSaleBillId,
       linkedPurchaseBillId: linkedPurchaseBillId ?? this.linkedPurchaseBillId,
+      paymentAttachmentUrl: paymentAttachmentUrl ?? this.paymentAttachmentUrl,
+      paymentAttachmentName: paymentAttachmentName ?? this.paymentAttachmentName,
+      paymentAttachmentType: paymentAttachmentType ?? this.paymentAttachmentType,
+      paymentReceiptUrl: paymentReceiptUrl ?? this.paymentReceiptUrl,
+      paymentReceiptName: paymentReceiptName ?? this.paymentReceiptName,
     );
   }
 }

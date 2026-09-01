@@ -223,6 +223,11 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
     required String createdBy,
     required String createdByName,
     required DateTime createdAt,
+    String? paymentAttachmentUrl,
+    String? paymentAttachmentName,
+    String? paymentAttachmentType,
+    String? paymentReceiptUrl,
+    String? paymentReceiptName,
   }) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
@@ -258,6 +263,15 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
           'createdBy': createdBy,
           'creatorName': createdByName,
           'createdAt': Timestamp.fromDate(createdAt),
+          if (paymentAttachmentUrl != null)
+            'paymentAttachmentUrl': paymentAttachmentUrl,
+          if (paymentAttachmentName != null)
+            'paymentAttachmentName': paymentAttachmentName,
+          if (paymentAttachmentType != null)
+            'paymentAttachmentType': paymentAttachmentType,
+          if (paymentReceiptUrl != null) 'paymentReceiptUrl': paymentReceiptUrl,
+          if (paymentReceiptName != null)
+            'paymentReceiptName': paymentReceiptName,
           if (isOb) 'isObPayment': true,
           if (isOb) 'obPartyName': clientName.trim(),
         });
@@ -339,6 +353,11 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
     required String createdBy,
     required String createdByName,
     required DateTime createdAt,
+    String? paymentAttachmentUrl,
+    String? paymentAttachmentName,
+    String? paymentAttachmentType,
+    String? paymentReceiptUrl,
+    String? paymentReceiptName,
   }) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
@@ -379,6 +398,15 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
           'createdBy': createdBy,
           'creatorName': createdByName,
           'createdAt': Timestamp.fromDate(createdAt),
+          if (paymentAttachmentUrl != null)
+            'paymentAttachmentUrl': paymentAttachmentUrl,
+          if (paymentAttachmentName != null)
+            'paymentAttachmentName': paymentAttachmentName,
+          if (paymentAttachmentType != null)
+            'paymentAttachmentType': paymentAttachmentType,
+          if (paymentReceiptUrl != null) 'paymentReceiptUrl': paymentReceiptUrl,
+          if (paymentReceiptName != null)
+            'paymentReceiptName': paymentReceiptName,
           if (isOb) 'isObPayment': true,
           if (isOb) 'obPartyName': clientName.trim(),
         });
@@ -454,6 +482,11 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
     required String createdBy,
     required String createdByName,
     required DateTime createdAt,
+    String? paymentAttachmentUrl,
+    String? paymentAttachmentName,
+    String? paymentAttachmentType,
+    String? paymentReceiptUrl,
+    String? paymentReceiptName,
   }) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
@@ -496,6 +529,15 @@ class PurchaseBillActionsNotifier extends AsyncNotifier<void> {
           'createdBy':            createdBy,
           'creatorName':          createdByName,
           'createdAt':            Timestamp.fromDate(createdAt),
+          if (paymentAttachmentUrl != null)
+            'paymentAttachmentUrl': paymentAttachmentUrl,
+          if (paymentAttachmentName != null)
+            'paymentAttachmentName': paymentAttachmentName,
+          if (paymentAttachmentType != null)
+            'paymentAttachmentType': paymentAttachmentType,
+          if (paymentReceiptUrl != null) 'paymentReceiptUrl': paymentReceiptUrl,
+          if (paymentReceiptName != null)
+            'paymentReceiptName': paymentReceiptName,
           if (isOb) 'isObPayment': true,
           if (isOb) 'obPartyName': client,
         });

@@ -1,7 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:synccash/app/theme/app_colors.dart';
 import 'package:synccash/features/auth/presentation/providers/auth_provider.dart'
     show currentCashbookIdProvider;
@@ -233,6 +236,8 @@ class _TransactionDetailsScreenState
   @override
   Widget build(BuildContext context) {
     final bool isIncome = widget.transaction.type == 'income';
+    final bool showPurchasePaymentDocs =
+        kIsWeb || defaultTargetPlatform != TargetPlatform.android;
     final bool hasLinkedBill =
         widget.transaction.linkedSaleBillId != null &&
         widget.transaction.linkedSaleBillId!.isNotEmpty;
@@ -329,6 +334,34 @@ class _TransactionDetailsScreenState
                 value: widget.transaction.description,
               ),
 
+            if (showPurchasePaymentDocs &&
+                widget.transaction.paymentAttachmentUrl != null &&
+                widget.transaction.paymentAttachmentUrl!.isNotEmpty)
+              _DocumentTile(
+                title: 'Payment proof',
+                name: widget.transaction.paymentAttachmentName ?? 'Attachment',
+                icon: widget.transaction.paymentAttachmentType == 'pdf'
+                    ? Icons.picture_as_pdf_rounded
+                    : Icons.image_rounded,
+                onTap: () => launchUrl(
+                  Uri.parse(widget.transaction.paymentAttachmentUrl!),
+                  mode: LaunchMode.externalApplication,
+                ),
+              ),
+
+            if (showPurchasePaymentDocs &&
+                widget.transaction.paymentReceiptUrl != null &&
+                widget.transaction.paymentReceiptUrl!.isNotEmpty)
+              _DocumentTile(
+                title: 'Payment receipt',
+                name: widget.transaction.paymentReceiptName ?? 'Receipt PDF',
+                icon: Icons.receipt_long_rounded,
+                onTap: () => launchUrl(
+                  Uri.parse(widget.transaction.paymentReceiptUrl!),
+                  mode: LaunchMode.externalApplication,
+                ),
+              ),
+
             // Bill No. — shown when linked to a sale bill
             if (hasLinkedBill)
               _DetailTile(
@@ -398,6 +431,51 @@ class _DetailTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DocumentTile extends StatelessWidget {
+  final String title;
+  final String name;
+  final IconData icon;
+  final Future<bool> Function() onTap;
+
+  const _DocumentTile({
+    required this.title,
+    required this.name,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: ListTile(
+        onTap: () async {
+          final opened = await onTap();
+          if (!opened && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not open this document')),
+            );
+          }
+        },
+        leading: Icon(icon, color: AppColors.income),
+        title: Text(title,
+            style: const TextStyle(
+                color: AppColors.textSecondary, fontSize: 13)),
+        subtitle: Text(name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w600)),
+        trailing: const Icon(Icons.open_in_new_rounded,
+            color: AppColors.textSecondary, size: 18),
       ),
     );
   }

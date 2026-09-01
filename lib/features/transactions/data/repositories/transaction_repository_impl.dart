@@ -42,6 +42,11 @@ class TransactionRepositoryImpl implements TransactionRepository {
       description: tx.description,
       linkedSaleBillId: tx.linkedSaleBillId,
       linkedPurchaseBillId: tx.linkedPurchaseBillId,
+      paymentAttachmentUrl: tx.paymentAttachmentUrl,
+      paymentAttachmentName: tx.paymentAttachmentName,
+      paymentAttachmentType: tx.paymentAttachmentType,
+      paymentReceiptUrl: tx.paymentReceiptUrl,
+      paymentReceiptName: tx.paymentReceiptName,
     );
 
     final batch = _firestore.batch();
@@ -116,6 +121,11 @@ class TransactionRepositoryImpl implements TransactionRepository {
     final newExpense = newIsIncome ? 0.0 : tx.amount;
 
     final batch = _firestore.batch();
+
+    // linkedSaleBillId/linkedPurchaseBillId and the payment attachment/receipt
+    // fields are always written (using FieldValue.delete() when null) so that
+    // clearing a bill link or removing an attachment is actually persisted,
+    // instead of silently leaving the old value in place.
     batch.update(txRef, {
       'amount': tx.amount,
       'type': tx.type,
@@ -127,6 +137,11 @@ class TransactionRepositoryImpl implements TransactionRepository {
       'lastEditedBy': tx.lastEditedBy,
       'linkedSaleBillId': tx.linkedSaleBillId ?? FieldValue.delete(),
       'linkedPurchaseBillId': tx.linkedPurchaseBillId ?? FieldValue.delete(),
+      'paymentAttachmentUrl': tx.paymentAttachmentUrl ?? FieldValue.delete(),
+      'paymentAttachmentName': tx.paymentAttachmentName ?? FieldValue.delete(),
+      'paymentAttachmentType': tx.paymentAttachmentType ?? FieldValue.delete(),
+      'paymentReceiptUrl': tx.paymentReceiptUrl ?? FieldValue.delete(),
+      'paymentReceiptName': tx.paymentReceiptName ?? FieldValue.delete(),
     });
 
     if (old != null) {

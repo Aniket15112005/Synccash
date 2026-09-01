@@ -1,6 +1,9 @@
 // lib/features/transactions/presentation/screens/add_transaction_screen.dart
 
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart';
@@ -24,6 +27,8 @@ import 'package:synccash/features/purchases/domain/entities/purchase_bill_entity
 import 'package:synccash/features/purchases/presentation/widgets/purchase_bill_no_dropdown_field.dart';
 import 'package:synccash/features/purchases/presentation/providers/purchase_bill_provider.dart';
 import 'package:synccash/features/purchases/presentation/providers/purchase_client_provider.dart';
+import 'package:synccash/features/transactions/data/services/payment_storage_service.dart';
+import 'package:synccash/features/transactions/presentation/screens/payment_receipt_generator.dart';
 
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:synccash/voice/voice_recorder_service.dart';
@@ -64,6 +69,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
   final _formKey    = GlobalKey<FormState>();
   final _amountCtrl = TextEditingController();
   final _descCtrl   = TextEditingController();
+
+  PlatformFile? _paymentAttachment;
+  Uint8List? _paymentReceiptBytes;
+  String? _paymentReceiptName;
+  PaymentReceiptData? _paymentReceiptData;
 
   String   _type         = 'expense';
   String   _category     = 'Retail';
@@ -133,8 +143,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         _loadExistingBill(tx.cashbookId, tx.linkedSaleBillId!);
       }
       // ADDED: load the existing linked purchase bill (mirror of above).
-      // Gated behind _purchaseFeatureEnabled — Android has no purchase
-      // feature, so it never fetches this even for a legacy/edited tx.
+      // Gated behind _purchaseFeatureEnabled so this is only fetched when the
+      // purchase feature is enabled.
       if (_purchaseFeatureEnabled &&
           tx.linkedPurchaseBillId != null && tx.linkedPurchaseBillId!.isNotEmpty) {
         _loadExistingPurchaseBill(tx.cashbookId, tx.linkedPurchaseBillId!);
@@ -303,7 +313,6 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         ...allBills.map((b) => b.partyName.trim()),
       }.toList()..sort();
     }
-
     final purchaseClientsFuture = _resolveAsync(
       cached: ref.read(purchaseClientsProvider).asData?.value,
       load: () => ref.read(purchaseClientsProvider.future),
@@ -496,14 +505,19 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     }
   }
 
-  // ADDED: Android users don't get the purchase feature (purchase bills /
-  // purchase clients). This also means _resolveAllPartyNames() and the
-  // pre-warm in build() never touch purchaseClientsProvider /
-  // allPurchaseBillsProvider on Android, so those two Firestore streams are
-  // never opened at all there — removing the ~2s reconnect delay entirely
-  // for Android instead of just hiding it behind a spinner.
+  // Purchase clients and bills remain iOS/PWA/web/Windows-only.
   bool get _purchaseFeatureEnabled =>
       kIsWeb || defaultTargetPlatform != TargetPlatform.android;
+
+  bool _isKnownPurchaseClient(WidgetRef ref) {
+    if (!_purchaseFeatureEnabled) return false;
+    final name = _descCtrl.text.trim().toLowerCase();
+    if (name.isEmpty) return false;
+    final clients = ref.read(purchaseClientsProvider).asData?.value ?? [];
+    final bills = ref.read(allPurchaseBillsProvider).asData?.value ?? [];
+    return clients.any((c) => c.clientName.trim().toLowerCase() == name) ||
+        bills.any((b) => b.clientName.trim().toLowerCase() == name);
+  }
 
   Color get _accentColor => _type == 'income' ? _C.income : _C.expense;
 
@@ -588,6 +602,62 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
     }
   }
 
+  Future<void> _pickPaymentAttachment() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
+      withData: true,
+    );
+    if (!mounted || result == null || result.files.isEmpty) return;
+
+    final file = result.files.single;
+    if (file.bytes == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not read that file')),
+      );
+      return;
+    }
+    if (file.bytes!.lengthInBytes > 15 * 1024 * 1024) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please choose a file smaller than 15 MB')),
+      );
+      return;
+    }
+    setState(() => _paymentAttachment = file);
+  }
+
+  Future<void> _createPaymentReceipt() async {
+    final amount = double.tryParse(_amountCtrl.text.trim());
+    if (amount == null || amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter the payment amount first')),
+      );
+      return;
+    }
+
+    final user = ref.read(authProvider).value;
+    final draft = await showDialog<PaymentReceiptData>(
+      context: context,
+      builder: (_) => _PaymentReceiptDialog(
+        amount: amount,
+        paymentDate: _selectedDate,
+        paidTo: _descCtrl.text.trim(),
+        billNumber: _selectedPurchaseBill?.billNumber ?? '',
+        paidBy: user?.displayName ?? '',
+      ),
+    );
+    if (!mounted || draft == null) return;
+
+    final bytes = await buildPaymentReceiptPdf(draft);
+    if (!mounted) return;
+    setState(() {
+      _paymentReceiptData = draft;
+      _paymentReceiptBytes = bytes;
+      _paymentReceiptName =
+          '${draft.receiptNumber.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_')}.pdf';
+    });
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final user = ref.read(authProvider).value;
@@ -601,6 +671,45 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
 
     try {
       final existing = widget.existingTransaction;
+      String? paymentAttachmentUrl = existing?.paymentAttachmentUrl;
+      String? paymentAttachmentName = existing?.paymentAttachmentName;
+      String? paymentAttachmentType = existing?.paymentAttachmentType;
+      String? paymentReceiptUrl = existing?.paymentReceiptUrl;
+      String? paymentReceiptName = existing?.paymentReceiptName;
+
+      if (_isKnownPurchaseClient(ref)) {
+        final uploadKey = existing?.transactionId.isNotEmpty == true
+            ? existing!.transactionId
+            : '${user.uid}_${DateTime.now().microsecondsSinceEpoch}';
+        final storage = PaymentStorageService();
+        if (_paymentAttachment?.bytes != null) {
+          final extension = (_paymentAttachment!.extension ?? '').toLowerCase();
+          paymentAttachmentUrl = await storage.uploadPaymentFile(
+            bytes: _paymentAttachment!.bytes!,
+            cashbookId: existing?.cashbookId ?? user.currentCashbookId!,
+            transactionKey: uploadKey,
+            fileName: _paymentAttachment!.name,
+            contentType: extension == 'pdf'
+                ? 'application/pdf'
+                : 'image/${extension == 'jpg' ? 'jpeg' : extension}',
+            folder: 'purchase_payment_attachments',
+          );
+          paymentAttachmentName = _paymentAttachment!.name;
+          paymentAttachmentType = extension == 'pdf' ? 'pdf' : 'image';
+        }
+        if (_paymentReceiptBytes != null) {
+          paymentReceiptUrl = await storage.uploadPaymentFile(
+            bytes: _paymentReceiptBytes!,
+            cashbookId: existing?.cashbookId ?? user.currentCashbookId!,
+            transactionKey: uploadKey,
+            fileName: _paymentReceiptName ?? 'payment_receipt.pdf',
+            contentType: 'application/pdf',
+            folder: 'purchase_payment_receipts',
+          );
+          paymentReceiptName = _paymentReceiptName;
+        }
+      }
+
       final tx = TransactionEntity(
         transactionId: existing?.transactionId ?? '',
         cashbookId:    existing?.cashbookId ?? user.currentCashbookId!,
@@ -614,6 +723,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         lastEditedBy:  user.uid,
         linkedSaleBillId: _selectedBill?.saleBillId, // ADDED
         linkedPurchaseBillId: _selectedPurchaseBill?.purchaseBillId, // ADDED
+        paymentAttachmentUrl: paymentAttachmentUrl,
+        paymentAttachmentName: paymentAttachmentName,
+        paymentAttachmentType: paymentAttachmentType,
+        paymentReceiptUrl: paymentReceiptUrl,
+        paymentReceiptName: paymentReceiptName,
       );
 
       if (existing != null) {
@@ -648,10 +762,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
         );
       } else if (_purchaseFeatureEnabled && _type == 'expense' && _selectedPurchaseBill != null) {
         // ADDED: purchase-side mirror of the sales bill payment branch above.
-        // Gated behind _purchaseFeatureEnabled: Android never has a
-        // _selectedPurchaseBill (the dropdown is hidden there), but this
-        // guard also protects against ever reading purchaseClientsProvider
-        // on Android below.
+        // Gated behind _purchaseFeatureEnabled to keep purchase routing
+        // contained in this feature.
         await ref.read(purchaseBillActionsProvider.notifier).recordPaymentWithOverflow(
           cashbookId:     tx.cashbookId,
           selectedBillId: _selectedPurchaseBill!.purchaseBillId,
@@ -662,6 +774,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdBy:      tx.createdBy,
           createdByName:  tx.creatorName,
           createdAt:      tx.createdAt,
+          paymentAttachmentUrl: paymentAttachmentUrl,
+          paymentAttachmentName: paymentAttachmentName,
+          paymentAttachmentType: paymentAttachmentType,
+          paymentReceiptUrl: paymentReceiptUrl,
+          paymentReceiptName: paymentReceiptName,
         );
       } else if (_purchaseFeatureEnabled && _type == 'expense' && _isPurchaseObPayment) {
         // ADDED: purchase-side mirror of the sales OB payment branch above.
@@ -674,6 +791,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdBy:     tx.createdBy,
           createdByName: tx.creatorName,
           createdAt:     tx.createdAt,
+          paymentAttachmentUrl: paymentAttachmentUrl,
+          paymentAttachmentName: paymentAttachmentName,
+          paymentAttachmentType: paymentAttachmentType,
+          paymentReceiptUrl: paymentReceiptUrl,
+          paymentReceiptName: paymentReceiptName,
         );
       } else if (_purchaseFeatureEnabled &&
           _type == 'expense' &&
@@ -681,7 +803,7 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI') &&
           // Gate: only auto-route when the confirmed party is a known purchase client.
           // purchaseClientsProvider is pre-warmed in build(), so this is a sync read.
-          // Never reached on Android — _purchaseFeatureEnabled short-circuits first.
+          // Only reached when the purchase feature is enabled.
           (ref.read(purchaseClientsProvider).asData?.value ?? []).any(
             (c) => c.clientName.trim().toLowerCase() ==
                 _descCtrl.text.trim().toLowerCase(),
@@ -700,6 +822,11 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           createdBy:     tx.createdBy,
           createdByName: tx.creatorName,
           createdAt:     tx.createdAt,
+          paymentAttachmentUrl: paymentAttachmentUrl,
+          paymentAttachmentName: paymentAttachmentName,
+          paymentAttachmentType: paymentAttachmentType,
+          paymentReceiptUrl: paymentReceiptUrl,
+          paymentReceiptName: paymentReceiptName,
         );
       } else {
         await ref.read(transactionRepositoryProvider).addTransaction(tx);
@@ -737,6 +864,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
       ref.watch(purchaseClientsProvider);
       ref.watch(allPurchaseBillsProvider);
     }
+    final showPurchasePaymentOptions =
+        _type == 'expense' && _partyConfirmed && _isKnownPurchaseClient(ref);
 
     return Scaffold(
       backgroundColor: _C.bg,
@@ -873,8 +1002,8 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                           // Mirrors the sales bill dropdown above; the two never render
                           // together since one requires _type == 'income' and the other
                           // requires _type == 'expense'.
-                          // Gated behind _purchaseFeatureEnabled — Android has no purchase
-                          // feature at all, so this section never renders there.
+                          // Gated behind _purchaseFeatureEnabled so this section
+                          // renders on every supported client.
                           if (_purchaseFeatureEnabled && _type == 'expense' && _partyConfirmed && (_category == 'Wholesale' || _category == 'Bank' || _category == 'UPI')) ...[
                             if (_loadingPurchaseBill)
                               Padding(
@@ -910,6 +1039,24 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
                                 onObSelected: () =>
                                     setState(() { _isPurchaseObPayment = true; _selectedPurchaseBill = null; }),
                               ),
+                          ],
+                          if (showPurchasePaymentOptions) ...[
+                            const SizedBox(height: 16),
+                            const _FieldLabel('Purchase payment documents'),
+                            const SizedBox(height: 8),
+                            _PurchasePaymentOptions(
+                              attachment: _paymentAttachment,
+                              receiptData: _paymentReceiptData,
+                              onAttach: _pickPaymentAttachment,
+                              onCreateReceipt: _createPaymentReceipt,
+                              onRemoveAttachment: () =>
+                                  setState(() => _paymentAttachment = null),
+                              onRemoveReceipt: () => setState(() {
+                                _paymentReceiptBytes = null;
+                                _paymentReceiptName = null;
+                                _paymentReceiptData = null;
+                              }),
+                            ),
                           ],
                           const SizedBox(height: 24),
                           const _FieldLabel('Date'),
@@ -959,6 +1106,236 @@ class _AddTransactionScreenState extends ConsumerState<AddTransactionScreen>
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PurchasePaymentOptions extends StatelessWidget {
+  final PlatformFile? attachment;
+  final PaymentReceiptData? receiptData;
+  final VoidCallback onAttach;
+  final VoidCallback onCreateReceipt;
+  final VoidCallback onRemoveAttachment;
+  final VoidCallback onRemoveReceipt;
+
+  const _PurchasePaymentOptions({
+    required this.attachment,
+    required this.receiptData,
+    required this.onAttach,
+    required this.onCreateReceipt,
+    required this.onRemoveAttachment,
+    required this.onRemoveReceipt,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget tile({
+      required IconData icon,
+      required String title,
+      required String subtitle,
+      required VoidCallback onTap,
+      VoidCallback? onRemove,
+    }) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: _C.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _C.border),
+        ),
+        child: ListTile(
+          onTap: onTap,
+          leading: Icon(icon, color: _C.expense, size: 21),
+          title: Text(title,
+              style: const TextStyle(
+                  color: _C.textPri,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600)),
+          subtitle: Text(subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _C.textSec, fontSize: 11)),
+          trailing: onRemove == null
+              ? const Icon(Icons.chevron_right_rounded, color: _C.textSec)
+              : IconButton(
+                  onPressed: onRemove,
+                  icon: const Icon(Icons.close_rounded,
+                      color: _C.textSec, size: 18),
+                ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        tile(
+          icon: attachment == null
+              ? Icons.attach_file_rounded
+              : (attachment!.extension?.toLowerCase() == 'pdf'
+                  ? Icons.picture_as_pdf_rounded
+                  : Icons.image_rounded),
+          title: attachment == null ? 'Attach payment proof' : 'Payment proof attached',
+          subtitle: attachment?.name ?? 'Upload an image or PDF from your phone',
+          onTap: onAttach,
+          onRemove: attachment == null ? null : onRemoveAttachment,
+        ),
+        tile(
+          icon: receiptData == null
+              ? Icons.receipt_long_rounded
+              : Icons.check_circle_outline_rounded,
+          title: receiptData == null ? 'Create payment receipt' : 'Payment receipt ready',
+          subtitle: receiptData == null
+              ? 'Add payment details and generate a PDF'
+              : '${receiptData!.receiptNumber} • Tap to edit',
+          onTap: onCreateReceipt,
+          onRemove: receiptData == null ? null : onRemoveReceipt,
+        ),
+      ],
+    );
+  }
+}
+
+class _PaymentReceiptDialog extends StatefulWidget {
+  final double amount;
+  final DateTime paymentDate;
+  final String paidTo;
+  final String billNumber;
+  final String paidBy;
+
+  const _PaymentReceiptDialog({
+    required this.amount,
+    required this.paymentDate,
+    required this.paidTo,
+    required this.billNumber,
+    required this.paidBy,
+  });
+
+  @override
+  State<_PaymentReceiptDialog> createState() => _PaymentReceiptDialogState();
+}
+
+class _PaymentReceiptDialogState extends State<_PaymentReceiptDialog> {
+  late final TextEditingController _receiptCtrl;
+  late final TextEditingController _paidByCtrl;
+  late final TextEditingController _paidToCtrl;
+  late final TextEditingController _billCtrl;
+  late final TextEditingController _methodCtrl;
+  late final TextEditingController _notesCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _receiptCtrl = TextEditingController(
+        text: 'REC-${DateFormat('yyyyMMddHHmmss').format(DateTime.now())}');
+    _paidByCtrl = TextEditingController(text: widget.paidBy);
+    _paidToCtrl = TextEditingController(text: widget.paidTo);
+    _billCtrl = TextEditingController(text: widget.billNumber);
+    _methodCtrl = TextEditingController(text: 'Cash');
+    _notesCtrl = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _receiptCtrl.dispose();
+    _paidByCtrl.dispose();
+    _paidToCtrl.dispose();
+    _billCtrl.dispose();
+    _methodCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  InputDecoration _decoration(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(color: _C.textSec, fontSize: 13),
+      filled: true,
+      fillColor: _C.bg,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: _C.border),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: _C.border),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: _C.expense),
+      ),
+    );
+  }
+
+  Widget _field(String label, TextEditingController controller, {int lines = 1}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: controller,
+        maxLines: lines,
+        style: const TextStyle(color: _C.textPri, fontSize: 13),
+        decoration: _decoration(label),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: _C.surface2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Text('Create payment receipt',
+          style: TextStyle(color: _C.textPri, fontWeight: FontWeight.w700)),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('INR ${widget.amount.toStringAsFixed(2)} • '
+                '${DateFormat('dd MMM yyyy').format(widget.paymentDate)}',
+                style: const TextStyle(color: _C.income, fontSize: 13)),
+            const SizedBox(height: 16),
+            _field('Receipt number', _receiptCtrl),
+            _field('Paid by', _paidByCtrl),
+            _field('Paid to', _paidToCtrl),
+            _field('Purchase bill number (optional)', _billCtrl),
+            _field('Payment method', _methodCtrl),
+            _field('Notes (optional)', _notesCtrl, lines: 3),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel', style: TextStyle(color: _C.textSec)),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: _C.expense,
+            foregroundColor: Colors.white,
+          ),
+          onPressed: () {
+            if (_paidToCtrl.text.trim().isEmpty) return;
+            Navigator.pop(
+              context,
+              PaymentReceiptData(
+                receiptNumber: _receiptCtrl.text.trim().isEmpty
+                    ? 'PAYMENT'
+                    : _receiptCtrl.text.trim(),
+                paidBy: _paidByCtrl.text.trim(),
+                paidTo: _paidToCtrl.text.trim(),
+                billNumber: _billCtrl.text.trim(),
+                amount: widget.amount,
+                paymentDate: widget.paymentDate,
+                paymentMethod: _methodCtrl.text.trim(),
+                notes: _notesCtrl.text.trim(),
+              ),
+            );
+          },
+          child: const Text('Generate PDF'),
+        ),
+      ],
     );
   }
 }

@@ -14,6 +14,11 @@ class TransactionModel extends TransactionEntity {
     required super.description,
     super.linkedSaleBillId, // nullable, null for all existing docs
     super.linkedPurchaseBillId, // NEW — nullable, null for all existing docs
+    super.paymentAttachmentUrl,
+    super.paymentAttachmentName,
+    super.paymentAttachmentType,
+    super.paymentReceiptUrl,
+    super.paymentReceiptName,
   });
 
   factory TransactionModel.fromJson(Map<String, dynamic> json, String documentId) {
@@ -31,6 +36,11 @@ class TransactionModel extends TransactionEntity {
           : DateTime.now(),
       linkedSaleBillId: json['linkedSaleBillId'] as String?,
       linkedPurchaseBillId: json['linkedPurchaseBillId'] as String?, // NEW
+      paymentAttachmentUrl: json['paymentAttachmentUrl'] as String?,
+      paymentAttachmentName: json['paymentAttachmentName'] as String?,
+      paymentAttachmentType: json['paymentAttachmentType'] as String?,
+      paymentReceiptUrl: json['paymentReceiptUrl'] as String?,
+      paymentReceiptName: json['paymentReceiptName'] as String?,
     );
   }
 
@@ -53,6 +63,14 @@ class TransactionModel extends TransactionEntity {
       // Only written when a bill is linked — keeps existing docs unchanged
       if (linkedSaleBillId != null) 'linkedSaleBillId': linkedSaleBillId,
       if (linkedPurchaseBillId != null) 'linkedPurchaseBillId': linkedPurchaseBillId,
+      if (paymentAttachmentUrl != null)
+        'paymentAttachmentUrl': paymentAttachmentUrl,
+      if (paymentAttachmentName != null)
+        'paymentAttachmentName': paymentAttachmentName,
+      if (paymentAttachmentType != null)
+        'paymentAttachmentType': paymentAttachmentType,
+      if (paymentReceiptUrl != null) 'paymentReceiptUrl': paymentReceiptUrl,
+      if (paymentReceiptName != null) 'paymentReceiptName': paymentReceiptName,
     };
   }
 }
